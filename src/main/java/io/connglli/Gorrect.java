@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ * Copyright (c) 2025-2025 Cong Li (cong.li@inf.ethz.ch)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -25,7 +25,7 @@
 package io.connglli;
 
 public class Gorrect {
-  public static void main(String[] args) {
-    System.out.println("Gorrect");
-  }
+    public static void main(String[] args) {
+        System.out.println("Gorrect");
+    }
 }
