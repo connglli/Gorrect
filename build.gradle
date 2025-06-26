@@ -1,15 +1,73 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
 plugins {
   id 'java'
+  id 'com.gradleup.shadow' version '8.3.5'
 }
 
-group = 'io.connglli'
-version = '1.0-SNAPSHOT'
+group = 'io.connglli.gorrect'
+version = '0.1-SNAPSHOT'
 
 repositories {
   mavenCentral()
 }
 
+
+compileJava {
+  sourceCompatibility = JavaVersion.VERSION_11
+  targetCompatibility = JavaVersion.VERSION_11
+}
+
+jar {
+  manifest {
+    attributes 'Main-Class': 'io.connglli.gorrect.Gorrect'
+  }
+}
+
+// Archive all essential Gorrect files into a ZIP for distribution
+tasks.register('archive', Zip) {
+  dependsOn tasks.shadowJar
+
+  description = "Archive the Gorrect project as a ZIP file"
+  archiveFileName = "gorrect-${project.version}.zip"
+
+  exclude '**/.idea'
+
+  from("$project.rootDir") {
+    include 'LICENSE'
+    include 'README.md'
+  }
+
+  from("$buildDir/libs") {
+    include shadowJar.archiveFileName.get()
+    rename shadowJar.archiveFileName.get(), "gorrect.jar"
+  }
+}
+
 dependencies {
+  implementation fileTree(dir: 'lib', includes: ['*.jar'])
   testImplementation platform('org.junit:junit-bom:5.10.0')
   testImplementation 'org.junit.jupiter:junit-jupiter'
 }

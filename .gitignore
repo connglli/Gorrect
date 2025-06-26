@@ -45,3 +45,6 @@ bin/
 ### Python ###
 venv/
 **/__pycache__/
+
+### Gorrect ###
+generated/

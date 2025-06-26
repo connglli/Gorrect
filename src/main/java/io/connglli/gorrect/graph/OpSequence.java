@@ -22,10 +22,9 @@
  * SOFTWARE.
  */
 
-package io.connglli;
+package io.connglli.gorrect.graph;
 
-public class Gorrect {
-    public static void main(String[] args) {
-        System.out.println("Gorrect");
-    }
+import java.util.ArrayList;
+
+public class OpSequence extends ArrayList<Operation> {
 }
