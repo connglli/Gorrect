@@ -57,22 +57,22 @@ public class ObjectGraph {
         this.nextRefId = other.nextRefId;
 
         for (GObject obj : other.objects.values()) {
-            this.objects.put(obj.id, new GObject(obj));
+            this.objects.put(obj.getId(), new GObject(obj));
         }
 
         for (GReference ref : other.references.values()) {
-            this.references.put(ref.id, new GReference(ref));
+            this.references.put(ref.getId(), new GReference(ref));
         }
     }
 
 
     public List<GObject> getRoots() {
-        return objects.values().stream().filter(o -> o.type == GObject.Type.GC_ROOT)
+        return objects.values().stream().filter(o -> o.getType() == GObject.Type.GC_ROOT)
                 .collect(Collectors.toList());
     }
 
     public List<GObject> getNonRoots() {
-        return objects.values().stream().filter(o -> o.type != GObject.Type.GC_ROOT)
+        return objects.values().stream().filter(o -> o.getType() != GObject.Type.GC_ROOT)
                 .collect(Collectors.toList());
     }
 
@@ -87,7 +87,7 @@ public class ObjectGraph {
     public Map<Integer, Set<Integer>> getAdjacentTable() {
         Map<Integer, Set<Integer>> table = new HashMap<>();
         for (var ref : references.values()) {
-            table.computeIfAbsent(ref.source, integer -> new HashSet<>()).add(ref.target);
+            table.computeIfAbsent(ref.getSource(), unused -> new HashSet<>()).add(ref.getTarget());
         }
         return table;
     }
@@ -105,8 +105,8 @@ public class ObjectGraph {
         // Remove all references connected to this object
         List<Integer> refsToRemove = new ArrayList<>();
         for (GReference ref : references.values()) {
-            if (ref.source == objId || ref.target == objId) {
-                refsToRemove.add(ref.id);
+            if (ref.getSource() == objId || ref.getTarget() == objId) {
+                refsToRemove.add(ref.getId());
             }
         }
 
@@ -166,7 +166,7 @@ public class ObjectGraph {
     public Set<Integer> getStronglyReachableObjects() {
         Set<Integer> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
-            result.addAll(getStronglyReachableObjects(rootObj.id));
+            result.addAll(getStronglyReachableObjects(rootObj.getId()));
         }
         return result;
     }
@@ -181,7 +181,7 @@ public class ObjectGraph {
     public Set<Integer> getSoftlyReachableObjects() {
         Set<Integer> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.id,
+            result.addAll(getReachableObjects(rootObj.getId(),
                     EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT)));
         }
         result.removeAll(getStronglyReachableObjects());
@@ -199,7 +199,7 @@ public class ObjectGraph {
     public Set<Integer> getWeaklyReachableObjects() {
         Set<Integer> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.id, EnumSet.of(GReference.Type.STRONG,
+            result.addAll(getReachableObjects(rootObj.getId(), EnumSet.of(GReference.Type.STRONG,
                     GReference.Type.SOFT, GReference.Type.WEAK)));
         }
         result.removeAll(getStronglyReachableObjects());
@@ -214,7 +214,7 @@ public class ObjectGraph {
         GAssert.set(types.size() == GReference.Type.values().length,
                 "Not all reachable types are considered");
         for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.id, types));
+            result.addAll(getReachableObjects(rootObj.getId(), types));
         }
         return result;
     }
@@ -229,7 +229,7 @@ public class ObjectGraph {
 
         GAssert.set(objects.containsKey(rootId),
                 String.format("Object with ID %d does not exist", rootId));
-        GAssert.set(objects.get(rootId).type == GObject.Type.GC_ROOT,
+        GAssert.set(objects.get(rootId).getType() == GObject.Type.GC_ROOT,
                 String.format("Object with ID %d is not a root object", rootId));
 
         Set<Integer> visited = new HashSet<>();
@@ -242,10 +242,10 @@ public class ObjectGraph {
             int current = queue.poll();
 
             for (GReference ref : references.values()) {
-                if (ref.source == current && allowedTypes.contains(ref.type)) {
-                    if (!visited.contains(ref.target)) {
-                        visited.add(ref.target);
-                        queue.offer(ref.target);
+                if (ref.getSource() == current && allowedTypes.contains(ref.getType())) {
+                    if (!visited.contains(ref.getTarget())) {
+                        visited.add(ref.getTarget());
+                        queue.offer(ref.getTarget());
                     }
                 }
             }

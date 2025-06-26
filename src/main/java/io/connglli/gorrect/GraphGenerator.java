@@ -36,6 +36,8 @@ import io.connglli.gorrect.graph.GReference;
 import io.connglli.gorrect.graph.ObjectGraph;
 import io.connglli.gorrect.utility.GAssert;
 import io.connglli.gorrect.utility.GRandom;
+import lombok.Builder;
+import lombok.Getter;
 
 /**
  * GraphGenerator generates a random ObjectGraph
@@ -73,7 +75,7 @@ public class GraphGenerator {
                 int fromIdx = random.nextInt(objIds.size());
                 int toIdx = random.nextInt(objIds.size());
 
-                if (fromIdx == toIdx && !config.allowSelfLoops) {
+                if (fromIdx == toIdx) {
                     continue;
                 }
 
@@ -81,7 +83,7 @@ public class GraphGenerator {
                 int to = objIds.get(toIdx);
                 var refKey = new SimpleEntry<>(from, to);
 
-                if (!config.allowMultipleRefs && existingRefs.contains(refKey)) {
+                if (existingRefs.contains(refKey)) {
                     continue;
                 }
 
@@ -108,7 +110,7 @@ public class GraphGenerator {
     private void enforceReachabilityFromRoots(ObjectGraph graph) {
         List<Integer> reachable = new ArrayList<>(graph.getReachableObjects());
         for (var toObj : graph.getObjects()) {
-            int toId = toObj.id;
+            int toId = toObj.getId();
             if (reachable.contains(toId)) {
                 continue;
             }
@@ -121,114 +123,34 @@ public class GraphGenerator {
                 "Not all objects are reachable even though we have enforced reachability");
     }
 
+    @Builder
+    @Getter
     public static class Config {
-        public final int minRoots;
-        public final int maxRoots;
-        public final int minObjs;
-        public final int maxObjs;
-        public final int minRefs;
-        public final int maxRefs;
-        public final double strongRefProba;
-        public final double softRefProba;
-        public final double weakRefProba;
-        public final boolean allowSelfLoops;
-        public final boolean allowMultipleRefs;
+        @Builder.Default
+        private int minRoots = 1;
 
-        private Config(Builder builder) {
-            this.minRoots = builder.minRoots;
-            this.maxRoots = builder.maxRoots;
-            this.minObjs = builder.minObjs;
-            this.maxObjs = builder.maxObjs;
-            this.minRefs = builder.minRefs;
-            this.maxRefs = builder.maxRefs;
-            this.strongRefProba = builder.strongRefProba;
-            this.softRefProba = builder.softRefProba;
-            this.weakRefProba = builder.weakRefProba;
-            this.allowSelfLoops = builder.allowSelfLoops;
-            this.allowMultipleRefs = builder.allowMultipleRefs;
+        @Builder.Default
+        private int maxRoots = 10;
 
-            // Validate probabilities sum to 1.0
-            double sum = strongRefProba + softRefProba + weakRefProba;
-            GAssert.set(Math.abs(sum - 1.0) < 0.001,
-                    "Reference type probabilities must sum to 1.0, but we got " + sum);
+        @Builder.Default
+        private int minObjs = 5;
 
-        }
+        @Builder.Default
+        private int maxObjs = 20;
 
-        public static class Builder {
-            private int minRoots = 1;
-            private int maxRoots = 10;
-            private int minObjs = 5;
-            private int maxObjs = 20;
-            private int minRefs = 5;
-            private int maxRefs = 30;
-            private double strongRefProba = 0.5;
-            private double softRefProba = 0.2;
-            private double weakRefProba = 0.3;
-            private boolean allowSelfLoops = false;
-            private boolean allowMultipleRefs = false;
+        @Builder.Default
+        private int minRefs = 5;
 
-            public Builder minRoots(int minRoots) {
-                this.minRoots = minRoots;
-                return this;
-            }
+        @Builder.Default
+        private int maxRefs = 30;
 
-            public Builder maxRoots(int maxRoots) {
-                this.maxRoots = maxRoots;
-                return this;
-            }
+        @Builder.Default
+        private double strongRefProba = 0.5;
 
-            public Builder minObjs(int minObjs) {
-                this.minObjs = minObjs;
-                return this;
-            }
+        @Builder.Default
+        private double softRefProba = 0.2;
 
-            public Builder maxObjs(int maxObjs) {
-                this.maxObjs = maxObjs;
-                return this;
-            }
-
-            public Builder minRefs(int minRefs) {
-                this.minRefs = minRefs;
-                return this;
-            }
-
-            public Builder maxRefs(int maxRefs) {
-                this.maxRefs = maxRefs;
-                return this;
-            }
-
-            public Builder strongRefProba(double prob) {
-                this.strongRefProba = prob;
-                return this;
-            }
-
-            public Builder softRefProba(double prob) {
-                this.softRefProba = prob;
-                return this;
-            }
-
-            public Builder weakRefProba(double prob) {
-                this.weakRefProba = prob;
-                return this;
-            }
-
-            public Builder allowSelfLoops(boolean allow) {
-                // noinspection DataFlowIssue
-                GAssert.set(false, "Set is currently not supported");
-                allowSelfLoops = allow;
-                return this;
-            }
-
-            public Builder allowMultipleRefs(boolean allow) {
-                // noinspection DataFlowIssue
-                GAssert.set(false, "Set allowMultipleRefs is currently not supported");
-                allowMultipleRefs = allow;
-                return this;
-            }
-
-            public Config build() {
-                return new Config(this);
-            }
-        }
+        @Builder.Default
+        private double weakRefProba = 0.3;
     }
 }

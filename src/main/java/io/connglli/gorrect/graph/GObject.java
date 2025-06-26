@@ -24,9 +24,14 @@
 
 package io.connglli.gorrect.graph;
 
+import lombok.AllArgsConstructor;
+import lombok.Value;
+
 /**
  * GObj represents an object
  */
+@Value
+@AllArgsConstructor
 public class GObject {
     public enum Type {
         GC_ROOT("root"), ORDINARY("ordi");
@@ -43,13 +48,8 @@ public class GObject {
         }
     }
 
-    public final int id;
-    public final Type type;
-
-    public GObject(int id, Type type) {
-        this.id = id;
-        this.type = type;
-    }
+    int id;
+    Type type;
 
     public GObject(GObject other) {
         this.id = other.id;

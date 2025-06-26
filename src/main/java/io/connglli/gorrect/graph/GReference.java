@@ -24,9 +24,14 @@
 
 package io.connglli.gorrect.graph;
 
+import lombok.AllArgsConstructor;
+import lombok.Value;
+
 /**
  * GRef represents a reference between two objects
  */
+@Value
+@AllArgsConstructor
 public class GReference {
     public enum Type {
         STRONG("strong"), SOFT("soft"), WEAK("weak");
@@ -43,17 +48,10 @@ public class GReference {
         }
     }
 
-    public final int id;
-    public final int source;
-    public final int target;
-    public final Type type;
-
-    public GReference(int id, int source, int target, Type type) {
-        this.id = id;
-        this.source = source;
-        this.target = target;
-        this.type = type;
-    }
+    int id;
+    int source;
+    int target;
+    Type type;
 
     public GReference(GReference other) {
         this.id = other.id;
@@ -64,6 +62,6 @@ public class GReference {
 
     @Override
     public String toString() {
-        return "ref(" + id + ": " + source + " -[" + type + "]-> " + target + ")";
+        return "ref(" + id + ": " + source + "-[" + type + "]->" + target + ")";
     }
 }

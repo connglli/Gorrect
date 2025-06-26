@@ -37,7 +37,7 @@ public class Gorrect {
     public static void main(String[] args) {
         GRandom.getInstance().setSeed(1);
 
-        GraphGenerator.Config config = new GraphGenerator.Config.Builder().minObjs(10).maxObjs(15)
+        GraphGenerator.Config config = GraphGenerator.Config.builder().minObjs(10).maxObjs(15)
                 .minRefs(15).maxRefs(25).build();
 
         GraphGenerator generator = new GraphGenerator(config);
