@@ -25,39 +25,29 @@
 package io.connglli.gorrect.graph;
 
 import lombok.AllArgsConstructor;
-import lombok.Value;
+import lombok.Data;
+import lombok.NonNull;
 
 /**
  * GObj represents an object
  */
-@Value
+@Data
 @AllArgsConstructor
 public class GObject {
     public enum Type {
-        GC_ROOT("root"), ORDINARY("ordi");
-
-        final String name;
-
-        Type(String name) {
-            this.name = name;
-        }
-
-        @Override
-        public String toString() {
-            return name;
-        }
+        GCROOT, ORDINARY;
     }
 
-    int id;
-    Type type;
+    private final int id;
+    private Type type;
 
-    public GObject(GObject other) {
+    public GObject(@NonNull GObject other) {
         this.id = other.id;
         this.type = other.type;
     }
 
     @Override
     public String toString() {
-        return "obj(" + id + ":" + type + ")";
+        return "obj(" + id + ":" + type.name() + ")";
     }
 }

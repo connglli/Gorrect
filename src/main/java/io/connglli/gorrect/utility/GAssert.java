@@ -31,4 +31,8 @@ public class GAssert {
             throw new AssertionError(message);
         }
     }
+
+    public static void panic(String message) {
+        throw new AssertionError(message);
+    }
 }

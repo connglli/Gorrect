@@ -57,7 +57,7 @@ public class GraphGenerator {
         List<Integer> objIds = new ArrayList<>();
         int numRoots = random.nextInt(config.minRoots, config.maxRoots + 1);
         for (int i = 0; i < numRoots; i++) {
-            objIds.add(graph.addObject(GObject.Type.GC_ROOT));
+            objIds.add(graph.addObject(GObject.Type.GCROOT));
         }
 
         int numObjs = random.nextInt(config.minObjs, config.maxObjs + 1);
