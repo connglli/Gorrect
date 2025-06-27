@@ -183,6 +183,23 @@ able, at least not easy, to control the generated state in this way.
 4. **Reference Type Constraints**: Different GC implementations handle reference types differently - ensure your
    operations can test these variations.
 5. **Concurrent Operations**: Consider operations that simulate concurrent access patterns if testing concurrent GCs.
-6. **Parallel GC**: Consider modeling parallelisms targeting multiple GC threads.
+   The GIR program generator should control whether to generate operations that can cause concurrent GCs (while the
+   Object Graph and Orale Interpreter are kept clean without considering such things). For example, when generating, the
+   generator measures the heap usage. When the heap usage reaches the limit of the Eden space, it knows the LVM will
+   start STW marking and concurrent marking. At this time, the generator can choose to generate many operations that can
+   cause reference changes. There should also be other GC event-aware policies.
+6. **Parallel GC**: Consider modeling parallelisms targeting multiple GC threads. For example, adding operations like:
+
+```shell
+# Example GIR extension for thread awareness
+.thread-context main, worker1, worker2
+on-thread worker1: add-ref $1, $2  # Cross-thread reference
+on-thread worker2: remove-ref $3, $1  # Concurrent modification
+sync-point all-threads  # Synchronization barrier
+
+.allocation-burst 100ms, 50MB  # Burst allocation to trigger TLAB pressure
+.allocation-pause 200ms        # Pause to let concurrent GC catch up
+```
+
 7. **Stress patterns**: Consider patterns that push specific GC limits
 8. **Realistic workload patterns**: Consider patterns based on common application behaviors
