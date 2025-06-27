@@ -32,12 +32,12 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
- * ReplaceRefTarget swaps the referent (target) of two references. Even though the reachability of
- * all objects remain unchanged. This drastically changes the reference relation in the graph,
- * including the reference chains of each object, and the reachability strength of each object.
+ * SwapReferentsOperation swaps the referents of two references. Even though the reachability of all
+ * objects remain unchanged. This drastically changes the reference relation in the graph, including
+ * the reference chains of each object, and the reachability strength of each object.
  */
 @RequiredArgsConstructor
-public class SwapRefTargetOperation extends Operation {
+public class SwapReferentsOperation extends Operation {
     @Getter
     @NonNull
     private final Integer refId1;
@@ -51,8 +51,8 @@ public class SwapRefTargetOperation extends Operation {
         GReference ref2 = graph.getReference(refId2);
         graph.removeReference(refId1);
         graph.removeReference(refId2);
-        graph.addReference(ref1.getSource(), ref2.getTarget(), ref1.getType());
-        graph.addReference(ref2.getSource(), ref1.getTarget(), ref2.getType());
+        graph.addReference(ref1.getReferer(), ref2.getReferent(), ref1.getType());
+        graph.addReference(ref2.getReferer(), ref1.getReferent(), ref2.getType());
         return graph;
     }
 }

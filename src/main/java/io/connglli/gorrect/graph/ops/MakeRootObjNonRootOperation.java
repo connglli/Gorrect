@@ -32,9 +32,9 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
- * MakeObjNonRootOperation makes a root node non-root. This removes the node from the root set of GC
- * marking and consequently making a lot of objects referenced by it are no longer reachable. This
- * reduced the heap usage perhaps drastically.
+ * MakeRootObjNonRootOperation makes a root node non-root. This removes the node from the root set
+ * of GC marking and consequently making a lot of objects referenced by it are no longer reachable.
+ * This reduced the heap usage perhaps drastically.
  */
 @RequiredArgsConstructor
 public class MakeRootObjNonRootOperation extends Operation {

@@ -57,12 +57,12 @@ public class GraphGenerator {
         List<Integer> objIds = new ArrayList<>();
         int numRoots = random.nextInt(config.minRoots, config.maxRoots + 1);
         for (int i = 0; i < numRoots; i++) {
-            objIds.add(graph.addObject(GObject.Type.GCROOT));
+            objIds.add(graph.addObject(GObject.Type.GCROOT, 1));
         }
 
         int numObjs = random.nextInt(config.minObjs, config.maxObjs + 1);
         for (int i = 0; i < numObjs; i++) {
-            objIds.add(graph.addObject(GObject.Type.ORDINARY));
+            objIds.add(graph.addObject(GObject.Type.ORDINARY, 1));
         }
 
         int numRefs = random.nextInt(config.minRefs, config.maxRefs + 1);

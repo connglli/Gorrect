@@ -34,8 +34,7 @@ import io.connglli.gorrect.graph.ObjectGraph;
 import io.connglli.gorrect.graph.Operation;
 import io.connglli.gorrect.graph.ops.AddRefOperation;
 import io.connglli.gorrect.graph.ops.RemoveObjOperation;
-import io.connglli.gorrect.graph.ops.RemoveRefByFromToIdsOperation;
-import io.connglli.gorrect.graph.ops.RemoveRefByRefIdOperation;
+import io.connglli.gorrect.graph.ops.RemoveRefOperation;
 import io.connglli.gorrect.utility.GRandom;
 
 public class Gorrect {
@@ -72,11 +71,10 @@ public class Gorrect {
                             .collect(Collectors.joining(", ")));
         }
 
-        Operation op1 = new RemoveRefByRefIdOperation(1);
+        Operation op1 = new RemoveRefOperation(1);
         Operation op2 = new AddRefOperation(0, 3, GReference.Type.WEAK);
 
-        graph.apply(op1).apply(op2).apply(new RemoveRefByFromToIdsOperation(0, 3))
-                .apply(new RemoveObjOperation(3));
+        graph.apply(op1).apply(op2).apply(new RemoveObjOperation(3));
 
         System.out.println("#Roots: " + graph.getRoots().size());
         for (GObject obj : graph.getRoots()) {

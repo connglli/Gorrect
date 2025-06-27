@@ -24,7 +24,6 @@
 
 package io.connglli.gorrect.graph.ops;
 
-import io.connglli.gorrect.graph.GReference;
 import io.connglli.gorrect.graph.ObjectGraph;
 import io.connglli.gorrect.graph.Operation;
 import lombok.Getter;
@@ -32,25 +31,19 @@ import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
- * ReplaceRefTarget replaces the referent (target) of a reference to a new target. This changes the
- * reference relation in the graph, causing some object no longer reachable and reduce heap usage.
- * On the other hand, it increases the chance that objects rooting from the new target will possibly
- * live longer than before replacing the target.
+ * RemoveRefOperation removes a reference from the graph. This may cause a large portion of objects
+ * become unreachable anymore and thus decrease the heap usage.
  */
 @RequiredArgsConstructor
-public class ReplaceRefTarget extends Operation {
+public class RemoveRefOperation extends Operation {
     @Getter
     @NonNull
     private final Integer refId;
-    @Getter
-    @NonNull
-    private final Integer objId;
 
     @Override
     public ObjectGraph applyTo(ObjectGraph graph) {
-        GReference ref = graph.getReference(refId);
         graph.removeReference(refId);
-        graph.addReference(ref.getSource(), objId, ref.getType());
+        graph.removeUnreachableObjects();
         return graph;
     }
 }

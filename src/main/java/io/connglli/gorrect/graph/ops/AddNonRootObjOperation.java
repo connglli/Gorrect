@@ -34,22 +34,24 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * AddNonRootObjOperation adds a new object to the graph as one of a non-root object. To make the
- * object reachable, this operation requires a source object to reference to it. This operation also
- * aims to increase the heap usage.
+ * object reachable, this operation requires a referer object to reference to it. This operation
+ * also aims to increase the heap usage.
  */
 @RequiredArgsConstructor
 public class AddNonRootObjOperation extends Operation {
     @Getter
+    private final Long objSize;
+    @Getter
     @NonNull
-    private final Integer fromId;
+    private final Integer refererId;
     @Getter
     @NonNull
     private final GReference.Type refType;
 
     @Override
     public ObjectGraph applyTo(ObjectGraph graph) {
-        int toId = graph.addObject(GObject.Type.ORDINARY);
-        graph.addReference(fromId, toId, refType);
+        int toId = graph.addObject(GObject.Type.ORDINARY, objSize);
+        graph.addReference(refererId, toId, refType);
         return graph;
     }
 }

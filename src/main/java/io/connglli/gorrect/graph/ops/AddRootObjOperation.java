@@ -27,6 +27,8 @@ package io.connglli.gorrect.graph.ops;
 import io.connglli.gorrect.graph.GObject;
 import io.connglli.gorrect.graph.ObjectGraph;
 import io.connglli.gorrect.graph.Operation;
+import lombok.Getter;
+import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -36,10 +38,13 @@ import lombok.RequiredArgsConstructor;
  */
 @RequiredArgsConstructor
 public class AddRootObjOperation extends Operation {
+    @Getter
+    @NonNull
+    Long objSize;
 
     @Override
     public ObjectGraph applyTo(ObjectGraph graph) {
-        graph.addObject(GObject.Type.GCROOT);
+        graph.addObject(GObject.Type.GCROOT, objSize);
         return graph;
     }
 }

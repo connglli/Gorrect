@@ -24,6 +24,7 @@
 
 package io.connglli.gorrect.graph;
 
+import io.connglli.gorrect.utility.Formats;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
@@ -40,14 +41,21 @@ public class GObject {
 
     private final int id;
     private Type type;
+    private long bytes;
 
     public GObject(@NonNull GObject other) {
         this.id = other.id;
         this.type = other.type;
+        this.bytes = other.bytes;
+    }
+
+    public long getSize() {
+        return bytes;
     }
 
     @Override
     public String toString() {
-        return "obj(" + id + ":" + type.name() + ")";
+        return "obj(" + id + ":" + type.name() + "=" + Formats.memorySize(bytes) + ")";
     }
+
 }

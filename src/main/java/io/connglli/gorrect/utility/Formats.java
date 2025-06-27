@@ -22,9 +22,28 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph;
+package io.connglli.gorrect.utility;
 
-import java.util.ArrayList;
+public class Formats {
 
-public class OpSequence extends ArrayList<Operation> {
+    public static String memorySize(long bytes) {
+        return memorySize(bytes, 2);
+    }
+
+    public static String memorySize(long bytes, int decimals) {
+        if (bytes == 0)
+            return "0 B";
+
+        String[] units = {"B", "KB", "MB", "GB", "TB", "PB", "EB", "ZB", "YB"};
+        int k = 1024, i = 0;
+        double size = bytes;
+
+        while (size >= k && i < units.length - 1) {
+            size /= k;
+            i++;
+        }
+
+        // noinspection MalformedFormatString
+        return String.format("%." + decimals + "f%s", size, units[i]);
+    }
 }

@@ -39,19 +39,19 @@ public class GReference {
     }
 
     private final int id;
-    private final int source;
-    private final int target;
+    private final int referer;
+    private final int referent;
     private Type type;
 
     public GReference(@NonNull GReference other) {
         this.id = other.id;
-        this.source = other.source;
-        this.target = other.target;
+        this.referer = other.referer;
+        this.referent = other.referent;
         this.type = other.type;
     }
 
     @Override
     public String toString() {
-        return "ref(" + id + ": " + source + "-[" + type.name() + "]->" + target + ")";
+        return "ref(" + id + ": " + referer + "-[" + type.name() + "]->" + referent + ")";
     }
 }

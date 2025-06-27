@@ -69,8 +69,8 @@ public class ObjectGraph {
             this.references.put(ref.getId(), new GReference(ref));
         }
 
-        for (Integer fromId : other.adjTab.keySet()) {
-            this.adjTab.put(fromId, new HashSet<>(other.adjTab.get(fromId)));
+        for (Integer refererId : other.adjTab.keySet()) {
+            this.adjTab.put(refererId, new HashSet<>(other.adjTab.get(refererId)));
         }
     }
 
@@ -133,15 +133,15 @@ public class ObjectGraph {
         return references.get(refId);
     }
 
-    public boolean hasReference(int fromId, int toId) {
-        return adjTab.containsKey(fromId) && adjTab.get(fromId).contains(toId);
+    public boolean hasReference(int refererId, int referentId) {
+        return adjTab.containsKey(refererId) && adjTab.get(refererId).contains(referentId);
     }
 
-    public @NonNull GReference getReference(int fromId, int toId) {
-        GAssert.set(hasReference(fromId, toId), String
-                .format("Reference from object %d to object %d does not exist", fromId, toId));
+    public @NonNull GReference getReference(int refererId, int referentId) {
+        GAssert.set(hasReference(refererId, referentId), String.format(
+                "Reference from object %d to object %d does not exist", refererId, referentId));
         for (GReference ref : references.values()) {
-            if (ref.getSource() == fromId && ref.getTarget() == toId) {
+            if (ref.getReferer() == refererId && ref.getReferent() == referentId) {
                 return ref;
             }
         }
@@ -155,9 +155,9 @@ public class ObjectGraph {
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
     /// added object is reachable from our root objects.
-    public int addObject(GObject.Type type) {
+    public int addObject(GObject.Type type, long size) {
         int id = nextObjId++;
-        objects.put(id, new GObject(id, type));
+        objects.put(id, new GObject(id, type, size));
         adjTab.put(id, new HashSet<>());
         return id;
     }
@@ -170,7 +170,7 @@ public class ObjectGraph {
         // Remove all references connected to this object
         List<Integer> refsToRemove = new ArrayList<>();
         for (GReference ref : references.values()) {
-            if (ref.getSource() == objId || ref.getTarget() == objId) {
+            if (ref.getReferer() == objId || ref.getReferent() == objId) {
                 refsToRemove.add(ref.getId());
             }
         }
@@ -188,20 +188,21 @@ public class ObjectGraph {
     }
 
     /// Add a reference into the graph. Note that it is the user's responsibility to ensure that the
-    /// referrer (fromId) and the referent (toId) all exist in the graph.
-    public int addReference(int fromId, int toId, GReference.Type type) {
-        GAssert.set(objects.containsKey(fromId), String.format(
-                "The object with id %d for adding as the source of a new reference does not exist",
-                fromId));
-        GAssert.set(objects.containsKey(toId), String.format(
-                "The object with id %d for adding as the target of a new reference does not exist",
-                toId));
-        GAssert.set(!hasReference(fromId, toId), String.format(
-                "A reference already exists between object %d and object %d", fromId, toId));
+    /// referrer and the referent all exist in the graph.
+    public int addReference(int refererId, int referentId, GReference.Type type) {
+        GAssert.set(objects.containsKey(refererId), String.format(
+                "The object with id %d for adding as the referer of a new reference does not exist",
+                refererId));
+        GAssert.set(objects.containsKey(referentId), String.format(
+                "The object with id %d for adding as the referent of a new reference does not exist",
+                referentId));
+        GAssert.set(!hasReference(refererId, referentId),
+                String.format("A reference already exists between object %d and object %d",
+                        refererId, referentId));
 
         int refId = nextRefId++;
-        references.put(refId, new GReference(refId, fromId, toId, type));
-        adjTab.get(fromId).add(toId);
+        references.put(refId, new GReference(refId, refererId, referentId, type));
+        adjTab.get(refererId).add(referentId);
 
         return refId;
     }
@@ -212,13 +213,13 @@ public class ObjectGraph {
         GAssert.set(hasReference(refId),
                 String.format("Reference with id %d does not exist", refId));
         GReference ref = references.remove(refId);
-        adjTab.get(ref.getSource()).remove(ref.getTarget());
+        adjTab.get(ref.getReferer()).remove(ref.getReferent());
     }
 
     /// Remove a reference from the graph. This operation may cause certain objects unreachable.
     /// Call removeUnreachableObjects() to compact the graph.
-    public void removeReference(int fromId, int toId) {
-        removeReference(getReference(fromId, toId).getId());
+    public void removeReference(int refererId, int referentId) {
+        removeReference(getReference(refererId, referentId).getId());
     }
 
     /// Apply an operation to the graph and return this for chained operations
@@ -259,7 +260,7 @@ public class ObjectGraph {
                 .filter(id -> !reachableObjs.contains(id)).collect(Collectors.toSet());
         unreachableObjs.forEach(objects::remove);
         Set<Integer> unreachableRefs = references.keySet().stream()
-                .filter(id -> unreachableObjs.contains(references.get(id).getSource()))
+                .filter(id -> unreachableObjs.contains(references.get(id).getReferer()))
                 .collect(Collectors.toSet());
         unreachableRefs.forEach(references::remove);
         unreachableObjs.forEach(adjTab::remove);
@@ -348,10 +349,10 @@ public class ObjectGraph {
             int current = queue.poll();
 
             for (GReference ref : references.values()) {
-                if (ref.getSource() == current && allowedTypes.contains(ref.getType())) {
-                    if (!visited.contains(ref.getTarget())) {
-                        visited.add(ref.getTarget());
-                        queue.offer(ref.getTarget());
+                if (ref.getReferer() == current && allowedTypes.contains(ref.getType())) {
+                    if (!visited.contains(ref.getReferent())) {
+                        visited.add(ref.getReferent());
+                        queue.offer(ref.getReferent());
                     }
                 }
             }

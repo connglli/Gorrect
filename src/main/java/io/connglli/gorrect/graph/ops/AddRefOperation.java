@@ -33,14 +33,14 @@ import lombok.RequiredArgsConstructor;
 
 /**
  * AddRefOperation adds a references between two objects. This operation may cause objects that are
- * rooting from the target object live longer than before adding this reference. It may also lead to
- * the reachability of new objects starting from the edge and increase heap usages in the future.
+ * rooting from the referent object live longer than before adding this reference. It may also lead
+ * to the reachability of new objects starting from the edge and increase heap usages in the future.
  */
 @RequiredArgsConstructor
 public class AddRefOperation extends Operation {
     @Getter
     @NonNull
-    private final Integer fromId;
+    private final Integer refererId;
     @Getter
     @NonNull
     private final Integer toId;
@@ -50,7 +50,7 @@ public class AddRefOperation extends Operation {
 
     @Override
     public ObjectGraph applyTo(ObjectGraph graph) {
-        graph.addReference(fromId, toId, type);
+        graph.addReference(refererId, toId, type);
         return graph;
     }
 }
