@@ -68,6 +68,15 @@ public class GRandom {
         return random.nextLong();
     }
 
+    public long nextLong(long bound) {
+        return random.nextLong(bound);
+    }
+
+    public long nextLong(long min, long max) {
+        GAssert.set(max > min, "Max bound must be greater than min bound");
+        return random.nextLong(max - min) + min;
+    }
+
     public boolean nextBoolean() {
         return random.nextBoolean();
     }
