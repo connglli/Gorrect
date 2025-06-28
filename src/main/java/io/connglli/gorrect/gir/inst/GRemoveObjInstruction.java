@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,30 +22,27 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph.ops;
+package io.connglli.gorrect.gir.inst;
 
-import io.connglli.gorrect.graph.GObject;
-import io.connglli.gorrect.graph.ObjectGraph;
-import io.connglli.gorrect.graph.Operation;
-import lombok.Getter;
+import io.connglli.gorrect.gir.model.GID;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.Value;
 
 /**
- * MakeNonRootObjRootOperation makes a non-root object one of a root object. This adds the object
- * into the root set of GC marking, opening a new channel for adding reachable objets. This
- * operation also cause objects that are rooting from the this object live longer than before.
+ * GRemoveObjInstruction removes an object from the object graph. This
+ * instruction may lead to the unreachability of large number of objects rooting
+ * from it. This instruction aims to reduce the heap usage perhaps drastically.
  */
-@RequiredArgsConstructor
-public class MakeNonRootObjRootOperation extends Operation {
-    @Getter
-    @NonNull
-    private final Integer objId;
+@Value
+@EqualsAndHashCode(callSuper = true)
+@GIROpCode("remove-obj")
+public class GRemoveObjInstruction extends GInstruction {
+  /** The ID of the object to be removed from the graph. */
+  @GIRInput(0) @NonNull GID objectId;
 
-    @Override
-    public ObjectGraph applyTo(ObjectGraph graph) {
-        GObject obj = graph.getNonRoot(objId);
-        obj.setType(GObject.Type.GCROOT);
-        return graph;
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

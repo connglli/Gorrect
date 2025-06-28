@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,31 +22,27 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph.ops;
+package io.connglli.gorrect.gir.inst;
 
-import io.connglli.gorrect.graph.GObject;
-import io.connglli.gorrect.graph.ObjectGraph;
-import io.connglli.gorrect.graph.Operation;
-import lombok.Getter;
+import io.connglli.gorrect.gir.model.GID;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.Value;
 
 /**
- * MakeRootObjNonRootOperation makes a root node non-root. This removes the node from the root set
- * of GC marking and consequently making a lot of objects referenced by it are no longer reachable.
- * This reduced the heap usage perhaps drastically.
+ * GRemoveRefInstruction removes a reference from the graph. This may cause a
+ * large portion of objects become unreachable anymore and thus decrease the
+ * heap usage.
  */
-@RequiredArgsConstructor
-public class MakeRootObjNonRootOperation extends Operation {
-    @Getter
-    @NonNull
-    private final Integer objId;
+@Value
+@EqualsAndHashCode(callSuper = true)
+@GIROpCode("remove-ref")
+public class GRemoveRefInstruction extends GInstruction {
+  /** The ID of the reference to be removed from the graph. */
+  @GIRInput(0) @NonNull GID referenceId;
 
-    @Override
-    public ObjectGraph applyTo(ObjectGraph graph) {
-        GObject root = graph.getRoot(objId);
-        root.setType(GObject.Type.ORDINARY);
-        graph.removeUnreachableObjects();
-        return graph;
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

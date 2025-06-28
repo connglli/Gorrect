@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph;
+package io.connglli.gorrect.gir.model;
 
 import io.connglli.gorrect.utility.Formats;
 import lombok.AllArgsConstructor;
@@ -39,9 +39,9 @@ public class GObject {
         GCROOT, ORDINARY;
     }
 
-    private final int id;
-    private Type type;
-    private long bytes;
+    private final GID id; // Unique identifier for the object
+    private Type type; // The type of the object
+    private long bytes; // The size of the object in bytes
 
     public GObject(@NonNull GObject other) {
         this.id = other.id;

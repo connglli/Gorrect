@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,29 +22,26 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph.ops;
+package io.connglli.gorrect.gir.inst;
 
-import io.connglli.gorrect.graph.GObject;
-import io.connglli.gorrect.graph.ObjectGraph;
-import io.connglli.gorrect.graph.Operation;
-import lombok.Getter;
+import io.connglli.gorrect.gir.model.GID;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.Value;
 
 /**
- * AddRootObjOperation adds a new object to the graph as one of a root object. This operation opens
- * a new channel for adding a large number of reachable objects in the future. This operation aims
- * to increase the heap usage.
+ * GSoftenRefInstruction softens the type of a reference one layer up. This will
+ * drastically change the reachability strength of each object in the graph.
  */
-@RequiredArgsConstructor
-public class AddRootObjOperation extends Operation {
-    @Getter
-    @NonNull
-    Long objSize;
+@Value
+@EqualsAndHashCode(callSuper = true)
+@GIROpCode("soften-ref")
+public class GSoftenRefInstruction extends GInstruction {
+  /** The ID of the reference to be softened (weakened) by one level. */
+  @GIRInput(0) @NonNull GID referenceId;
 
-    @Override
-    public ObjectGraph applyTo(ObjectGraph graph) {
-        graph.addObject(GObject.Type.GCROOT, objSize);
-        return graph;
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

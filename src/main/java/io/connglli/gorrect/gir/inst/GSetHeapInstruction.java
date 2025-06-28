@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in all
- * copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in
+ * all copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -22,28 +22,26 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph.ops;
+package io.connglli.gorrect.gir.inst;
 
-import io.connglli.gorrect.graph.ObjectGraph;
-import io.connglli.gorrect.graph.Operation;
-import lombok.Getter;
+import io.connglli.gorrect.gir.model.ObjectGraph;
+import lombok.EqualsAndHashCode;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.Value;
 
 /**
- * RemoveRefOperation removes a reference from the graph. This may cause a large portion of objects
- * become unreachable anymore and thus decrease the heap usage.
+ * Set instruction for configuring heap settings and initial state.
  */
-@RequiredArgsConstructor
-public class RemoveRefOperation extends Operation {
-    @Getter
-    @NonNull
-    private final Integer refId;
+@Value
+@EqualsAndHashCode(callSuper = true)
+@GIROpCode("set-heap")
+public class GSetHeapInstruction extends GInstruction {
+  @GIRInput(0) @NonNull Long heapSize;
 
-    @Override
-    public ObjectGraph applyTo(ObjectGraph graph) {
-        graph.removeReference(refId);
-        graph.removeUnreachableObjects();
-        return graph;
-    }
+  @GIRInput(1) @NonNull ObjectGraph initState;
+
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph;
+package io.connglli.gorrect.gir.model;
 
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -38,10 +38,10 @@ public class GReference {
         STRONG, SOFT, WEAK;
     }
 
-    private final int id;
-    private final int referer;
-    private final int referent;
-    private Type type;
+    private final GID id; // Unique identifier for the reference
+    private final GID referer; // The source/from object of the reference
+    private final GID referent; // The target/to object being referenced
+    private Type type; // The strength of the reference
 
     public GReference(@NonNull GReference other) {
         this.id = other.id;

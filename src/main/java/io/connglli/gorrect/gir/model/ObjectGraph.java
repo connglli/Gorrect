@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.graph;
+package io.connglli.gorrect.gir.model;
 
 import java.util.*;
 import java.util.stream.Collectors;
@@ -39,27 +39,20 @@ import lombok.NonNull;
  * Currently, we assume there's only one thread and all root objects live on that thread.
  */
 public class ObjectGraph {
-    private final Map<Integer, GObject> objects; // ID -> Object
-    private final Map<Integer, GReference> references; // ID -> Reference
-    private final Map<Integer, Set<Integer>> adjTab; // ID -> {ID}: Adjacent table
-
-    private int nextObjId;
-    private int nextRefId;
+    private final Map<GID, GObject> objects; // ID -> Object
+    private final Map<GID, GReference> references; // ID -> Reference
+    private final Map<GID, Set<GID>> adjTab; // ID -> {ID}: Adjacent table
 
     public ObjectGraph() {
         this.objects = new HashMap<>();
         this.references = new HashMap<>();
         this.adjTab = new HashMap<>();
-        this.nextObjId = 0;
-        this.nextRefId = 0;
     }
 
-    public ObjectGraph(ObjectGraph other) {
+    public ObjectGraph(@NonNull ObjectGraph other) {
         this.objects = new HashMap<>();
         this.references = new HashMap<>();
         this.adjTab = new HashMap<>();
-        this.nextObjId = other.nextObjId;
-        this.nextRefId = other.nextRefId;
 
         for (GObject obj : other.objects.values()) {
             this.objects.put(obj.getId(), new GObject(obj));
@@ -69,8 +62,10 @@ public class ObjectGraph {
             this.references.put(ref.getId(), new GReference(ref));
         }
 
-        for (Integer refererId : other.adjTab.keySet()) {
-            this.adjTab.put(refererId, new HashSet<>(other.adjTab.get(refererId)));
+        for (GID refererId : other.adjTab.keySet()) {
+            this.adjTab.put(refererId, other.adjTab.get(refererId).stream()
+                    .map(GID::new)
+                    .collect(Collectors.toSet()));
         }
     }
 
@@ -79,40 +74,35 @@ public class ObjectGraph {
                 .collect(Collectors.toList());
     }
 
-    public List<GObject> getNonRoots() {
-        return objects.values().stream().filter(o -> o.getType() != GObject.Type.GCROOT)
-                .collect(Collectors.toList());
-    }
-
     public List<GObject> getObjects() {
         return new ArrayList<>(objects.values());
     }
 
-    public boolean hasObject(int objId) {
+    public boolean hasObject(@NonNull GID objId) {
         return objects.containsKey(objId);
     }
 
-    public @NonNull GObject getObject(int objId) {
+    public @NonNull GObject getObject(@NonNull GID objId) {
         GAssert.set(hasObject(objId), String.format("Object (with id %d) does not exist", objId));
         return objects.get(objId);
     }
 
-    public boolean hasRoot(int objId) {
+    public boolean hasRoot(@NonNull GID objId) {
         return hasObject(objId) && getObject(objId).getType() == GObject.Type.GCROOT;
     }
 
-    public @NonNull GObject getRoot(int rootId) {
+    public @NonNull GObject getRoot(@NonNull GID rootId) {
         GObject obj = getObject(rootId);
         GAssert.set(obj.getType() == GObject.Type.GCROOT,
                 String.format("Object (with id %d) is not a root object", rootId));
         return obj;
     }
 
-    public boolean hasNonRoot(int objId) {
+    public boolean hasNonRoot(@NonNull GID objId) {
         return hasObject(objId) && getObject(objId).getType() != GObject.Type.GCROOT;
     }
 
-    public @NonNull GObject getNonRoot(int objId) {
+    public @NonNull GObject getNonRoot(@NonNull GID objId) {
         GObject obj = getObject(objId);
         GAssert.set(obj.getType() != GObject.Type.GCROOT,
                 String.format("Object (with id %d) is a root object", objId));
@@ -123,21 +113,21 @@ public class ObjectGraph {
         return new ArrayList<>(references.values());
     }
 
-    public boolean hasReference(int refId) {
+    public boolean hasReference(@NonNull GID refId) {
         return references.containsKey(refId);
     }
 
-    public @NonNull GReference getReference(int refId) {
+    public @NonNull GReference getReference(@NonNull GID refId) {
         GAssert.set(hasReference(refId),
                 String.format("Reference with id %d does not exist", refId));
         return references.get(refId);
     }
 
-    public boolean hasReference(int refererId, int referentId) {
+    public boolean hasReference(@NonNull GID refererId, @NonNull GID referentId) {
         return adjTab.containsKey(refererId) && adjTab.get(refererId).contains(referentId);
     }
 
-    public @NonNull GReference getReference(int refererId, int referentId) {
+    public @NonNull GReference getReference(@NonNull GID refererId, @NonNull GID referentId) {
         GAssert.set(hasReference(refererId, referentId), String.format(
                 "Reference from object %d to object %d does not exist", refererId, referentId));
         for (GReference ref : references.values()) {
@@ -146,35 +136,38 @@ public class ObjectGraph {
             }
         }
         GAssert.panic("Cannot reach here");
-        return references.get(0);
+        return references.get(new GID("null"));
     }
 
-    public Map<Integer, Set<Integer>> getAdjacentTable() {
-        return adjTab;
+    public Set<GID> getReferents(@NonNull GID refererId) {
+        GAssert.set(hasObject(refererId),
+                String.format("Object with id %d does not exist", refererId));
+        return adjTab.get(refererId);
     }
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
     /// added object is reachable from our root objects.
-    public int addObject(GObject.Type type, long size) {
-        int id = nextObjId++;
-        objects.put(id, new GObject(id, type, size));
-        adjTab.put(id, new HashSet<>());
-        return id;
+    public GID addObject(@NonNull GID objId, GObject.Type type, long size) {
+        GAssert.set(!objects.containsKey(objId), "The id %s is already used by another object".formatted(objId));
+        GAssert.set(!references.containsKey(objId), "The id %s is already used by another reference".formatted(objId));
+        objects.put(objId, new GObject(objId, type, size));
+        adjTab.put(objId, new HashSet<>());
+        return objId;
     }
 
     /// Remove an object from the graph. This operation may cause certain objects unreachable. Call
     /// removeUnreachableObjects() to compact the graph.
-    public void removeObject(int objId) {
+    public void removeObject(@NonNull GID objId) {
         GAssert.set(hasObject(objId), String.format("Object with id %d does not exist", objId));
 
         // Remove all references connected to this object
-        List<Integer> refsToRemove = new ArrayList<>();
+        List<GID> refsToRemove = new ArrayList<>();
         for (GReference ref : references.values()) {
             if (ref.getReferer() == objId || ref.getReferent() == objId) {
                 refsToRemove.add(ref.getId());
             }
         }
-        for (int refId : refsToRemove) {
+        for (GID refId : refsToRemove) {
             references.remove(refId);
         }
 
@@ -189,7 +182,7 @@ public class ObjectGraph {
 
     /// Add a reference into the graph. Note that it is the user's responsibility to ensure that the
     /// referrer and the referent all exist in the graph.
-    public int addReference(int refererId, int referentId, GReference.Type type) {
+    public GID addReference(@NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId, GReference.Type type) {
         GAssert.set(objects.containsKey(refererId), String.format(
                 "The object with id %d for adding as the referer of a new reference does not exist",
                 refererId));
@@ -200,7 +193,6 @@ public class ObjectGraph {
                 String.format("A reference already exists between object %d and object %d",
                         refererId, referentId));
 
-        int refId = nextRefId++;
         references.put(refId, new GReference(refId, refererId, referentId, type));
         adjTab.get(refererId).add(referentId);
 
@@ -209,7 +201,7 @@ public class ObjectGraph {
 
     /// Remove a reference from the graph. This operation may cause certain objects unreachable.
     /// Call removeUnreachableObjects() to compact the graph.
-    public void removeReference(int refId) {
+    public void removeReference(@NonNull GID refId) {
         GAssert.set(hasReference(refId),
                 String.format("Reference with id %d does not exist", refId));
         GReference ref = references.remove(refId);
@@ -218,14 +210,8 @@ public class ObjectGraph {
 
     /// Remove a reference from the graph. This operation may cause certain objects unreachable.
     /// Call removeUnreachableObjects() to compact the graph.
-    public void removeReference(int refererId, int referentId) {
+    public void removeReference(@NonNull GID refererId, @NonNull GID referentId) {
         removeReference(getReference(refererId, referentId).getId());
-    }
-
-    /// Apply an operation to the graph and return this for chained operations
-    public @NonNull ObjectGraph apply(@NonNull Operation op) {
-        GAssert.set(op.applyTo(this) == this, "The operation generated a new graph");
-        return this;
     }
 
     /*
@@ -255,38 +241,58 @@ public class ObjectGraph {
      */
 
     public void removeUnreachableObjects() {
-        Set<Integer> reachableObjs = getReachableObjects();
-        Set<Integer> unreachableObjs = objects.keySet().stream()
+        Set<GID> reachableObjs = getReachableObjects();
+        Set<GID> unreachableObjs = objects.keySet().stream()
                 .filter(id -> !reachableObjs.contains(id)).collect(Collectors.toSet());
-        unreachableObjs.forEach(objects::remove);
-        Set<Integer> unreachableRefs = references.keySet().stream()
-                .filter(id -> unreachableObjs.contains(references.get(id).getReferer()))
-                .collect(Collectors.toSet());
-        unreachableRefs.forEach(references::remove);
-        unreachableObjs.forEach(adjTab::remove);
+        unreachableObjs.forEach(id -> {
+            if (hasObject(id)) {
+                this.removeObject(id);
+            }
+        });
     }
 
-    public Set<Integer> getStronglyReachableObjects(int rootId) {
+    public void removeWeaklyReachableObjects() {
+        Set<GID> weaklyReachableObjs = getWeaklyReachableObjects();
+        weaklyReachableObjs.forEach(id -> {
+            if (hasObject(id)) {
+                this.removeObject(id);
+            }
+        });
+        removeUnreachableObjects();
+    }
+
+    public void removeSoftlyReachableObjects() {
+        Set<GID> stronglyRechableObjects = getStronglyReachableObjects();
+        Set<GID> otherObjects = objects.keySet().stream().filter(id -> !stronglyRechableObjects.contains(id)).collect(Collectors.toSet());
+        otherObjects.forEach(id -> {
+            if (hasObject(id)) {
+                this.removeObject(id);
+            }
+        });
+        removeUnreachableObjects();
+    }
+
+    public Set<GID> getStronglyReachableObjects(@NonNull GID rootId) {
         return getReachableObjects(rootId, EnumSet.of(GReference.Type.STRONG));
     }
 
-    public Set<Integer> getStronglyReachableObjects() {
-        Set<Integer> result = new HashSet<>();
+    public Set<GID> getStronglyReachableObjects() {
+        Set<GID> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
             result.addAll(getStronglyReachableObjects(rootObj.getId()));
         }
         return result;
     }
 
-    public Set<Integer> getSoftlyReachableObjects(int rootId) {
-        Set<Integer> result = getReachableObjects(rootId,
+    public Set<GID> getSoftlyReachableObjects(@NonNull GID rootId) {
+        Set<GID> result = getReachableObjects(rootId,
                 EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT));
         result.removeAll(getStronglyReachableObjects());
         return result;
     }
 
-    public Set<Integer> getSoftlyReachableObjects() {
-        Set<Integer> result = new HashSet<>();
+    public Set<GID> getSoftlyReachableObjects() {
+        Set<GID> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
             result.addAll(getReachableObjects(rootObj.getId(),
                     EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT)));
@@ -295,16 +301,16 @@ public class ObjectGraph {
         return result;
     }
 
-    public Set<Integer> getWeaklyReachableObjects(int rootId) {
-        Set<Integer> result = getReachableObjects(rootId,
+    public Set<GID> getWeaklyReachableObjects(@NonNull GID rootId) {
+        Set<GID> result = getReachableObjects(rootId,
                 EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK));
         result.removeAll(getSoftlyReachableObjects());
         result.removeAll(getStronglyReachableObjects());
         return result;
     }
 
-    public Set<Integer> getWeaklyReachableObjects() {
-        Set<Integer> result = new HashSet<>();
+    public Set<GID> getWeaklyReachableObjects() {
+        Set<GID> result = new HashSet<>();
         for (GObject rootObj : getRoots()) {
             result.addAll(getReachableObjects(rootObj.getId(), EnumSet.of(GReference.Type.STRONG,
                     GReference.Type.SOFT, GReference.Type.WEAK)));
@@ -314,8 +320,8 @@ public class ObjectGraph {
         return result;
     }
 
-    public Set<Integer> getReachableObjects() {
-        Set<Integer> result = new HashSet<>();
+    public Set<GID> getReachableObjects() {
+        Set<GID> result = new HashSet<>();
         EnumSet<GReference.Type> types =
                 EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK);
         GAssert.set(types.size() == GReference.Type.values().length,
@@ -326,7 +332,7 @@ public class ObjectGraph {
         return result;
     }
 
-    private Set<Integer> getReachableObjects(int rootId, Set<GReference.Type> allowedTypes) {
+    private Set<GID> getReachableObjects(@NonNull GID rootId, Set<GReference.Type> allowedTypes) {
 
         // TODO: Optimize reachability algorithm implementations by running reachability only once.
         // This can be accomplished by giving each object an reachability mark and populating the
@@ -339,14 +345,14 @@ public class ObjectGraph {
         GAssert.set(objects.get(rootId).getType() == GObject.Type.GCROOT,
                 String.format("Object with ID %d is not a root object", rootId));
 
-        Set<Integer> visited = new HashSet<>();
-        Queue<Integer> queue = new LinkedList<>();
+        Set<GID> visited = new HashSet<>();
+        Queue<GID> queue = new LinkedList<>();
 
         queue.offer(rootId);
         visited.add(rootId);
 
         while (!queue.isEmpty()) {
-            int current = queue.poll();
+            GID current = queue.poll();
 
             for (GReference ref : references.values()) {
                 if (ref.getReferer() == current && allowedTypes.contains(ref.getType())) {
