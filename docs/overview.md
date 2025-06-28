@@ -56,7 +56,7 @@ The following advanced operations may exist:
   adding a large number of reachable objects in the future. This operation aims to increase the heap usage.
 * _AddNonRootObjOperation_: Adds a new object to the graph as one of a non-root object. To make the object reachable,
   this
-  operation requires a source object to reference to it. This operation also aims to increase the heap usage.
+  operation requires a source object to reference it. This operation also aims to increase the heap usage.
 * _MakeNonRootObjRootOperation_: Makes a non-root object one of a root object. This adds the object into the root set of
   GC marking, opening a new channel for adding reachable objets. This operation also cause objects that are rooting from
   the this object live longer than before.
@@ -65,7 +65,7 @@ The following advanced operations may exist:
 * _AddStrongRefOperation_: Adds a strong reference between two objects.
 * _AddSoftRefOperation_: Adds a soft reference between two objects.
 * _AddWeakRefOperation_: Adds a weak reference between two objects.
-* _ReplaceReferentOperation_: Replaces the referent (target) of a reference to a new referent. This changes the
+* _ReplaceReferentOperation_: Replaces the referent (target) of a reference with a new referent. This changes the
   reference
   relation in the graph, causing some object no longer reachable and reduce heap usage. On the other hand, it increases
   the chance that objects rooting from the new referent will possibly live longer than before replacing the target.
