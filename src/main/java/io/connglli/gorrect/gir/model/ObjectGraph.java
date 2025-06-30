@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.model;
 
 import java.util.*;
+import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
 import io.connglli.gorrect.utility.GAssert;
@@ -39,6 +40,17 @@ import lombok.NonNull;
  * Currently, we assume there's only one thread and all root objects live on that thread.
  */
 public class ObjectGraph {
+    public static abstract class ObjectVisitor implements Consumer<GObject> {
+    }
+    public static abstract class ReferenceVisitor implements Consumer<GObject> {
+    }
+
+    public enum TraverseOrder {
+        DFS, // Depth-First Order
+        BFS, // Breadth-First Order
+        RPO, // Reverse Postorder
+    }
+
     private final Map<GID, GObject> objects; // ID -> Object
     private final Map<GID, GReference> references; // ID -> Reference
     private final Map<GID, Set<GID>> adjTab; // ID -> {ID}: Adjacent table
@@ -214,6 +226,16 @@ public class ObjectGraph {
     /// Call removeUnreachableObjects() to compact the graph.
     public void removeReference(@NonNull GID refererId, @NonNull GID referentId) {
         removeReference(getReference(refererId, referentId).getId());
+    }
+
+    /// Visit all objects in the object graph in a specific order
+    public void accept(ObjectVisitor visitor, TraverseOrder order) {
+        GAssert.panic("Not yet implemented");
+    }
+
+    /// Visit all references in the object graph in a specific order
+    public void accept(ReferenceVisitor visitor, TraverseOrder order) {
+        GAssert.panic("Not yet implemented");
     }
 
     /*
