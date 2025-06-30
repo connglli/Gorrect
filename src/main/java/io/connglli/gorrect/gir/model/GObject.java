@@ -24,7 +24,6 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.utility.Formats;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
@@ -55,7 +54,7 @@ public class GObject {
 
     @Override
     public String toString() {
-        return "obj(" + id + ":" + type.name() + "=" + Formats.memorySize(bytes) + ")";
+        return "obj(" + id + ":" + type.name() + "=" + GMemorySize.toString(bytes) + ")";
     }
 
 }

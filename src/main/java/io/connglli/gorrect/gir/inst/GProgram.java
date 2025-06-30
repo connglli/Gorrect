@@ -42,7 +42,7 @@ public class GProgram extends GInstruction {
 
     public void addInstruction(GInstruction instruction) {
         GAssert.set(!(instruction instanceof GSetHeapInstruction),
-                "GSetHeapInstruction is already aded");
+                "GSetHeapInstruction is already added");
         instructions.add(instruction);
     }
 

@@ -82,7 +82,7 @@ public class ObjectGraph {
     }
 
     public @NonNull GObject getObject(@NonNull GID objId) {
-        GAssert.set(hasObject(objId), String.format("Object (with id %d) does not exist", objId));
+        GAssert.set(hasObject(objId), String.format("Object (with id %s) does not exist", objId));
         return objects.get(objId);
     }
 
@@ -93,7 +93,7 @@ public class ObjectGraph {
     public @NonNull GObject getRoot(@NonNull GID rootId) {
         GObject obj = getObject(rootId);
         GAssert.set(obj.getType() == GObject.Type.GCROOT,
-                String.format("Object (with id %d) is not a root object", rootId));
+                String.format("Object (with id %s) is not a root object", rootId));
         return obj;
     }
 
@@ -104,7 +104,7 @@ public class ObjectGraph {
     public @NonNull GObject getNonRoot(@NonNull GID objId) {
         GObject obj = getObject(objId);
         GAssert.set(obj.getType() != GObject.Type.GCROOT,
-                String.format("Object (with id %d) is a root object", objId));
+                String.format("Object (with id %s) is a root object", objId));
         return obj;
     }
 
@@ -118,7 +118,7 @@ public class ObjectGraph {
 
     public @NonNull GReference getReference(@NonNull GID refId) {
         GAssert.set(hasReference(refId),
-                String.format("Reference with id %d does not exist", refId));
+                String.format("Reference with id %s does not exist", refId));
         return references.get(refId);
     }
 
@@ -128,7 +128,7 @@ public class ObjectGraph {
 
     public @NonNull GReference getReference(@NonNull GID refererId, @NonNull GID referentId) {
         GAssert.set(hasReference(refererId, referentId), String.format(
-                "Reference from object %d to object %d does not exist", refererId, referentId));
+                "Reference from object %s to object %s does not exist", refererId, referentId));
         for (GReference ref : references.values()) {
             if (ref.getReferer() == refererId && ref.getReferent() == referentId) {
                 return ref;
@@ -140,17 +140,17 @@ public class ObjectGraph {
 
     public Set<GID> getReferents(@NonNull GID refererId) {
         GAssert.set(hasObject(refererId),
-                String.format("Object with id %d does not exist", refererId));
+                String.format("Object with id %s does not exist", refererId));
         return adjTab.get(refererId);
     }
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
     /// added object is reachable from our root objects.
     public GID addObject(@NonNull GID objId, GObject.Type type, long size) {
-        GAssert.set(!objects.containsKey(objId),
-                "The id %s is already used by another object".formatted(objId));
+        GAssert.set(!objects.containsKey(objId), "The id %s is already used by another object",
+                objId);
         GAssert.set(!references.containsKey(objId),
-                "The id %s is already used by another reference".formatted(objId));
+                "The id %s is already used by another reference", objId);
         objects.put(objId, new GObject(objId, type, size));
         adjTab.put(objId, new HashSet<>());
         return objId;
@@ -159,7 +159,7 @@ public class ObjectGraph {
     /// Remove an object from the graph. This operation may cause certain objects unreachable. Call
     /// removeUnreachableObjects() to compact the graph.
     public void removeObject(@NonNull GID objId) {
-        GAssert.set(hasObject(objId), String.format("Object with id %d does not exist", objId));
+        GAssert.set(hasObject(objId), String.format("Object with id %s does not exist", objId));
 
         // Remove all references connected to this object
         List<GID> refsToRemove = new ArrayList<>();
@@ -174,8 +174,8 @@ public class ObjectGraph {
 
         // Update adjacent table
         adjTab.remove(objId);
-        adjTab.values().forEach(adjs -> {
-            adjs.remove(objId);
+        adjTab.values().forEach(referents -> {
+            referents.remove(objId);
         });
 
         objects.remove(objId);
@@ -186,13 +186,13 @@ public class ObjectGraph {
     public GID addReference(@NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId,
             GReference.Type type) {
         GAssert.set(objects.containsKey(refererId), String.format(
-                "The object with id %d for adding as the referer of a new reference does not exist",
+                "The object with id %s for adding as the referer of a new reference does not exist",
                 refererId));
         GAssert.set(objects.containsKey(referentId), String.format(
-                "The object with id %d for adding as the referent of a new reference does not exist",
+                "The object with id %s for adding as the referent of a new reference does not exist",
                 referentId));
         GAssert.set(!hasReference(refererId, referentId),
-                String.format("A reference already exists between object %d and object %d",
+                String.format("A reference already exists between object %s and object %s",
                         refererId, referentId));
 
         references.put(refId, new GReference(refId, refererId, referentId, type));
@@ -205,7 +205,7 @@ public class ObjectGraph {
     /// Call removeUnreachableObjects() to compact the graph.
     public void removeReference(@NonNull GID refId) {
         GAssert.set(hasReference(refId),
-                String.format("Reference with id %d does not exist", refId));
+                String.format("Reference with id %s does not exist", refId));
         GReference ref = references.remove(refId);
         adjTab.get(ref.getReferer()).remove(ref.getReferent());
     }
@@ -344,9 +344,9 @@ public class ObjectGraph {
         // reference type between the parent and the object is strong/soft/weak.
 
         GAssert.set(objects.containsKey(rootId),
-                String.format("Object with ID %d does not exist", rootId));
+                String.format("Object with id %s does not exist", rootId));
         GAssert.set(objects.get(rootId).getType() == GObject.Type.GCROOT,
-                String.format("Object with ID %d is not a root object", rootId));
+                String.format("Object with id %s is not a root object", rootId));
 
         Set<GID> visited = new HashSet<>();
         Queue<GID> queue = new LinkedList<>();

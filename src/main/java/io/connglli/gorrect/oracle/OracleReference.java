@@ -103,7 +103,7 @@ public class OracleReference {
 
     public void redirect(@NonNull OracleObject newReferent) {
         GAssert.set(newReferent.getId() != getReferent().getId(),
-                "Cannot redirect reference %d to the same referent".formatted(getId()));
+                "Cannot redirect reference %s to the same referent", getId());
         heap.unlink(getReferer(), getReferent());
         heap.reference(getId(), getReferer(), newReferent, getType());
     }

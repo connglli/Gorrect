@@ -36,6 +36,34 @@ import lombok.NonNull;
 public class GReference {
     public enum Type {
         STRONG, SOFT, WEAK;
+
+        public boolean strongerThanOrEqual(Type other) {
+            if (this == STRONG) {
+                return other == STRONG;
+            } else if (this == SOFT) {
+                return other == SOFT || other == WEAK;
+            } else {
+                return other == WEAK;
+            }
+        }
+
+        public boolean strongerThan(Type other) {
+            if (this == STRONG) {
+                return other != STRONG;
+            } else if (this == SOFT) {
+                return other == WEAK;
+            } else {
+                return false;
+            }
+        }
+
+        public boolean weakerThan(Type other) {
+            return !strongerThanOrEqual(other);
+        }
+
+        public boolean weakerThanOrEqual(Type other) {
+            return !strongerThan(other);
+        }
     }
 
     private final GID id; // Unique identifier for the reference

@@ -37,7 +37,7 @@ import lombok.NonNull;
  * interpreter should carefully handle the size of the heap. Therefore, it wraps object graph into
  * {@link OracleHeap} and uses it to manage the heap memory. Indeed, methods provided by the
  * {@link OracleHeap} are similar to those in GIR, but they are more memory-aware and more
- * convinient. The interpreter is used to execute a GIR program and simulate the change of the
+ * convenient. The interpreter is used to execute a GIR program and simulate the change of the
  * {@link ObjectGraph}.
  */
 public class OracleInterpreter implements GInstructionVisitor<Void> {
