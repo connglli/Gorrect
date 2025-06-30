@@ -53,18 +53,21 @@ public class ObjectGraph {
 
     private final Map<GID, GObject> objects; // ID -> Object
     private final Map<GID, GReference> references; // ID -> Reference
-    private final Map<GID, Set<GID>> adjTab; // ID -> {ID}: Adjacent table
+    private final Map<GID, Set<GID>> refTo; // ID -> {ID}: Refer-to table
+    private final Map<GID, Set<GID>> refBy; // ID -> {ID}: Referred-by table
 
     public ObjectGraph() {
         this.objects = new HashMap<>();
         this.references = new HashMap<>();
-        this.adjTab = new HashMap<>();
+        this.refTo = new HashMap<>();
+        this.refBy = new HashMap<>();
     }
 
     public ObjectGraph(@NonNull ObjectGraph other) {
         this.objects = new HashMap<>();
         this.references = new HashMap<>();
-        this.adjTab = new HashMap<>();
+        this.refTo = new HashMap<>();
+        this.refBy = new HashMap<>();
 
         for (GObject obj : other.objects.values()) {
             this.objects.put(obj.getId(), new GObject(obj));
@@ -74,9 +77,14 @@ public class ObjectGraph {
             this.references.put(ref.getId(), new GReference(ref));
         }
 
-        for (GID refererId : other.adjTab.keySet()) {
-            this.adjTab.put(refererId,
-                    other.adjTab.get(refererId).stream().map(GID::new).collect(Collectors.toSet()));
+        for (GID refererId : other.refTo.keySet()) {
+            this.refTo.put(refererId,
+                    other.refTo.get(refererId).stream().map(GID::new).collect(Collectors.toSet()));
+        }
+
+        for (GID referentId : other.refBy.keySet()) {
+            this.refBy.put(referentId,
+                    other.refBy.get(referentId).stream().map(GID::new).collect(Collectors.toSet()));
         }
     }
 
@@ -135,7 +143,7 @@ public class ObjectGraph {
     }
 
     public boolean hasReference(@NonNull GID refererId, @NonNull GID referentId) {
-        return adjTab.containsKey(refererId) && adjTab.get(refererId).contains(referentId);
+        return refTo.containsKey(refererId) && refTo.get(refererId).contains(referentId);
     }
 
     public @NonNull GReference getReference(@NonNull GID refererId, @NonNull GID referentId) {
@@ -153,7 +161,13 @@ public class ObjectGraph {
     public Set<GID> getReferents(@NonNull GID refererId) {
         GAssert.set(hasObject(refererId),
                 String.format("Object with id %s does not exist", refererId));
-        return adjTab.get(refererId);
+        return refTo.get(refererId);
+    }
+
+    public Set<GID> getReferers(@NonNull GID referentId) {
+        GAssert.set(hasObject(referentId),
+                String.format("Object with id %s does not exist", referentId));
+        return refBy.get(referentId);
     }
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
@@ -164,7 +178,8 @@ public class ObjectGraph {
         GAssert.set(!references.containsKey(objId),
                 "The id %s is already used by another reference", objId);
         objects.put(objId, new GObject(objId, type, size));
-        adjTab.put(objId, new HashSet<>());
+        refTo.put(objId, new HashSet<>());
+        refBy.put(objId, new HashSet<>());
         return objId;
     }
 
@@ -184,10 +199,14 @@ public class ObjectGraph {
             references.remove(refId);
         }
 
-        // Update adjacent table
-        adjTab.remove(objId);
-        adjTab.values().forEach(referents -> {
+        // Update adjacent tables
+        refTo.remove(objId);
+        refTo.values().forEach(referents -> {
             referents.remove(objId);
+        });
+        refBy.remove(objId);
+        refBy.values().forEach(referers -> {
+            referers.remove(objId);
         });
 
         objects.remove(objId);
@@ -208,7 +227,8 @@ public class ObjectGraph {
                         refererId, referentId));
 
         references.put(refId, new GReference(refId, refererId, referentId, type));
-        adjTab.get(refererId).add(referentId);
+        refTo.get(refererId).add(referentId);
+        refBy.get(referentId).add(refererId);
 
         return refId;
     }
@@ -219,7 +239,8 @@ public class ObjectGraph {
         GAssert.set(hasReference(refId),
                 String.format("Reference with id %s does not exist", refId));
         GReference ref = references.remove(refId);
-        adjTab.get(ref.getReferer()).remove(ref.getReferent());
+        refTo.get(ref.getReferer()).remove(ref.getReferent());
+        refBy.get(ref.getReferent()).remove(ref.getReferer());
     }
 
     /// Remove a reference from the graph. This operation may cause certain objects unreachable.

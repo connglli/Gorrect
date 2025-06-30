@@ -78,6 +78,18 @@ public class GReference {
         this.type = other.type;
     }
 
+    public boolean isStrong() {
+        return type == Type.STRONG;
+    }
+
+    public boolean isSoft() {
+        return type == Type.SOFT;
+    }
+
+    public boolean isWeak() {
+        return type == Type.WEAK;
+    }
+
     @Override
     public String toString() {
         return "ref(" + id + ": " + referer + "-[" + type.name() + "]->" + referent + ")";

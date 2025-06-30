@@ -52,6 +52,10 @@ public class GObject {
         return bytes;
     }
 
+    public boolean isRoot() {
+        return type == Type.GCROOT;
+    }
+
     @Override
     public String toString() {
         return "obj(" + id + ":" + type.name() + "=" + GMemorySize.toString(bytes) + ")";
