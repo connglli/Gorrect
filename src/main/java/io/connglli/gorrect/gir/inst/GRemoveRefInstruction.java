@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -30,19 +30,20 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GRemoveRefInstruction removes a reference from the graph. This may cause a
- * large portion of objects become unreachable anymore and thus decrease the
- * heap usage.
+ * GRemoveRefInstruction removes a reference from the graph. This may cause a large portion of
+ * objects become unreachable anymore and thus decrease the heap usage.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-ref")
 public class GRemoveRefInstruction extends GInstruction {
-  /** The ID of the reference to be removed from the graph. */
-  @GIRInput(0) @NonNull GID referenceId;
+    /** The ID of the reference to be removed from the graph. */
+    @GIRInput(0)
+    @NonNull
+    GID referenceId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

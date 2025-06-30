@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -29,24 +29,27 @@ import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.Value;
 
-/**
- * GAddRootObjInstruction adds a new object to the graph as one of a root
- * object. This instruction opens a new channel for adding a large number of
- * reachable objects in the future. This instruction aims to increase the heap
- * usage.
+/***
+ * GAddRootObjInstruction adds a new object to the graph as one of a root object. This instruction
+ * opens a new channel for adding a large number of reachable objects in the future. This
+ * instruction aims to increase the heap usage.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-root-obj")
 public class GAddRootObjInstruction extends GInstruction {
-  /** The size in bytes of the new root object to be created. */
-  @GIRInput(0) @NonNull Long objectSize;
+    /** The size in bytes of the new root object to be created. */
+    @GIRInput(0)
+    @NonNull
+    Long objectSize;
 
-  /** The unique ID assigned to the newly created root object. */
-  @GIROutput(0) @NonNull GID objectId;
+    /** The unique ID assigned to the newly created root object. */
+    @GIROutput(0)
+    @NonNull
+    GID objectId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

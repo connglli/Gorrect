@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -23,29 +23,33 @@
  */
 
 package io.connglli.gorrect.gir.inst;
+
 import io.connglli.gorrect.gir.model.GID;
 import lombok.EqualsAndHashCode;
 import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GSwapReferentsInstruction swaps the referents of two references. Even though
- * the reachability of all objects remain unchanged. This drastically changes
- * the reference relation in the graph, including the reference chains of each
- * object, and the reachability strength of each object.
+ * GSwapReferentsInstruction swaps the referents of two references. Even though the reachability of
+ * all objects remain unchanged. This drastically changes the reference relation in the graph,
+ * including the reference chains of each object, and the reachability strength of each object.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("swap-referents")
 public class GSwapReferentsInstruction extends GInstruction {
-  /** The ID of the first reference involved in the swap operation. */
-  @GIRInput(0) @NonNull GID referenceId1;
+    /** The ID of the first reference involved in the swap operation. */
+    @GIRInput(0)
+    @NonNull
+    GID referenceId1;
 
-  /** The ID of the second reference involved in the swap operation. */
-  @GIRInput(1) @NonNull GID referenceId2;
+    /** The ID of the second reference involved in the swap operation. */
+    @GIRInput(1)
+    @NonNull
+    GID referenceId2;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

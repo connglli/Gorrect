@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -30,20 +30,21 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GMakeNonRootInstruction makes a root node non-root. This removes the node
- * from the root set of GC marking and consequently making a lot of objects
- * referenced by it are no longer reachable. This reduced the heap usage perhaps
- * drastically.
+ * GMakeNonRootInstruction makes a root node non-root. This removes the node from the root set of GC
+ * marking and consequently making a lot of objects referenced by it are no longer reachable. This
+ * reduced the heap usage perhaps drastically.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("make-root-obj-non-root")
 public class GMakeNonRootInstruction extends GInstruction {
-  /** The ID of the root object that are about to make non-root. */
-  @GIRInput(0) @NonNull GID objectId;
+    /** The ID of the root object that are about to make non-root. */
+    @GIRInput(0)
+    @NonNull
+    GID objectId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

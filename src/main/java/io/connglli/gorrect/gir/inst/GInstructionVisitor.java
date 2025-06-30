@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,37 +25,51 @@
 package io.connglli.gorrect.gir.inst;
 
 /**
- * GInstructionVisitor provides a visitor pattern interface for processing GIR
- * instructions. This interface allows for type-safe dispatching of operations
- * on different instruction types without requiring modification of the
- * instruction classes themselves.
+ * GInstructionVisitor provides a visitor pattern interface for processing GIR instructions. This
+ * interface allows for type-safe dispatching of operations on different instruction types without
+ * requiring modification of the instruction classes themselves.
  */
 public interface GInstructionVisitor<T> {
 
-  /// The entry point for visiting a program
-  T visit(GProgram program);
+    /// The entry point for visiting a program
+    T visit(GProgram program);
 
-  /// Setup instructions
-  T visit(GSetHeapInstruction instruction);
+    /// Setup instructions
+    T visit(GSetHeapInstruction instruction);
 
-  /// Object management instructions
-  T visit(GAddRootObjInstruction instruction);
-  T visit(GAddNonRootObjInstruction instruction);
-  T visit(GMakeRootInstruction instruction);
-  T visit(GMakeNonRootInstruction instruction);
-  T visit(GCloneObjInstruction instruction);
-  T visit(GRemoveObjInstruction instruction);
+    /// Object management instructions
+    T visit(GAddRootObjInstruction instruction);
 
-  /// Reference management instructions
-  T visit(GAddSoftRefInstruction instruction);
-  T visit(GAddStrongRefInstruction instruction);
-  T visit(GAddWeakRefInstruction instruction);
-  T visit(GAddFaninRefsInstruction instruction);
-  T visit(GAddFanoutRefsInstruction instruction);
-  T visit(GReplaceReferentInstruction instruction);
-  T visit(GSoftenRefInstruction instruction);
-  T visit(GStrengthRefInstruction instruction);
-  T visit(GSwapReferentsInstruction instruction);
-  T visit(GRemoveRefInstruction instruction);
-  T visit(GRemoveAllReferentsInstruction instruction);
+    T visit(GAddNonRootObjInstruction instruction);
+
+    T visit(GMakeRootInstruction instruction);
+
+    T visit(GMakeNonRootInstruction instruction);
+
+    T visit(GCloneObjInstruction instruction);
+
+    T visit(GRemoveObjInstruction instruction);
+
+    /// Reference management instructions
+    T visit(GAddSoftRefInstruction instruction);
+
+    T visit(GAddStrongRefInstruction instruction);
+
+    T visit(GAddWeakRefInstruction instruction);
+
+    T visit(GAddFaninRefsInstruction instruction);
+
+    T visit(GAddFanoutRefsInstruction instruction);
+
+    T visit(GReplaceReferentInstruction instruction);
+
+    T visit(GSoftenRefInstruction instruction);
+
+    T visit(GStrengthRefInstruction instruction);
+
+    T visit(GSwapReferentsInstruction instruction);
+
+    T visit(GRemoveRefInstruction instruction);
+
+    T visit(GRemoveAllReferentsInstruction instruction);
 }

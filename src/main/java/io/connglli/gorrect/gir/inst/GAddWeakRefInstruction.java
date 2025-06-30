@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -30,27 +30,32 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GAddWeakRefInstruction adds a weak reference between two objects. This
- * instruction may cause objects that are rooting from the referent object live
- * longer than before adding this reference. It may also lead to the
- * reachability of new objects starting from the edge and increase heap usages
- * in the future.
+ * GAddWeakRefInstruction adds a weak reference between two objects. This instruction may cause
+ * objects that are rooting from the referent object live longer than before adding this reference.
+ * It may also lead to the reachability of new objects starting from the edge and increase heap
+ * usages in the future.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-weak-ref")
 public class GAddWeakRefInstruction extends GInstruction {
-  /** The ID of the object that will be the source of the weak reference. */
-  @GIRInput(0) @NonNull GID refererId;
+    /** The ID of the object that will be the source of the weak reference. */
+    @GIRInput(0)
+    @NonNull
+    GID refererId;
 
-  /** The ID of the object that will be the target of the weak reference. */
-  @GIRInput(1) @NonNull GID referentId;
+    /** The ID of the object that will be the target of the weak reference. */
+    @GIRInput(1)
+    @NonNull
+    GID referentId;
 
-  /** The unique ID assigned to the newly created weak reference. */
-  @GIROutput(0) @NonNull GID referenceId;
+    /** The unique ID assigned to the newly created weak reference. */
+    @GIROutput(0)
+    @NonNull
+    GID referenceId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

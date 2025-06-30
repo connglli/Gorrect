@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -24,9 +24,10 @@
 
 package io.connglli.gorrect.gir.inst;
 
-import io.connglli.gorrect.utility.GAssert;
 import java.util.ArrayList;
 import java.util.List;
+
+import io.connglli.gorrect.utility.GAssert;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
 
@@ -36,21 +37,25 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public class GProgram extends GInstruction {
-  private final GSetHeapInstruction configuration;
-  private final List<GInstruction> instructions = new ArrayList<>();
+    private final GSetHeapInstruction configuration;
+    private final List<GInstruction> instructions = new ArrayList<>();
 
-  public void addInstruction(GInstruction instruction) {
-    GAssert.set(!(instruction instanceof GSetHeapInstruction),
+    public void addInstruction(GInstruction instruction) {
+        GAssert.set(!(instruction instanceof GSetHeapInstruction),
                 "GSetHeapInstruction is already aded");
-    instructions.add(instruction);
-  }
+        instructions.add(instruction);
+    }
 
-  public int size() { return instructions.size(); }
+    public int size() {
+        return instructions.size();
+    }
 
-  public boolean isEmpty() { return instructions.isEmpty(); }
+    public boolean isEmpty() {
+        return instructions.isEmpty();
+    }
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

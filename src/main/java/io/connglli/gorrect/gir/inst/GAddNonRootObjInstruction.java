@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -31,28 +31,36 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GAddNonRootObjInstruction adds a new object to the graph as one of a non-root
- * object. To make the object reachable, this operation requires a referer
- * object to reference it. This operation also aims to increase the heap usage.
+ * GAddNonRootObjInstruction adds a new object to the graph as one of a non-root object. To make the
+ * object reachable, this operation requires a referer object to reference it. This operation also
+ * aims to increase the heap usage.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-non-root")
 public class GAddNonRootObjInstruction extends GInstruction {
-  /** The size in bytes of the new object to be created. */
-  @GIRInput(0) @NonNull Long objectSize;
+    /** The size in bytes of the new object to be created. */
+    @GIRInput(0)
+    @NonNull
+    Long objectSize;
 
-  /** The ID of the existing object that will reference the new object. */
-  @GIRInput(1) @NonNull GID refererId;
+    /** The ID of the existing object that will reference the new object. */
+    @GIRInput(1)
+    @NonNull
+    GID refererId;
 
-  /** The type of reference to create between the referer and the new object. */
-  @GIRInput(2) @NonNull GReference.Type referenceType;
+    /** The type of reference to create between the referer and the new object. */
+    @GIRInput(2)
+    @NonNull
+    GReference.Type referenceType;
 
-  /** The unique ID assigned to the newly created object. */
-  @GIROutput(0) @NonNull GID objectId;
+    /** The unique ID assigned to the newly created object. */
+    @GIROutput(0)
+    @NonNull
+    GID objectId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

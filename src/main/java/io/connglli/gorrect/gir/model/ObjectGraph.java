@@ -63,9 +63,8 @@ public class ObjectGraph {
         }
 
         for (GID refererId : other.adjTab.keySet()) {
-            this.adjTab.put(refererId, other.adjTab.get(refererId).stream()
-                    .map(GID::new)
-                    .collect(Collectors.toSet()));
+            this.adjTab.put(refererId,
+                    other.adjTab.get(refererId).stream().map(GID::new).collect(Collectors.toSet()));
         }
     }
 
@@ -148,8 +147,10 @@ public class ObjectGraph {
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
     /// added object is reachable from our root objects.
     public GID addObject(@NonNull GID objId, GObject.Type type, long size) {
-        GAssert.set(!objects.containsKey(objId), "The id %s is already used by another object".formatted(objId));
-        GAssert.set(!references.containsKey(objId), "The id %s is already used by another reference".formatted(objId));
+        GAssert.set(!objects.containsKey(objId),
+                "The id %s is already used by another object".formatted(objId));
+        GAssert.set(!references.containsKey(objId),
+                "The id %s is already used by another reference".formatted(objId));
         objects.put(objId, new GObject(objId, type, size));
         adjTab.put(objId, new HashSet<>());
         return objId;
@@ -182,7 +183,8 @@ public class ObjectGraph {
 
     /// Add a reference into the graph. Note that it is the user's responsibility to ensure that the
     /// referrer and the referent all exist in the graph.
-    public GID addReference(@NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId, GReference.Type type) {
+    public GID addReference(@NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId,
+            GReference.Type type) {
         GAssert.set(objects.containsKey(refererId), String.format(
                 "The object with id %d for adding as the referer of a new reference does not exist",
                 refererId));
@@ -263,7 +265,8 @@ public class ObjectGraph {
 
     public void removeSoftlyReachableObjects() {
         Set<GID> stronglyRechableObjects = getStronglyReachableObjects();
-        Set<GID> otherObjects = objects.keySet().stream().filter(id -> !stronglyRechableObjects.contains(id)).collect(Collectors.toSet());
+        Set<GID> otherObjects = objects.keySet().stream()
+                .filter(id -> !stronglyRechableObjects.contains(id)).collect(Collectors.toSet());
         otherObjects.forEach(id -> {
             if (hasObject(id)) {
                 this.removeObject(id);

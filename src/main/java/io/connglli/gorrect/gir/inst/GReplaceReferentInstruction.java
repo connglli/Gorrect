@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -30,24 +30,27 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GReplaceReferentInstruction replaces the referent of a reference by a new
- * referent. This changes the reference relation in the graph, causing some
- * object no longer reachable and reduce heap usage. On the other hand, it
- * increases the chance that objects rooting from the new referent will possibly
- * live longer than before replacing the referent.
+ * GReplaceReferentInstruction replaces the referent of a reference by a new referent. This changes
+ * the reference relation in the graph, causing some object no longer reachable and reduce heap
+ * usage. On the other hand, it increases the chance that objects rooting from the new referent will
+ * possibly live longer than before replacing the referent.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("replace-referent")
 public class GReplaceReferentInstruction extends GInstruction {
-  /** The ID of the reference whose referent will be replaced. */
-  @GIRInput(0) @NonNull GID referenceId;
+    /** The ID of the reference whose referent will be replaced. */
+    @GIRInput(0)
+    @NonNull
+    GID referenceId;
 
-  /** The ID of the object that will become the new referent. */
-  @GIRInput(1) @NonNull GID newReferentId;
+    /** The ID of the object that will become the new referent. */
+    @GIRInput(1)
+    @NonNull
+    GID newReferentId;
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
-    return visitor.visit(this);
-  }
+    @Override
+    public <T> T accept(GInstructionVisitor<T> visitor) {
+        return visitor.visit(this);
+    }
 }

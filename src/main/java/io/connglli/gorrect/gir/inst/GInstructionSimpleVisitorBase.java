@@ -10,8 +10,8 @@
  * copies of the Software, and to permit persons to whom the Software is
  * furnished to do so, subject to the following conditions:
  *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
  *
  * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
  * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -25,105 +25,107 @@
 package io.connglli.gorrect.gir.inst;
 
 /**
- * GInstructionSimpleVisitorBase provides default implementations for all
- * visitor methods. This class can be extended to implement specific visitor
- * behavior by overriding only the methods of interest.
+ * GInstructionSimpleVisitorBase provides default implementations for all visitor methods. This
+ * class can be extended to implement specific visitor behavior by overriding only the methods of
+ * interest.
  */
-public abstract class GInstructionSimpleVisitorBase<T>
-    implements GInstructionVisitor<T> {
+public abstract class GInstructionSimpleVisitorBase<T> implements GInstructionVisitor<T> {
 
-  /** Default implementation that can be overridden by subclasses. */
-  protected abstract T defaultVisit(GInstruction instruction);
+    /** Default implementation that can be overridden by subclasses. */
+    protected abstract T defaultVisit(GInstruction instruction);
 
-  @Override
-  public T visit(GProgram program) {
-    return defaultVisit(program);
-  }
+    @Override
+    public T visit(GProgram program) {
+        return defaultVisit(program);
+    }
 
-  @Override
-  public T visit(GSetHeapInstruction instruction) {
-    return defaultVisit(instruction);
-  }
-  @Override
-  public T visit(GAddRootObjInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GSetHeapInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GAddNonRootObjInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddRootObjInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GMakeRootInstruction instruction) {
-    return defaultVisit(instruction);
-  }
-  @Override
-  public T visit(GMakeNonRootInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddNonRootObjInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GRemoveObjInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GMakeRootInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GCloneObjInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GMakeNonRootInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GAddStrongRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
-  @Override
-  public T visit(GAddSoftRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GRemoveObjInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GAddWeakRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GCloneObjInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GAddFaninRefsInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddStrongRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GAddFanoutRefsInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddSoftRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GReplaceReferentInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddWeakRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GSoftenRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddFaninRefsInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GStrengthRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GAddFanoutRefsInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GSwapReferentsInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GReplaceReferentInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GRemoveRefInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GSoftenRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 
-  @Override
-  public T visit(GRemoveAllReferentsInstruction instruction) {
-    return defaultVisit(instruction);
-  }
+    @Override
+    public T visit(GStrengthRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
+
+    @Override
+    public T visit(GSwapReferentsInstruction instruction) {
+        return defaultVisit(instruction);
+    }
+
+    @Override
+    public T visit(GRemoveRefInstruction instruction) {
+        return defaultVisit(instruction);
+    }
+
+    @Override
+    public T visit(GRemoveAllReferentsInstruction instruction) {
+        return defaultVisit(instruction);
+    }
 }
