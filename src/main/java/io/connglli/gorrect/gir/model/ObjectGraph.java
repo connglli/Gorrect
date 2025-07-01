@@ -25,9 +25,11 @@
 package io.connglli.gorrect.gir.model;
 
 import java.util.*;
-import java.util.function.Consumer;
 import java.util.stream.Collectors;
 
+import io.connglli.gorrect.gir.model.visitor.ObjectBreadthFirstVisitor;
+import io.connglli.gorrect.gir.model.visitor.ObjectVisitor;
+import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
 import io.connglli.gorrect.utility.GAssert;
 import lombok.NonNull;
 
@@ -40,17 +42,6 @@ import lombok.NonNull;
  * Currently, we assume there's only one thread and all root objects live on that thread.
  */
 public class ObjectGraph {
-    public static abstract class ObjectVisitor implements Consumer<GObject> {
-    }
-    public static abstract class ReferenceVisitor implements Consumer<GObject> {
-    }
-
-    public enum TraverseOrder {
-        DFS, // Depth-First Order
-        BFS, // Breadth-First Order
-        RPO, // Reverse Postorder
-    }
-
     private final Map<GID, GObject> objects; // ID -> Object
     private final Map<GID, GReference> references; // ID -> Reference
     private final Map<GID, Set<GID>> refTo; // ID -> {ID}: Refer-to table
@@ -161,13 +152,13 @@ public class ObjectGraph {
     public Set<GID> getReferents(@NonNull GID refererId) {
         GAssert.set(hasObject(refererId),
                 String.format("Object with id %s does not exist", refererId));
-        return refTo.get(refererId);
+        return new HashSet<>(refTo.get(refererId));
     }
 
     public Set<GID> getReferers(@NonNull GID referentId) {
         GAssert.set(hasObject(referentId),
                 String.format("Object with id %s does not exist", referentId));
-        return refBy.get(referentId);
+        return new HashSet<>(refBy.get(referentId));
     }
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
@@ -250,13 +241,13 @@ public class ObjectGraph {
     }
 
     /// Visit all objects in the object graph in a specific order
-    public void accept(ObjectVisitor visitor, TraverseOrder order) {
-        GAssert.panic("Not yet implemented");
+    public void accept(ObjectVisitor visitor) {
+        visitor.visit(this);
     }
 
     /// Visit all references in the object graph in a specific order
-    public void accept(ReferenceVisitor visitor, TraverseOrder order) {
-        GAssert.panic("Not yet implemented");
+    public void accept(ReferenceVisitor visitor) {
+        visitor.visit(this);
     }
 
     /*
@@ -318,98 +309,66 @@ public class ObjectGraph {
         removeUnreachableObjects();
     }
 
-    public Set<GID> getStronglyReachableObjects(@NonNull GID rootId) {
-        return getReachableObjects(rootId, EnumSet.of(GReference.Type.STRONG));
-    }
-
     public Set<GID> getStronglyReachableObjects() {
-        Set<GID> result = new HashSet<>();
-        for (GObject rootObj : getRoots()) {
-            result.addAll(getStronglyReachableObjects(rootObj.getId()));
-        }
-        return result;
-    }
-
-    public Set<GID> getSoftlyReachableObjects(@NonNull GID rootId) {
-        Set<GID> result = getReachableObjects(rootId,
-                EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT));
-        result.removeAll(getStronglyReachableObjects());
-        return result;
+        return markReachability().entrySet().stream()
+                .filter(entry -> entry.getValue() == GReference.Type.STRONG).map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     public Set<GID> getSoftlyReachableObjects() {
-        Set<GID> result = new HashSet<>();
-        for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.getId(),
-                    EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT)));
-        }
-        result.removeAll(getStronglyReachableObjects());
-        return result;
-    }
-
-    public Set<GID> getWeaklyReachableObjects(@NonNull GID rootId) {
-        Set<GID> result = getReachableObjects(rootId,
-                EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK));
-        result.removeAll(getSoftlyReachableObjects());
-        result.removeAll(getStronglyReachableObjects());
-        return result;
+        return markReachability().entrySet().stream()
+                .filter(entry -> entry.getValue() == GReference.Type.SOFT).map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     public Set<GID> getWeaklyReachableObjects() {
-        Set<GID> result = new HashSet<>();
-        for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.getId(), EnumSet.of(GReference.Type.STRONG,
-                    GReference.Type.SOFT, GReference.Type.WEAK)));
-        }
-        result.removeAll(getStronglyReachableObjects());
-        result.removeAll(getSoftlyReachableObjects());
-        return result;
+        return markReachability().entrySet().stream()
+                .filter(entry -> entry.getValue() == GReference.Type.WEAK).map(Map.Entry::getKey)
+                .collect(Collectors.toSet());
     }
 
     public Set<GID> getReachableObjects() {
-        Set<GID> result = new HashSet<>();
-        EnumSet<GReference.Type> types =
-                EnumSet.of(GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK);
-        GAssert.set(types.size() == GReference.Type.values().length,
-                "Not all reachable types are considered");
-        for (GObject rootObj : getRoots()) {
-            result.addAll(getReachableObjects(rootObj.getId(), types));
-        }
-        return result;
+        return markReachability().keySet();
     }
 
-    private Set<GID> getReachableObjects(@NonNull GID rootId, Set<GReference.Type> allowedTypes) {
-
-        // TODO: Optimize reachability algorithm implementations by running reachability only once.
-        // This can be accomplished by giving each object an reachability mark and populating the
-        // mark while we were visiting the graph. For example, when ONE of the parent of an object
-        // is strongly reachable, this object must be strongly/softly/weakly reachable if the
-        // reference type between the parent and the object is strong/soft/weak.
-
-        GAssert.set(objects.containsKey(rootId),
-                String.format("Object with id %s does not exist", rootId));
-        GAssert.set(objects.get(rootId).getType() == GObject.Type.GCROOT,
-                String.format("Object with id %s is not a root object", rootId));
-
-        Set<GID> visited = new HashSet<>();
-        Queue<GID> queue = new LinkedList<>();
-
-        queue.offer(rootId);
-        visited.add(rootId);
-
-        while (!queue.isEmpty()) {
-            GID current = queue.poll();
-
-            for (GReference ref : references.values()) {
-                if (ref.getReferer() == current && allowedTypes.contains(ref.getType())) {
-                    if (!visited.contains(ref.getReferent())) {
-                        visited.add(ref.getReferent());
-                        queue.offer(ref.getReferent());
+    private Map<GID, GReference.Type> markReachability() {
+        Map<GID, GReference.Type> result = new HashMap<>();
+        accept(new ObjectBreadthFirstVisitor() {
+            @Override
+            public void visit(@NonNull ObjectGraph graph, @NonNull GObject referent) {
+                GID referentId = referent.getId();
+                if (referent.getType() == GObject.Type.GCROOT) {
+                    result.put(referentId, GReference.Type.STRONG);
+                    return;
+                }
+                GReference.Type referStrongestType = null;
+                for (GID refererId : graph.getReferers(referentId)) {
+                    GReference.Type referType = result.getOrDefault(refererId, null);
+                    if (referType == null) {
+                        continue; // Back-edges doesn't matter as the referer relies on us
+                    }
+                    GReference.Type referenceType =
+                            graph.getReference(refererId, referentId).getType();
+                    GReference.Type currentReachabilityType = null;
+                    if (referType == GReference.Type.STRONG) {
+                        currentReachabilityType = referenceType;
+                    } else if (referType == GReference.Type.SOFT) {
+                        currentReachabilityType =
+                                referenceType == GReference.Type.WEAK ? GReference.Type.WEAK
+                                        : GReference.Type.SOFT;
+                    } else if (referType == GReference.Type.WEAK) {
+                        currentReachabilityType = GReference.Type.WEAK;
+                    } else {
+                        GAssert.panic("Unknown reference type: %s", referType);
+                    }
+                    if (referStrongestType == null
+                            || currentReachabilityType.strongerThan(referStrongestType)) {
+                        referStrongestType = currentReachabilityType;
                     }
                 }
+                result.put(referentId, referStrongestType);
             }
-        }
-
-        return visited;
+        });
+        return result;
     }
 }

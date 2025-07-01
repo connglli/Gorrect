@@ -59,6 +59,11 @@ public class GAddNonRootObjInstruction extends GInstruction {
     @NonNull
     GID objectId;
 
+    /** The unique ID assigned to the newly created reference. */
+    @GIROutput(1)
+    @NonNull
+    GID referenceId;
+
     @Override
     public <T> T accept(GInstructionVisitor<T> visitor) {
         return visitor.visit(this);
