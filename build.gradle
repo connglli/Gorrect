@@ -34,7 +34,6 @@ repositories {
   mavenCentral()
 }
 
-
 compileJava {
   sourceCompatibility = JavaVersion.VERSION_21
   targetCompatibility = JavaVersion.VERSION_21
@@ -55,29 +54,29 @@ tasks.register('archive', Zip) {
 
   exclude '**/.idea'
 
-  from("$project.rootDir") {
+  from(layout.projectDirectory) {
     include 'LICENSE'
     include 'README.md'
   }
 
-  from("$buildDir/libs") {
+  from(layout.buildDirectory.dir('libs')) {
     include shadowJar.archiveFileName.get()
     rename shadowJar.archiveFileName.get(), "gorrect.jar"
   }
 }
 
-dependencies {
-  implementation fileTree(dir: 'lib', includes: ['*.jar'])
-
-  compileOnly("org.projectlombok:lombok:1.18.38")
-  annotationProcessor("org.projectlombok:lombok:1.18.38")
-
-  testImplementation platform('org.junit:junit-bom:5.10.0')
-  testImplementation 'org.junit.jupiter:junit-jupiter'
-  testCompileOnly("org.projectlombok:lombok:1.18.38")
-  testAnnotationProcessor("org.projectlombok:lombok:1.18.38")
-}
-
 test {
   useJUnitPlatform()
+}
+
+dependencies {
+  implementation fileTree(dir: 'lib', includes: ['*.jar'])
+  implementation "com.palantir.javapoet:javapoet:0.7.0"
+  compileOnly "org.projectlombok:lombok:1.18.38"
+  annotationProcessor "org.projectlombok:lombok:1.18.38"
+
+  testImplementation 'org.junit.jupiter:junit-jupiter:5.9.2'
+  testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+  testCompileOnly "org.projectlombok:lombok:1.18.38"
+  testAnnotationProcessor "org.projectlombok:lombok:1.18.38"
 }
