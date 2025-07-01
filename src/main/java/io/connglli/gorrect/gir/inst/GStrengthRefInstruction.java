@@ -30,8 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GStrengthRefInstruction strengthens the type of a reference one layer up. This will drastically
- * change the reachability strength of each object in the graph.
+ * GStrengthRefInstruction strengthens the type of a reference by one level.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

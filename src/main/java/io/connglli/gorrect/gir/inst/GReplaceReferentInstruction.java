@@ -30,10 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GReplaceReferentInstruction replaces the referent of a reference by a new referent. This changes
- * the reference relation in the graph, causing some object no longer reachable and reduce heap
- * usage. On the other hand, it increases the chance that objects rooting from the new referent will
- * possibly live longer than before replacing the referent.
+ * GReplaceReferentInstruction replaces the referent of a reference by a new referent.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

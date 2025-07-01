@@ -32,8 +32,7 @@ import lombok.Value;
 
 /**
  * GAddNonRootObjInstruction adds a new object to the graph as one of a non-root object. To make the
- * object reachable, this operation requires a referer object to reference it. This operation also
- * aims to increase the heap usage.
+ * object reachable, this operation requires a referer object to reference it.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

@@ -30,9 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GSwapReferentsInstruction swaps the referents of two references. Even though the reachability of
- * all objects remain unchanged. This drastically changes the reference relation in the graph,
- * including the reference chains of each object, and the reachability strength of each object.
+ * GSwapReferentsInstruction swaps the referents of two references.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

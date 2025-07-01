@@ -30,9 +30,8 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GRemoveAllReferentsInstruction removes all referents of a specified object This instruction is
- * used to clear all references to an object, effectively removing its connections to other objects
- * in the graph.
+ * GRemoveAllReferentsInstruction removes all referents of a specified object. For each referent
+ * being removed, all the references relating to it are also removed.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

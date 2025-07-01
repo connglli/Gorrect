@@ -30,10 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GAddWeakRefInstruction adds a weak reference between two objects. This instruction may cause
- * objects that are rooting from the referent object live longer than before adding this reference.
- * It may also lead to the reachability of new objects starting from the edge and increase heap
- * usages in the future.
+ * GAddWeakRefInstruction adds a weak reference between two objects.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

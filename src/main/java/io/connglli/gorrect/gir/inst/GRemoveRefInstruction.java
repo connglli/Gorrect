@@ -30,8 +30,8 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GRemoveRefInstruction removes a reference from the graph. This may cause a large portion of
- * objects become unreachable anymore and thus decrease the heap usage.
+ * GRemoveRefInstruction removes a reference from the graph. This may cause other objects to become
+ * unreachable any more. However, the instruction itself only removes the reference, nothing else.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

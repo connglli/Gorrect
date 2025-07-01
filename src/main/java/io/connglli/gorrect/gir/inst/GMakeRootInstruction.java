@@ -30,9 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GMakeRootInstruction makes a non-root object one of a root object. This adds the object into the
- * root set of GC marking, opening a new channel for adding reachable objects. This instruction also
- * cause objects that are rooting from this object live longer than before.
+ * GMakeRootInstruction makes a non-root object one of a root object.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

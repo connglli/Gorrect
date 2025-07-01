@@ -30,9 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /***
- * GAddRootObjInstruction adds a new object to the graph as one of a root object. This instruction
- * opens a new channel for adding a large number of reachable objects in the future. This
- * instruction aims to increase the heap usage.
+ * GAddRootObjInstruction adds a new object to the graph as one of a root object.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

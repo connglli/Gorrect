@@ -33,9 +33,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GAddFanoutRefsInstruction adds a lot of references to a single referer. The purpose of this
- * instruction is to efficiently add multiple references at the same time to change the reference
- * relation of the object graph.
+ * GAddFanoutRefsInstruction enables a referer to reference a list of different referents.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

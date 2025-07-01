@@ -29,7 +29,8 @@ import lombok.EqualsAndHashCode;
 import lombok.Value;
 
 /**
- * CloneObjInstruction clones an object in the graph, including all its referents.
+ * CloneObjInstruction clones an object in the graph. This includes create a new object and connect
+ * it to all the referents of the cloned object.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

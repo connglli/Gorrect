@@ -30,9 +30,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GMakeNonRootInstruction makes a root node non-root. This removes the node from the root set of GC
- * marking and consequently making a lot of objects referenced by it are no longer reachable. This
- * reduced the heap usage perhaps drastically.
+ * GMakeNonRootInstruction makes a root object non-root.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

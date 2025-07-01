@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ * Copyright (c) 2025-2025 Cong Li (cong.li@inf.ethz.ch)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -33,9 +33,7 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GAddFaninRefsInstruction adds a lot of references to a single referer. The purpose of this
- * instruction is to efficiently add multiple references at the same time to change the reference
- * relation of the object graph.
+ * GAddFaninRefsInstruction enables a list of referers to reference a single referent.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)
