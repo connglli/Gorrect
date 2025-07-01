@@ -241,27 +241,36 @@ class OracleInterpreterTest {
 
         ObjectGraph intermediateState = interpreter.getState();
         assertFalse(intermediateState.hasObject(o1), "Expected o1 to be unreachable");
-        assertFalse(intermediateState.hasObject(o2c), "Expected o2c to be unreachable");
         assertTrue(intermediateState.hasReference(r1, r2),
                 "Expected strong reference from r1 to r2");
         assertTrue(intermediateState.hasReference(r1, o2),
                 "Expected strong reference from r1 to o2");
+        assertTrue(intermediateState.hasReference(r1, o2c),
+                "Expected strong reference from r1 to o2c");
         assertTrue(intermediateState.hasReference(r2, r1),
                 "Expected strong reference from r2 to r1");
         assertTrue(intermediateState.hasReference(r2, o2),
                 "Expected strong reference from r2 to o2");
+        assertTrue(intermediateState.hasReference(r2, o2c),
+                "Expected strong reference from r2 to o2c");
         assertTrue(intermediateState.hasReference(o2, r2),
                 "Expected strong reference from o2 to r2");
+        assertTrue(intermediateState.hasReference(o2c, r2),
+                "Expected strong reference from o2c to r2");
 
         Set<GID> stronglyReachable = intermediateState.getStronglyReachableObjects();
-        assertEquals(3, stronglyReachable.size(),
+        assertEquals(4, stronglyReachable.size(),
                 "All objects remained should  be strongly reachable");
         assertTrue(stronglyReachable.contains(r1), "r1 should be strongly reachable");
         assertTrue(stronglyReachable.contains(r2), "r2 should be strongly reachable");
         assertTrue(stronglyReachable.contains(o2), "o2 should be strongly reachable");
+        assertTrue(stronglyReachable.contains(o2c), "o2c should be strongly reachable");
 
         GProgram newProgram =
                 new GProgram(new GSetHeapInstruction(40L * 1024 * 1024 * 1024, intermediateState));
+
+        // Remove object
+        newProgram.addInstruction(new GRemoveObjInstruction(o2c));
 
         // Remove reference
         newProgram.addInstruction(new GRemoveRefInstruction(new GID("ref-r2_o2")));

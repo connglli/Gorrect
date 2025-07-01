@@ -110,6 +110,11 @@ public class OracleHeap {
         return new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
     }
 
+    /* package */ OracleReference getReference(@NonNull OracleObject referer,
+            @NonNull OracleObject referent) {
+        return new OracleReference(this, graph.getReference(referer.getId(), referent.getId()));
+    }
+
     /* package */ Set<OracleReference> getReferences(@NonNull OracleObject object) {
         return graph.getReferents(object.getId()).stream()
                 .map(to -> new OracleReference(this, graph.getReference(object.getId(), to)))
@@ -137,6 +142,36 @@ public class OracleHeap {
         return graph.getReferents(referer.getId()).stream().filter(
                 to -> graph.getReference(referer.getId(), to).getType() == GReference.Type.WEAK)
                 .map(to -> new OracleObject(this, graph.getObject(to))).collect(Collectors.toSet());
+    }
+
+    /* package */ Set<OracleObject> getReferers(@NonNull OracleObject referent) {
+        return graph.getReferers(referent.getId()).stream()
+                .map(from -> new OracleObject(this, graph.getObject(from)))
+                .collect(Collectors.toSet());
+    }
+
+    /* package */ Set<OracleObject> getStrongReferers(@NonNull OracleObject referent) {
+        return graph.getReferers(referent.getId()).stream()
+                .filter(from -> graph.getReference(from, referent.getId())
+                        .getType() == GReference.Type.STRONG)
+                .map(from -> new OracleObject(this, graph.getObject(from)))
+                .collect(Collectors.toSet());
+    }
+
+    /* package */ Set<OracleObject> getSoftReferers(@NonNull OracleObject referent) {
+        return graph.getReferers(referent.getId()).stream()
+                .filter(from -> graph.getReference(from, referent.getId())
+                        .getType() == GReference.Type.SOFT)
+                .map(from -> new OracleObject(this, graph.getObject(from)))
+                .collect(Collectors.toSet());
+    }
+
+    /* package */ Set<OracleObject> getWeakReferers(@NonNull OracleObject referent) {
+        return graph.getReferers(referent.getId()).stream()
+                .filter(from -> graph.getReference(from, referent.getId())
+                        .getType() == GReference.Type.WEAK)
+                .map(from -> new OracleObject(this, graph.getObject(from)))
+                .collect(Collectors.toSet());
     }
 
     /* package */ void strongReference(@NonNull GID referenceId, @NonNull OracleObject referer,

@@ -91,6 +91,22 @@ public class OracleObject {
         return heap.getWeakReferents(this);
     }
 
+    public Set<OracleObject> getReferers() {
+        return heap.getReferers(this);
+    }
+
+    public Set<OracleObject> getStrongReferers() {
+        return heap.getStrongReferers(this);
+    }
+
+    public Set<OracleObject> getSoftReferers() {
+        return heap.getSoftReferers(this);
+    }
+
+    public Set<OracleObject> getWeakReferers() {
+        return heap.getWeakReferers(this);
+    }
+
     public void strongReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
         heap.strongReference(referenceId, this, referent);
     }
