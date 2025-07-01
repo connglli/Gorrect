@@ -54,19 +54,21 @@ public class OracleObject {
     }
 
     public void toRoot() {
-        GAssert.set(object.getType() == GObject.Type.ORDINARY,
-                "Object with id %s is not a non-root object", getId());
+        GAssert.set(!object.isRoot(), "Object with id %s is not a non-root object", getId());
         object.setType(GObject.Type.GCROOT);
     }
 
     public void toNonRoot() {
-        GAssert.set(object.getType() == GObject.Type.GCROOT,
-                "Object with id %s is not a root object", getId());
+        GAssert.set(object.isRoot(), "Object with id %s is not a root object", getId());
         object.setType(GObject.Type.ORDINARY);
     }
 
     public long getSize() {
-        return heap.estimateObjectSize(this);
+        return object.getSize();
+    }
+
+    public long getEstimatedHeapSize() {
+        return heap.estimateObjectHeapSize(this);
     }
 
     public Set<OracleReference> getReferences() {

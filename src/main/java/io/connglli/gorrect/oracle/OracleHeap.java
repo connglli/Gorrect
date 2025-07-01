@@ -48,11 +48,12 @@ public class OracleHeap {
     public OracleHeap(LangVM langVM, @NonNull ObjectGraph initState) {
         lvm = langVM;
         graph = new ObjectGraph(initState);
+        // Notify the language VM about the initial state of the heap
         for (GObject object : graph.getObjects()) {
-            allocateObject(object.getId(), object.getSize(), object.getType());
+            lvm.onOracleAllocate(object.getId(), object.getSize(), object.getType());
         }
         for (GReference reference : graph.getReferences()) {
-            reference(reference.getId(),
+            lvm.onOracleReference(reference.getId(),
                     new OracleObject(this, graph.getObject(reference.getReferer())),
                     new OracleObject(this, graph.getObject(reference.getReferent())),
                     reference.getType());
@@ -103,12 +104,10 @@ public class OracleHeap {
         graph.removeSoftlyReachableObjects();
     }
 
-    /* package */ @NonNull
-    OracleObject allocateObject(@NonNull GID objectId, long size, GObject.Type type) {
+    @NonNull
+    /* package */ OracleObject allocateObject(@NonNull GID objectId, long size, GObject.Type type) {
         lvm.onOracleAllocate(objectId, size, type);
-        OracleObject obj =
-                new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
-        return obj;
+        return new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
     }
 
     /* package */ Set<OracleReference> getReferences(@NonNull OracleObject object) {
@@ -166,11 +165,11 @@ public class OracleHeap {
         graph.removeReference(referer.getId(), referent.getId());
     }
 
-    /* package */ long estimateNewObjectSize(long requestedSize, GObject.Type type) {
-        return lvm.estimateNewObjectSize(requestedSize);
+    /* package */ long estimateNewObjectHeapSize(long requestedSize, GObject.Type type) {
+        return lvm.estimateNewObjectHeapSize(requestedSize);
     }
 
-    /* package */ long estimateObjectSize(OracleObject object) {
-        return lvm.estimateObjectSize(object);
+    /* package */ long estimateObjectHeapSize(OracleObject object) {
+        return lvm.estimateObjectHeapSize(object);
     }
 }

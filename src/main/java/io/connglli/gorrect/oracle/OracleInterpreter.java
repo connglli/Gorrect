@@ -29,6 +29,7 @@ import java.util.List;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.GAssert;
 import lombok.NonNull;
 
@@ -38,7 +39,7 @@ import lombok.NonNull;
  * {@link OracleHeap} and uses it to manage the heap memory. Indeed, methods provided by the
  * {@link OracleHeap} are similar to those in GIR, but they are more memory-aware and more
  * convenient. The interpreter is used to execute a GIR program and simulate the change of the
- * {@link ObjectGraph}.
+ * {@link io.connglli.gorrect.gir.model.ObjectGraph}.
  */
 public class OracleInterpreter implements GInstructionVisitor<Void> {
 
@@ -63,6 +64,11 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     public void interpret() {
         program.accept(this);
+        heap.clean();
+    }
+
+    public ObjectGraph getState() {
+        return heap.getGraph();
     }
 
     @Override
@@ -87,7 +93,11 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     @Override
     public Void visit(GAddNonRootObjInstruction instruction) {
-        heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
+        OracleObject referentObject =
+                heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
+        OracleObject refererObject = heap.getObject(instruction.getRefererId());
+        refererObject.reference(instruction.getReferenceId(), referentObject,
+                instruction.getReferenceType());
         return null;
     }
 

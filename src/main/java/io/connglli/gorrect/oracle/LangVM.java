@@ -64,9 +64,9 @@ public abstract class LangVM {
     // - Heap Helper Methods
     // -================================================
 
-    public abstract long estimateNewObjectSize(long requestedSize);
+    public abstract long estimateNewObjectHeapSize(long requestedSize);
 
-    public abstract long estimateObjectSize(OracleObject object);
+    public abstract long estimateObjectHeapSize(OracleObject object);
 
     public abstract void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type);
 

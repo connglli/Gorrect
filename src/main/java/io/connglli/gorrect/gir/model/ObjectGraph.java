@@ -80,8 +80,7 @@ public class ObjectGraph {
     }
 
     public List<GObject> getRoots() {
-        return objects.values().stream().filter(o -> o.getType() == GObject.Type.GCROOT)
-                .collect(Collectors.toList());
+        return objects.values().stream().filter(o -> o.isRoot()).collect(Collectors.toList());
     }
 
     public List<GObject> getObjects() {
@@ -98,12 +97,12 @@ public class ObjectGraph {
     }
 
     public boolean hasRoot(@NonNull GID objId) {
-        return hasObject(objId) && getObject(objId).getType() == GObject.Type.GCROOT;
+        return hasObject(objId) && getObject(objId).isRoot();
     }
 
     public @NonNull GObject getRoot(@NonNull GID rootId) {
         GObject obj = getObject(rootId);
-        GAssert.set(obj.getType() == GObject.Type.GCROOT,
+        GAssert.set(obj.isRoot(),
                 String.format("Object (with id %s) is not a root object", rootId));
         return obj;
     }
@@ -141,7 +140,7 @@ public class ObjectGraph {
         GAssert.set(hasReference(refererId, referentId), String.format(
                 "Reference from object %s to object %s does not exist", refererId, referentId));
         for (GReference ref : references.values()) {
-            if (ref.getReferer() == refererId && ref.getReferent() == referentId) {
+            if (ref.getReferer().equals(refererId) && ref.getReferent().equals(referentId)) {
                 return ref;
             }
         }
@@ -182,7 +181,7 @@ public class ObjectGraph {
         // Remove all references connected to this object
         List<GID> refsToRemove = new ArrayList<>();
         for (GReference ref : references.values()) {
-            if (ref.getReferer() == objId || ref.getReferent() == objId) {
+            if (ref.getReferer().equals(objId) || ref.getReferent().equals(objId)) {
                 refsToRemove.add(ref.getId());
             }
         }
@@ -337,7 +336,7 @@ public class ObjectGraph {
             @Override
             public void visit(@NonNull ObjectGraph graph, @NonNull GObject referent) {
                 GID referentId = referent.getId();
-                if (referent.getType() == GObject.Type.GCROOT) {
+                if (referent.isRoot()) {
                     result.put(referentId, GReference.Type.STRONG);
                     return;
                 }
