@@ -37,18 +37,18 @@ import lombok.experimental.FieldDefaults;
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-root-obj")
 public class GAddRootObjInstruction extends GInstruction {
-    /** The size in bytes of the new root object to be created. */
-    @GIRInput(0)
-    @NonNull
-    Long objectSize;
+  /** The size in bytes of the new root object to be created. */
+  @GIRInput(0)
+  @NonNull
+  Long objectSize;
 
-    /** The unique ID assigned to the newly created root object. */
-    @GIROutput(0)
-    @NonNull
-    GID objectId;
+  /** The unique ID assigned to the newly created root object. */
+  @GIROutput(0)
+  @NonNull
+  GID objectId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

@@ -24,44 +24,41 @@
 
 package io.connglli.gorrect.gir.inst;
 
-import java.util.List;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GAddFaninRefsInstruction enables a list of referers to reference a single referent.
- */
+/** GAddFaninRefsInstruction enables a list of referers to reference a single referent. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-fanin-refs")
 public class GAddFaninRefsInstruction extends GInstruction {
-    /** The source objects of the new references */
-    @GIRInput(0)
-    @NonNull
-    List<GID> refererIds;
+  /** The source objects of the new references */
+  @GIRInput(0)
+  @NonNull
+  List<GID> refererIds;
 
-    /** The target object being referenced */
-    @GIRInput(1)
-    @NonNull
-    GID referentId;
+  /** The target object being referenced */
+  @GIRInput(1)
+  @NonNull
+  GID referentId;
 
-    /** The target objects being referenced by which strength */
-    @GIRInput(2)
-    @NonNull
-    List<GReference.Type> referenceTypes;
+  /** The target objects being referenced by which strength */
+  @GIRInput(2)
+  @NonNull
+  List<GReference.Type> referenceTypes;
 
-    /** The newly created references */
-    @GIROutput(0)
-    @NonNull
-    List<GID> referenceIds;
+  /** The newly created references */
+  @GIROutput(0)
+  @NonNull
+  List<GID> referenceIds;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

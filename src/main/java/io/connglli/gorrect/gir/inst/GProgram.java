@@ -24,51 +24,47 @@
 
 package io.connglli.gorrect.gir.inst;
 
+import io.connglli.gorrect.utility.GAssert;
 import java.util.ArrayList;
 import java.util.List;
-
-import io.connglli.gorrect.utility.GAssert;
 import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
-/**
- * Represents a complete GIR program containing instructions and metadata.
- */
+/** Represents a complete GIR program containing instructions and metadata. */
 @Getter
 @RequiredArgsConstructor
 public class GProgram extends GInstruction {
-    @NonNull
-    private final GSetHeapInstruction configuration;
+  @NonNull private final GSetHeapInstruction configuration;
 
-    private final List<GInstruction> instructions = new ArrayList<>();
+  private final List<GInstruction> instructions = new ArrayList<>();
 
-    public void addInstruction(GInstruction instruction) {
-        GAssert.set(!(instruction instanceof GSetHeapInstruction),
-                "GSetHeapInstruction is already added");
-        instructions.add(instruction);
+  public void addInstruction(GInstruction instruction) {
+    GAssert.set(
+        !(instruction instanceof GSetHeapInstruction), "GSetHeapInstruction is already added");
+    instructions.add(instruction);
+  }
+
+  public int size() {
+    return instructions.size();
+  }
+
+  public boolean isEmpty() {
+    return instructions.isEmpty();
+  }
+
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
+
+  @Override
+  public String toString() {
+    StringBuilder sb = new StringBuilder();
+    sb.append(configuration).append("\n");
+    for (GInstruction instruction : instructions) {
+      sb.append(instruction).append("\n");
     }
-
-    public int size() {
-        return instructions.size();
-    }
-
-    public boolean isEmpty() {
-        return instructions.isEmpty();
-    }
-
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
-
-    @Override
-    public String toString() {
-        StringBuilder sb = new StringBuilder();
-        sb.append(configuration).append("\n");
-        for (GInstruction instruction : instructions) {
-            sb.append(instruction).append("\n");
-        }
-        return sb.toString();
-    }
+    return sb.toString();
+  }
 }

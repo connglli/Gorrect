@@ -38,13 +38,13 @@ import lombok.experimental.FieldDefaults;
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-ref")
 public class GRemoveRefInstruction extends GInstruction {
-    /** The ID of the reference to be removed from the graph. */
-    @GIRInput(0)
-    @NonNull
-    GID referenceId;
+  /** The ID of the reference to be removed from the graph. */
+  @GIRInput(0)
+  @NonNull
+  GID referenceId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

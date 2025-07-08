@@ -24,70 +24,63 @@
 
 package io.connglli.gorrect.gir.model;
 
+import io.connglli.gorrect.utility.GAssert;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
-import io.connglli.gorrect.utility.GAssert;
-
-/**
- * Represents a memory size with different units (bytes, KB, MB, GB).
- */
+/** Represents a memory size with different units (bytes, KB, MB, GB). */
 public class GMemorySize {
-    // @formatter:off
-    private static final Map<String, Long> MULTIPLIERS = new LinkedHashMap<>();
-    static {
-      MULTIPLIERS.put("B", 1L);
-      MULTIPLIERS.put("KB", 1024L);
-      MULTIPLIERS.put("MB", 1024L * 1024L);
-      MULTIPLIERS.put("GB", 1024L * 1024L * 1024L);
-      MULTIPLIERS.put("TB", 1024L * 1024L * 1024L * 1024L);
-      MULTIPLIERS.put("PB", 1024L * 1024L * 1024L * 1024L * 1024L);
-      MULTIPLIERS.put("EB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
-      // MULTIPLIERS.put("ZB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
-      // MULTIPLIERS.put("YB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
-    }
-    // @formatter:on
+  private static final Map<String, Long> MULTIPLIERS = new LinkedHashMap<>();
 
-    /**
-     * Parse a size string like "30m", "25k", "1g", "512" (bytes)
-     */
-    public static long parse(String sizeStr) {
-        if (sizeStr == null || sizeStr.trim().isEmpty()) {
-            GAssert.panic("Empty size string");
-        }
+  static {
+    MULTIPLIERS.put("B", 1L);
+    MULTIPLIERS.put("KB", 1024L);
+    MULTIPLIERS.put("MB", 1024L * 1024L);
+    MULTIPLIERS.put("GB", 1024L * 1024L * 1024L);
+    MULTIPLIERS.put("TB", 1024L * 1024L * 1024L * 1024L);
+    MULTIPLIERS.put("PB", 1024L * 1024L * 1024L * 1024L * 1024L);
+    MULTIPLIERS.put("EB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
+    // MULTIPLIERS.put("ZB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
+    // MULTIPLIERS.put("YB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
+  }
 
-        String trimmed = sizeStr.trim().toLowerCase();
-        String number = trimmed.replaceAll("[^\\d]", "");
-        String unit = trimmed.replaceAll("[\\d]", "").toUpperCase();
-
-        if (number.isEmpty()) {
-            GAssert.panic("Invalid size format: " + sizeStr);
-        }
-        if (!MULTIPLIERS.containsKey(unit)) {
-            GAssert.panic("Unsupported unit: " + unit);
-        }
-
-        return Long.parseLong(number) * MULTIPLIERS.get(unit);
+  /** Parse a size string like "30m", "25k", "1g", "512" (bytes) */
+  public static long parse(String sizeStr) {
+    if (sizeStr == null || sizeStr.trim().isEmpty()) {
+      GAssert.panic("Empty size string");
     }
 
-    public static String toString(long bytes) {
-        return toString(bytes, 2);
+    String trimmed = sizeStr.trim().toLowerCase();
+    String number = trimmed.replaceAll("[^\\d]", "");
+    String unit = trimmed.replaceAll("[\\d]", "").toUpperCase();
+
+    if (number.isEmpty()) {
+      GAssert.panic("Invalid size format: " + sizeStr);
+    }
+    if (!MULTIPLIERS.containsKey(unit)) {
+      GAssert.panic("Unsupported unit: " + unit);
     }
 
-    public static String toString(long bytes, int decimals) {
-        if (bytes == 0)
-            return "0B";
+    return Long.parseLong(number) * MULTIPLIERS.get(unit);
+  }
 
-        String[] units = MULTIPLIERS.keySet().toArray(new String[0]);
-        int k = 1024, i = 0;
-        double size = bytes;
+  public static String toString(long bytes) {
+    return toString(bytes, 2);
+  }
 
-        while (size >= k && i < units.length - 1) {
-            size /= k;
-            i++;
-        }
+  public static String toString(long bytes, int decimals) {
+    if (bytes == 0) return "0B";
 
-        // noinspection MalformedFormatString
-        return String.format("%." + decimals + "f%s", size, units[i]);
+    String[] units = MULTIPLIERS.keySet().toArray(new String[0]);
+    int k = 1024, i = 0;
+    double size = bytes;
+
+    while (size >= k && i < units.length - 1) {
+      size /= k;
+      i++;
     }
+
+    // noinspection MalformedFormatString
+    return String.format("%." + decimals + "f%s", size, units[i]);
+  }
 }

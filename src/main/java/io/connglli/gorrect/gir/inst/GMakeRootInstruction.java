@@ -28,22 +28,20 @@ import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GMakeRootInstruction makes a non-root object one of a root object.
- */
+/** GMakeRootInstruction makes a non-root object one of a root object. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("make-root")
 public class GMakeRootInstruction extends GInstruction {
-    /** The ID of the non-root object that are about to make root. */
-    @GIRInput(0)
-    @NonNull
-    GID objectId;
+  /** The ID of the non-root object that are about to make root. */
+  @GIRInput(0)
+  @NonNull
+  GID objectId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

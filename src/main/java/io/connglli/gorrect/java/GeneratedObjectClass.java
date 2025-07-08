@@ -24,16 +24,13 @@
 
 package io.connglli.gorrect.java;
 
-import javax.lang.model.element.Modifier;
-
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.MethodSpec;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.utility.Formats;
+import javax.lang.model.element.Modifier;
 import lombok.Getter;
 import lombok.NonNull;
-
 
 /**
  * GeneratedObjectClass is the class that is specifically designed for a specific object. That said,
@@ -43,27 +40,28 @@ import lombok.NonNull;
  */
 final class GeneratedObjectClass extends GeneratedClass {
 
-    @NonNull
-    @Getter
-    private final GID id;
+  @NonNull @Getter private final GID id;
 
-    @Getter
-    private final long size;
+  @Getter private final long size;
 
-    @NonNull
-    final ClassName clazzName;
+  @NonNull final ClassName clazzName;
 
-    GeneratedObjectClass(@NonNull GeneratedHeap heap, GID objectId, long objectSize) {
-        super(heap, clazzNameFor(objectId).canonicalName(), GeneratedObjectBaseClass.clazzName,
-                Modifier.FINAL);
-        addMethod(MethodSpec.constructorBuilder()
-                .addStatement("super($S, $L)", objectId, objectSize).build());
-        this.id = objectId;
-        this.size = objectSize;
-        this.clazzName = clazzNameFor(objectId);
-    }
+  GeneratedObjectClass(@NonNull GeneratedHeap heap, GID objectId, long objectSize) {
+    super(
+        heap,
+        clazzNameFor(objectId).canonicalName(),
+        GeneratedObjectBaseClass.clazzName,
+        Modifier.FINAL);
+    addMethod(
+        MethodSpec.constructorBuilder()
+            .addStatement("super($S, $L)", objectId, objectSize)
+            .build());
+    this.id = objectId;
+    this.size = objectSize;
+    this.clazzName = clazzNameFor(objectId);
+  }
 
-    private static ClassName clazzNameFor(@NonNull GID objectId) {
-        return ClassName.get("", "GGeneratedObject" + Formats.toCamelCase(objectId.get(), true));
-    }
+  private static ClassName clazzNameFor(@NonNull GID objectId) {
+    return ClassName.get("", "GGeneratedObject" + Formats.toCamelCase(objectId.get(), true));
+  }
 }

@@ -31,57 +31,57 @@ package io.connglli.gorrect.gir.inst;
  */
 public interface GInstructionVisitor<T> {
 
-    // -=======================================================
-    // The entry point for visiting a program
-    // -=======================================================
+  // -=======================================================
+  // The entry point for visiting a program
+  // -=======================================================
 
-    T visit(GProgram program);
+  T visit(GProgram program);
 
-    // -=======================================================
-    // Setup instructions
-    // -=======================================================
+  // -=======================================================
+  // Setup instructions
+  // -=======================================================
 
-    T visit(GSetHeapInstruction instruction);
+  T visit(GSetHeapInstruction instruction);
 
-    // -=======================================================
-    // Object management instructions
-    // -=======================================================
+  // -=======================================================
+  // Object management instructions
+  // -=======================================================
 
-    T visit(GAddRootObjInstruction instruction);
+  T visit(GAddRootObjInstruction instruction);
 
-    T visit(GAddNonRootObjInstruction instruction);
+  T visit(GAddNonRootObjInstruction instruction);
 
-    T visit(GMakeRootInstruction instruction);
+  T visit(GMakeRootInstruction instruction);
 
-    T visit(GMakeNonRootInstruction instruction);
+  T visit(GMakeNonRootInstruction instruction);
 
-    T visit(GCloneObjInstruction instruction);
+  T visit(GCloneObjInstruction instruction);
 
-    T visit(GRemoveObjInstruction instruction);
+  T visit(GRemoveObjInstruction instruction);
 
-    // -=======================================================
-    // Reference management instructions
-    // -=======================================================
+  // -=======================================================
+  // Reference management instructions
+  // -=======================================================
 
-    T visit(GAddStrongRefInstruction instruction);
+  T visit(GAddStrongRefInstruction instruction);
 
-    T visit(GAddSoftRefInstruction instruction);
+  T visit(GAddSoftRefInstruction instruction);
 
-    T visit(GAddWeakRefInstruction instruction);
+  T visit(GAddWeakRefInstruction instruction);
 
-    T visit(GAddFaninRefsInstruction instruction);
+  T visit(GAddFaninRefsInstruction instruction);
 
-    T visit(GAddFanoutRefsInstruction instruction);
+  T visit(GAddFanoutRefsInstruction instruction);
 
-    T visit(GReplaceReferentInstruction instruction);
+  T visit(GReplaceReferentInstruction instruction);
 
-    T visit(GSwapReferentsInstruction instruction);
+  T visit(GSwapReferentsInstruction instruction);
 
-    T visit(GSoftenRefInstruction instruction);
+  T visit(GSoftenRefInstruction instruction);
 
-    T visit(GStrengthRefInstruction instruction);
+  T visit(GStrengthRefInstruction instruction);
 
-    T visit(GRemoveRefInstruction instruction);
+  T visit(GRemoveRefInstruction instruction);
 
-    T visit(GRemoveAllReferentsInstruction instruction);
+  T visit(GRemoveAllReferentsInstruction instruction);
 }

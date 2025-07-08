@@ -24,9 +24,8 @@
 
 package io.connglli.gorrect.gir.model;
 
-import java.util.regex.Pattern;
-
 import io.connglli.gorrect.utility.GAssert;
+import java.util.regex.Pattern;
 import lombok.NonNull;
 
 /**
@@ -34,43 +33,42 @@ import lombok.NonNull;
  * comparable.
  */
 public class GID implements Comparable<GID> {
-    private static final Pattern GID_PATTERN = Pattern.compile("[a-zA-Z][a-zA-Z0-9_\\-]+");
+  private static final Pattern GID_PATTERN = Pattern.compile("[a-zA-Z][a-zA-Z0-9_\\-]+");
 
-    @NonNull
-    private final String id;
+  @NonNull private final String id;
 
-    public GID(@NonNull String id) {
-        GAssert.set(!id.isEmpty(), "GID cannot be empty");
-        GAssert.set(GID_PATTERN.matcher(id).matches(),
-                "GID must match the pattern: " + GID_PATTERN.pattern());
-        this.id = id;
-    }
+  public GID(@NonNull String id) {
+    GAssert.set(!id.isEmpty(), "GID cannot be empty");
+    GAssert.set(
+        GID_PATTERN.matcher(id).matches(), "GID must match the pattern: " + GID_PATTERN.pattern());
+    this.id = id;
+  }
 
-    public GID(@NonNull GID other) {
-        this.id = other.id;
-    }
+  public GID(@NonNull GID other) {
+    this.id = other.id;
+  }
 
-    public String get() {
-        return id;
-    }
+  public String get() {
+    return id;
+  }
 
-    @Override
-    public int compareTo(@NonNull GID other) {
-        return id.compareTo(other.id);
-    }
+  @Override
+  public int compareTo(@NonNull GID other) {
+    return id.compareTo(other.id);
+  }
 
-    @Override
-    public boolean equals(Object obj) {
-        return (obj instanceof GID) && id.equals(((GID) obj).id);
-    }
+  @Override
+  public boolean equals(Object obj) {
+    return (obj instanceof GID) && id.equals(((GID) obj).id);
+  }
 
-    @Override
-    public int hashCode() {
-        return id.hashCode();
-    }
+  @Override
+  public int hashCode() {
+    return id.hashCode();
+  }
 
-    @Override
-    public String toString() {
-        return id;
-    }
+  @Override
+  public String toString() {
+    return id;
+  }
 }

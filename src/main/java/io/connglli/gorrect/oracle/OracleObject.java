@@ -24,113 +24,110 @@
 
 package io.connglli.gorrect.oracle;
 
-import java.util.Set;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.Set;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor
 public class OracleObject {
 
-    @NonNull
-    private final OracleHeap heap;
+  @NonNull private final OracleHeap heap;
 
-    @NonNull
-    private final GObject object;
+  @NonNull private final GObject object;
 
-    public GID getId() {
-        return object.getId();
-    }
+  public GID getId() {
+    return object.getId();
+  }
 
-    public GObject.Type getType() {
-        return object.getType();
-    }
+  public GObject.Type getType() {
+    return object.getType();
+  }
 
-    public boolean isRoot() {
-        return object.isRoot();
-    }
+  public boolean isRoot() {
+    return object.isRoot();
+  }
 
-    public void toRoot() {
-        heap.makeRoot(this);
-    }
+  public void toRoot() {
+    heap.makeRoot(this);
+  }
 
-    public void toNonRoot() {
-        heap.makeNonRoot(this);
-    }
+  public void toNonRoot() {
+    heap.makeNonRoot(this);
+  }
 
-    /* package */ void setType(@NonNull GObject.Type type) {
-        object.setType(type);
-    }
+  /* package */ void setType(@NonNull GObject.Type type) {
+    object.setType(type);
+  }
 
-    public long getSize() {
-        return object.getSize();
-    }
+  public long getSize() {
+    return object.getSize();
+  }
 
-    public long getEstimatedHeapSize() {
-        return heap.estimateObjectHeapSize(this);
-    }
+  public long getEstimatedHeapSize() {
+    return heap.estimateObjectHeapSize(this);
+  }
 
-    public Set<OracleReference> getReferences() {
-        return heap.getReferences(this);
-    }
+  public Set<OracleReference> getReferences() {
+    return heap.getReferences(this);
+  }
 
-    public Set<OracleObject> getReferents() {
-        return heap.getReferents(this);
-    }
+  public Set<OracleObject> getReferents() {
+    return heap.getReferents(this);
+  }
 
-    public Set<OracleObject> getStrongReferents() {
-        return heap.getStrongReferents(this);
-    }
+  public Set<OracleObject> getStrongReferents() {
+    return heap.getStrongReferents(this);
+  }
 
-    public Set<OracleObject> getSoftReferents() {
-        return heap.getSoftReferents(this);
-    }
+  public Set<OracleObject> getSoftReferents() {
+    return heap.getSoftReferents(this);
+  }
 
-    public Set<OracleObject> getWeakReferents() {
-        return heap.getWeakReferents(this);
-    }
+  public Set<OracleObject> getWeakReferents() {
+    return heap.getWeakReferents(this);
+  }
 
-    public Set<OracleObject> getReferers() {
-        return heap.getReferers(this);
-    }
+  public Set<OracleObject> getReferers() {
+    return heap.getReferers(this);
+  }
 
-    public Set<OracleObject> getStrongReferers() {
-        return heap.getStrongReferers(this);
-    }
+  public Set<OracleObject> getStrongReferers() {
+    return heap.getStrongReferers(this);
+  }
 
-    public Set<OracleObject> getSoftReferers() {
-        return heap.getSoftReferers(this);
-    }
+  public Set<OracleObject> getSoftReferers() {
+    return heap.getSoftReferers(this);
+  }
 
-    public Set<OracleObject> getWeakReferers() {
-        return heap.getWeakReferers(this);
-    }
+  public Set<OracleObject> getWeakReferers() {
+    return heap.getWeakReferers(this);
+  }
 
-    public void strongReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-        heap.strongReference(referenceId, this, referent);
-    }
+  public void strongReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
+    heap.strongReference(referenceId, this, referent);
+  }
 
-    public void softReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-        heap.softReference(referenceId, this, referent);
-    }
+  public void softReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
+    heap.softReference(referenceId, this, referent);
+  }
 
-    public void weakReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-        heap.weakReference(referenceId, this, referent);
-    }
+  public void weakReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
+    heap.weakReference(referenceId, this, referent);
+  }
 
-    /* package */ void reference(@NonNull GID referenceId, @NonNull OracleObject referent,
-            @NonNull GReference.Type type) {
-        heap.reference(referenceId, this, referent, type);
-    }
+  /* package */ void reference(
+      @NonNull GID referenceId, @NonNull OracleObject referent, @NonNull GReference.Type type) {
+    heap.reference(referenceId, this, referent, type);
+  }
 
-    public void unlink(@NonNull OracleObject referent) {
-        heap.unlink(this, referent);
-    }
+  public void unlink(@NonNull OracleObject referent) {
+    heap.unlink(this, referent);
+  }
 
-    public void free() {
-        heap.freeObject(this);
-    }
+  public void free() {
+    heap.freeObject(this);
+  }
 }

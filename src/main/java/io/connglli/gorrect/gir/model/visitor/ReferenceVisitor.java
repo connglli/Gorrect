@@ -33,7 +33,7 @@ import lombok.NonNull;
  * references or the entire graph.
  */
 public interface ReferenceVisitor {
-    void visit(@NonNull ObjectGraph graph, @NonNull GReference ref);
+  void visit(@NonNull ObjectGraph graph, @NonNull GReference ref);
 
-    void visit(@NonNull ObjectGraph graph);
+  void visit(@NonNull ObjectGraph graph);
 }

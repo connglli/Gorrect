@@ -32,41 +32,39 @@ import lombok.RequiredArgsConstructor;
 @RequiredArgsConstructor
 public class OracleReference {
 
-    @NonNull
-    private final OracleHeap heap;
+  @NonNull private final OracleHeap heap;
 
-    @NonNull
-    private final GReference reference;
+  @NonNull private final GReference reference;
 
-    public GID getId() {
-        return reference.getId();
-    }
+  public GID getId() {
+    return reference.getId();
+  }
 
-    public GReference.Type getType() {
-        return reference.getType();
-    }
+  public GReference.Type getType() {
+    return reference.getType();
+  }
 
-    public OracleObject getReferer() {
-        return heap.getObject(reference.getReferer());
-    }
+  public OracleObject getReferer() {
+    return heap.getObject(reference.getReferer());
+  }
 
-    public OracleObject getReferent() {
-        return heap.getObject(reference.getReferent());
-    }
+  public OracleObject getReferent() {
+    return heap.getObject(reference.getReferent());
+  }
 
-    public void strengthen() {
-        reference.setType(reference.getType().strengthen());
-    }
+  public void strengthen() {
+    reference.setType(reference.getType().strengthen());
+  }
 
-    public void soften() {
-        reference.setType(reference.getType().soften());
-    }
+  public void soften() {
+    reference.setType(reference.getType().soften());
+  }
 
-    public void unlink() {
-        heap.unlink(getReferer(), getReferent());
-    }
+  public void unlink() {
+    heap.unlink(getReferer(), getReferent());
+  }
 
-    public void redirect(@NonNull OracleObject newReferent) {
-        heap.redirect(this, newReferent);
-    }
+  public void redirect(@NonNull OracleObject newReferent) {
+    heap.redirect(this, newReferent);
+  }
 }

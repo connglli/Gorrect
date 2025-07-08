@@ -33,7 +33,7 @@ import lombok.NonNull;
  * objects or the entire graph.
  */
 public interface ObjectVisitor {
-    void visit(@NonNull ObjectGraph graph, @NonNull GObject obj);
+  void visit(@NonNull ObjectGraph graph, @NonNull GObject obj);
 
-    void visit(@NonNull ObjectGraph graph);
+  void visit(@NonNull ObjectGraph graph);
 }

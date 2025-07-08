@@ -24,42 +24,42 @@
 
 package io.connglli.gorrect.java;
 
-import javax.lang.model.element.Modifier;
-
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeSpec;
-
 import io.connglli.gorrect.gir.model.GID;
+import javax.lang.model.element.Modifier;
 import lombok.NonNull;
 
 /**
  * GeneratedMainClass is the main class that contains the main method for the generation Java code.
  */
 final class GeneratedMainClass extends GeneratedClass {
-    static final ClassName clazzName = ClassName.get("", "GGeneratedMain");
+  static final ClassName clazzName = ClassName.get("", "GGeneratedMain");
 
-    // The main method of the main class. It is used to initialize the heap state and execute the
-    // heap manipulation sequence and finally waits for heap dumping.
-    private static final MethodSpec.Builder mainMethodSpec =
-            MethodSpec.methodBuilder("main").addModifiers(Modifier.PUBLIC, Modifier.STATIC)
-                    .returns(void.class).addParameter(String[].class, "args");
+  // The main method of the main class. It is used to initialize the heap state and execute the
+  // heap manipulation sequence and finally waits for heap dumping.
+  private static final MethodSpec.Builder mainMethodSpec =
+      MethodSpec.methodBuilder("main")
+          .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+          .returns(void.class)
+          .addParameter(String[].class, "args");
 
-    GeneratedMainClass(GeneratedHeap heap) {
-        super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
-    }
+  GeneratedMainClass(GeneratedHeap heap) {
+    super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
+  }
 
-    void addStatement(@NonNull String stmtFormat, Object... stmtArgs) {
-        mainMethodSpec.addStatement(stmtFormat, stmtArgs);
-    }
+  void addStatement(@NonNull String stmtFormat, Object... stmtArgs) {
+    mainMethodSpec.addStatement(stmtFormat, stmtArgs);
+  }
 
-    @Override
-    TypeSpec build() {
-        addMethod(mainMethodSpec.build());
-        return super.build();
-    }
+  @Override
+  TypeSpec build() {
+    addMethod(mainMethodSpec.build());
+    return super.build();
+  }
 
-    static String computeFieldName(@NonNull GID gid) {
-        return "root_ref_to_" + gid;
-    }
+  static String computeFieldName(@NonNull GID gid) {
+    return "root_ref_to_" + gid;
+  }
 }

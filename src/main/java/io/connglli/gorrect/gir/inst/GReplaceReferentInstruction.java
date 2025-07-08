@@ -28,27 +28,25 @@ import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GReplaceReferentInstruction replaces the referent of a reference by a new referent.
- */
+/** GReplaceReferentInstruction replaces the referent of a reference by a new referent. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("replace-referent")
 public class GReplaceReferentInstruction extends GInstruction {
-    /** The ID of the reference whose referent will be replaced. */
-    @GIRInput(0)
-    @NonNull
-    GID referenceId;
+  /** The ID of the reference whose referent will be replaced. */
+  @GIRInput(0)
+  @NonNull
+  GID referenceId;
 
-    /** The ID of the object that will become the new referent. */
-    @GIRInput(1)
-    @NonNull
-    GID newReferentId;
+  /** The ID of the object that will become the new referent. */
+  @GIRInput(1)
+  @NonNull
+  GID newReferentId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

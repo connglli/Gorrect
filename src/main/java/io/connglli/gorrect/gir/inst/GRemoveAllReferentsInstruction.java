@@ -39,12 +39,12 @@ import lombok.experimental.FieldDefaults;
 @GIROpCode("remove-all-referents")
 public class GRemoveAllReferentsInstruction extends GInstruction {
 
-    @GIRInput(0)
-    @NonNull
-    GID refererId;
+  @GIRInput(0)
+  @NonNull
+  GID refererId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

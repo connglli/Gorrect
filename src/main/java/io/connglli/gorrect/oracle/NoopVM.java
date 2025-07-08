@@ -35,39 +35,42 @@ import lombok.NonNull;
  */
 public class NoopVM extends LangVM {
 
-    public NoopVM() {
-        super(Long.MAX_VALUE);
-    }
+  public NoopVM() {
+    super(Long.MAX_VALUE);
+  }
 
-    @Override
-    public long estimateNewObjectHeapSize(long requestedSize) {
-        return requestedSize;
-    }
+  @Override
+  public long estimateNewObjectHeapSize(long requestedSize) {
+    return requestedSize;
+  }
 
-    @Override
-    public long estimateObjectHeapSize(OracleObject object) {
-        return object.getSize();
-    }
+  @Override
+  public long estimateObjectHeapSize(OracleObject object) {
+    return object.getSize();
+  }
 
-    @Override
-    public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {}
+  @Override
+  public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {}
 
-    @Override
-    public void onOracleFree(@NonNull OracleObject object) {}
+  @Override
+  public void onOracleFree(@NonNull OracleObject object) {}
 
-    @Override
-    public void onOracleReference(@NonNull GID referenceId, @NonNull OracleObject referer,
-            @NonNull OracleObject referent, GReference.Type type) {}
+  @Override
+  public void onOracleReference(
+      @NonNull GID referenceId,
+      @NonNull OracleObject referer,
+      @NonNull OracleObject referent,
+      GReference.Type type) {}
 
-    @Override
-    public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
+  @Override
+  public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
 
-    @Override
-    public void onOracleClean() {}
+  @Override
+  public void onOracleClean() {}
 
-    @Override
-    public void onOracleCompact() {}
+  @Override
+  public void onOracleCompact() {}
 
-    @Override
-    public void onOracleStressCompact() {}
+  @Override
+  public void onOracleStressCompact() {}
 }

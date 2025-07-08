@@ -26,13 +26,13 @@ package io.connglli.gorrect.utility;
 
 public class GAssert {
 
-    public static void set(boolean cond, String message, Object... args) {
-        if (!cond) {
-            throw new AssertionError(message.formatted(args));
-        }
+  public static void set(boolean cond, String message, Object... args) {
+    if (!cond) {
+      throw new AssertionError(message.formatted(args));
     }
+  }
 
-    public static void panic(String message, Object... args) {
-        throw new AssertionError(message.formatted(args));
-    }
+  public static void panic(String message, Object... args) {
+    throw new AssertionError(message.formatted(args));
+  }
 }

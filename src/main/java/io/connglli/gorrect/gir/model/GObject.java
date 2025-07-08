@@ -29,41 +29,39 @@ import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
 
-/**
- * GObject represents an object
- */
+/** GObject represents an object */
 @Data
 @AllArgsConstructor
 public class GObject {
-    public enum Type {
-        GCROOT, ORDINARY;
-    }
+  public enum Type {
+    GCROOT,
+    ORDINARY;
+  }
 
-    private final GID id; // Unique identifier for the object
-    private Type type; // The type of the object
-    private long bytes; // The size of the object in bytes
+  private final GID id; // Unique identifier for the object
+  private Type type; // The type of the object
+  private long bytes; // The size of the object in bytes
 
-    public GObject(@NonNull GObject other) {
-        this.id = other.id;
-        this.type = other.type;
-        this.bytes = other.bytes;
-    }
+  public GObject(@NonNull GObject other) {
+    this.id = other.id;
+    this.type = other.type;
+    this.bytes = other.bytes;
+  }
 
-    public long getSize() {
-        return bytes;
-    }
+  public long getSize() {
+    return bytes;
+  }
 
-    public boolean isRoot() {
-        return type == Type.GCROOT;
-    }
+  public boolean isRoot() {
+    return type == Type.GCROOT;
+  }
 
-    public void accept(ObjectGraph graph, @NonNull ObjectVisitor visitor) {
-        visitor.visit(graph, this);
-    }
+  public void accept(ObjectGraph graph, @NonNull ObjectVisitor visitor) {
+    visitor.visit(graph, this);
+  }
 
-    @Override
-    public String toString() {
-        return "obj(" + id + ":" + type.name() + "=" + GMemorySize.toString(bytes) + ")";
-    }
-
+  @Override
+  public String toString() {
+    return "obj(" + id + ":" + type.name() + "=" + GMemorySize.toString(bytes) + ")";
+  }
 }

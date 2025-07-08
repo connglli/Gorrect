@@ -39,33 +39,33 @@ import lombok.experimental.FieldDefaults;
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-non-root")
 public class GAddNonRootObjInstruction extends GInstruction {
-    /** The size in bytes of the new object to be created. */
-    @GIRInput(0)
-    @NonNull
-    Long objectSize;
+  /** The size in bytes of the new object to be created. */
+  @GIRInput(0)
+  @NonNull
+  Long objectSize;
 
-    /** The ID of the existing object that will reference the new object. */
-    @GIRInput(1)
-    @NonNull
-    GID refererId;
+  /** The ID of the existing object that will reference the new object. */
+  @GIRInput(1)
+  @NonNull
+  GID refererId;
 
-    /** The type of reference to create between the referer and the new object. */
-    @GIRInput(2)
-    @NonNull
-    GReference.Type referenceType;
+  /** The type of reference to create between the referer and the new object. */
+  @GIRInput(2)
+  @NonNull
+  GReference.Type referenceType;
 
-    /** The unique ID assigned to the newly created object. */
-    @GIROutput(0)
-    @NonNull
-    GID objectId;
+  /** The unique ID assigned to the newly created object. */
+  @GIROutput(0)
+  @NonNull
+  GID objectId;
 
-    /** The unique ID assigned to the newly created reference. */
-    @GIROutput(1)
-    @NonNull
-    GID referenceId;
+  /** The unique ID assigned to the newly created reference. */
+  @GIROutput(1)
+  @NonNull
+  GID referenceId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

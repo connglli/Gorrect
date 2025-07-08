@@ -33,5 +33,5 @@ import lombok.Setter;
 @Getter
 @Setter
 public class ValueHolder<V> {
-    private @NonNull V v;
+  private @NonNull V v;
 }

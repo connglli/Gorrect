@@ -29,25 +29,31 @@ import java.util.stream.Collectors;
 
 public final class Formats {
 
-    public static String toSnakeCase(String name) {
-        return name.chars()
-                .mapToObj(c -> Character.isUpperCase(c) ? "_" + ((char) Character.toLowerCase(c))
-                        : "" + ((char) c))
-                .collect(Collectors.joining()).toLowerCase();
-    }
+  public static String toSnakeCase(String name) {
+    return name.chars()
+        .mapToObj(
+            c ->
+                Character.isUpperCase(c)
+                    ? "_" + ((char) Character.toLowerCase(c))
+                    : "" + ((char) c))
+        .collect(Collectors.joining())
+        .toLowerCase();
+  }
 
-    public static String toCamelCase(String name, boolean capitalize) {
-        String[] parts = name.split("_");
-        String camelCase = Arrays.stream(parts)
-                .map(part -> part.substring(0, 1).toUpperCase() + part.substring(1).toLowerCase())
-                .collect(Collectors.joining());
-        return capitalize ? camelCase
-                : Character.toLowerCase(camelCase.charAt(0)) + camelCase.substring(1);
-    }
+  public static String toCamelCase(String name, boolean capitalize) {
+    String[] parts = name.split("_");
+    String camelCase =
+        Arrays.stream(parts)
+            .map(part -> part.substring(0, 1).toUpperCase() + part.substring(1).toLowerCase())
+            .collect(Collectors.joining());
+    return capitalize
+        ? camelCase
+        : Character.toLowerCase(camelCase.charAt(0)) + camelCase.substring(1);
+  }
 
-    public static String toCamelCase(String name) {
-        return toCamelCase(name, false);
-    }
+  public static String toCamelCase(String name) {
+    return toCamelCase(name, false);
+  }
 
-    private Formats() {}
+  private Formats() {}
 }

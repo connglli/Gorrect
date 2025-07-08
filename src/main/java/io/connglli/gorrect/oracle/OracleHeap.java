@@ -24,14 +24,13 @@
 
 package io.connglli.gorrect.oracle;
 
-import java.util.Set;
-import java.util.stream.Collectors;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.GAssert;
+import java.util.Set;
+import java.util.stream.Collectors;
 import lombok.Getter;
 import lombok.NonNull;
 
@@ -42,217 +41,238 @@ import lombok.NonNull;
  */
 public class OracleHeap {
 
-    // The language virtual machine that we're simulating
-    @Getter(lombok.AccessLevel.PACKAGE)
-    private final LangVM lvm;
+  // The language virtual machine that we're simulating
+  @Getter(lombok.AccessLevel.PACKAGE)
+  private final LangVM lvm;
 
-    // The underlying object graph that we're manipulating
-    @Getter(lombok.AccessLevel.PACKAGE)
-    @NonNull
-    private final ObjectGraph graph;
+  // The underlying object graph that we're manipulating
+  @Getter(lombok.AccessLevel.PACKAGE)
+  @NonNull
+  private final ObjectGraph graph;
 
-    public OracleHeap(LangVM langVM) {
-        lvm = langVM;
-        graph = new ObjectGraph();
+  public OracleHeap(LangVM langVM) {
+    lvm = langVM;
+    graph = new ObjectGraph();
+  }
+
+  public @NonNull OracleObject getObject(@NonNull GID objectId) {
+    return new OracleObject(this, graph.getObject(objectId));
+  }
+
+  public @NonNull OracleObject getRootObject(@NonNull GID objectId) {
+    return new OracleObject(this, graph.getRoot(objectId));
+  }
+
+  public @NonNull OracleObject getNonRootObject(@NonNull GID objectId) {
+    return new OracleObject(this, graph.getNonRoot(objectId));
+  }
+
+  // -========================================================================
+  // Initialization and Setup
+  // -========================================================================
+
+  public void initialize(@NonNull ObjectGraph initState) {
+    graph.reset(initState);
+    // Notify the language VM about the initial state of the heap
+    for (GObject object : graph.getObjects()) {
+      lvm.onOracleAllocate(object.getId(), object.getSize(), object.getType());
     }
-
-    public @NonNull OracleObject getObject(@NonNull GID objectId) {
-        return new OracleObject(this, graph.getObject(objectId));
+    for (GReference reference : graph.getReferences()) {
+      lvm.onOracleReference(
+          reference.getId(),
+          new OracleObject(this, graph.getObject(reference.getReferer())),
+          new OracleObject(this, graph.getObject(reference.getReferent())),
+          reference.getType());
     }
+  }
 
-    public @NonNull OracleObject getRootObject(@NonNull GID objectId) {
-        return new OracleObject(this, graph.getRoot(objectId));
-    }
+  // -========================================================================
+  // Object Allocation and Free
+  // -========================================================================
 
-    public @NonNull OracleObject getNonRootObject(@NonNull GID objectId) {
-        return new OracleObject(this, graph.getNonRoot(objectId));
-    }
+  @SuppressWarnings("UnusedReturnValue")
+  public @NonNull OracleObject allocRootObject(@NonNull GID objectId, long size) {
+    return allocateObject(objectId, size, GObject.Type.GCROOT);
+  }
 
-    // -========================================================================
-    // Initialization and Setup
-    // -========================================================================
+  public @NonNull OracleObject allocNonRootObject(@NonNull GID objectId, long size) {
+    return allocateObject(objectId, size, GObject.Type.ORDINARY);
+  }
 
-    public void initialize(@NonNull ObjectGraph initState) {
-        graph.reset(initState);
-        // Notify the language VM about the initial state of the heap
-        for (GObject object : graph.getObjects()) {
-            lvm.onOracleAllocate(object.getId(), object.getSize(), object.getType());
-        }
-        for (GReference reference : graph.getReferences()) {
-            lvm.onOracleReference(reference.getId(),
-                    new OracleObject(this, graph.getObject(reference.getReferer())),
-                    new OracleObject(this, graph.getObject(reference.getReferent())),
-                    reference.getType());
-        }
-    }
+  public void clean() {
+    lvm.onOracleClean();
+    graph.removeUnreachableObjects();
+  }
 
-    // -========================================================================
-    // Object Allocation and Free
-    // -========================================================================
+  public void compact() {
+    lvm.onOracleCompact();
+    graph.removeWeaklyReachableObjects();
+  }
 
-    @SuppressWarnings("UnusedReturnValue")
-    public @NonNull OracleObject allocRootObject(@NonNull GID objectId, long size) {
-        return allocateObject(objectId, size, GObject.Type.GCROOT);
-    }
+  public void stressCompact() {
+    lvm.onOracleStressCompact();
+    graph.removeSoftlyReachableObjects();
+  }
 
-    public @NonNull OracleObject allocNonRootObject(@NonNull GID objectId, long size) {
-        return allocateObject(objectId, size, GObject.Type.ORDINARY);
-    }
+  @NonNull
+  /* package */ OracleObject allocateObject(@NonNull GID objectId, long size, GObject.Type type) {
+    lvm.onOracleAllocate(objectId, size, type);
+    return new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
+  }
 
-    public void clean() {
-        lvm.onOracleClean();
-        graph.removeUnreachableObjects();
-    }
+  /* package */ void freeObject(@NonNull OracleObject object) {
+    lvm.onOracleFree(object);
+    graph.removeObject(object.getId());
+  }
 
-    public void compact() {
-        lvm.onOracleCompact();
-        graph.removeWeaklyReachableObjects();
-    }
+  // -========================================================================
+  // Object Role Transition
+  // -========================================================================
 
-    public void stressCompact() {
-        lvm.onOracleStressCompact();
-        graph.removeSoftlyReachableObjects();
-    }
+  void makeRoot(@NonNull OracleObject object) {
+    GAssert.set(!object.isRoot(), "Object with id %s is not a non-root object", object.getId());
+    object.setType(GObject.Type.GCROOT);
+  }
 
-    @NonNull
-    /* package */ OracleObject allocateObject(@NonNull GID objectId, long size, GObject.Type type) {
-        lvm.onOracleAllocate(objectId, size, type);
-        return new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
-    }
+  void makeNonRoot(@NonNull OracleObject root) {
+    GAssert.set(root.isRoot(), "Object with id %s is not a root object", root.getId());
+    root.setType(GObject.Type.ORDINARY);
+  }
 
-    /* package */ void freeObject(@NonNull OracleObject object) {
-        lvm.onOracleFree(object);
-        graph.removeObject(object.getId());
-    }
+  // -========================================================================
+  // Reference Addition and Deletion
+  // -========================================================================
 
-    // -========================================================================
-    // Object Role Transition
-    // -========================================================================
+  /* package */ OracleReference getReference(@NonNull GID referenceId) {
+    return new OracleReference(this, graph.getReference(referenceId));
+  }
 
-    void makeRoot(@NonNull OracleObject object) {
-        GAssert.set(!object.isRoot(), "Object with id %s is not a non-root object", object.getId());
-        object.setType(GObject.Type.GCROOT);
-    }
+  /* package */ OracleReference getReference(
+      @NonNull OracleObject referer, @NonNull OracleObject referent) {
+    return new OracleReference(this, graph.getReference(referer.getId(), referent.getId()));
+  }
 
-    void makeNonRoot(@NonNull OracleObject root) {
-        GAssert.set(root.isRoot(), "Object with id %s is not a root object", root.getId());
-        root.setType(GObject.Type.ORDINARY);
-    }
+  /* package */ Set<OracleReference> getReferences(@NonNull OracleObject object) {
+    return graph.getReferents(object.getId()).stream()
+        .map(to -> new OracleReference(this, graph.getReference(object.getId(), to.getId())))
+        .collect(Collectors.toSet());
+  }
 
-    // -========================================================================
-    // Reference Addition and Deletion
-    // -========================================================================
+  /* package */ Set<OracleObject> getReferents(@NonNull OracleObject referer) {
+    return graph.getReferents(referer.getId()).stream()
+        .map(to -> new OracleObject(this, to))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ OracleReference getReference(@NonNull GID referenceId) {
-        return new OracleReference(this, graph.getReference(referenceId));
-    }
+  /* package */ Set<OracleObject> getStrongReferents(@NonNull OracleObject referer) {
+    return graph.getReferents(referer.getId()).stream()
+        .filter(
+            to ->
+                graph.getReference(referer.getId(), to.getId()).getType() == GReference.Type.STRONG)
+        .map(to -> new OracleObject(this, to))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ OracleReference getReference(@NonNull OracleObject referer,
-            @NonNull OracleObject referent) {
-        return new OracleReference(this, graph.getReference(referer.getId(), referent.getId()));
-    }
+  /* package */ Set<OracleObject> getSoftReferents(@NonNull OracleObject referer) {
+    return graph.getReferents(referer.getId()).stream()
+        .filter(
+            to -> graph.getReference(referer.getId(), to.getId()).getType() == GReference.Type.SOFT)
+        .map(to -> new OracleObject(this, to))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleReference> getReferences(@NonNull OracleObject object) {
-        return graph.getReferents(object.getId()).stream().map(
-                to -> new OracleReference(this, graph.getReference(object.getId(), to.getId())))
-                .collect(Collectors.toSet());
-    }
+  /* package */ Set<OracleObject> getWeakReferents(@NonNull OracleObject referer) {
+    return graph.getReferents(referer.getId()).stream()
+        .filter(
+            to -> graph.getReference(referer.getId(), to.getId()).getType() == GReference.Type.WEAK)
+        .map(to -> new OracleObject(this, to))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleObject> getReferents(@NonNull OracleObject referer) {
-        return graph.getReferents(referer.getId()).stream().map(to -> new OracleObject(this, to))
-                .collect(Collectors.toSet());
-    }
+  /* package */ Set<OracleObject> getReferers(@NonNull OracleObject referent) {
+    return graph.getReferers(referent.getId()).stream()
+        .map(from -> new OracleObject(this, from))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleObject> getStrongReferents(@NonNull OracleObject referer) {
-        return graph.getReferents(referer.getId()).stream()
-                .filter(to -> graph.getReference(referer.getId(), to.getId())
-                        .getType() == GReference.Type.STRONG)
-                .map(to -> new OracleObject(this, to)).collect(Collectors.toSet());
-    }
+  /* package */ Set<OracleObject> getStrongReferers(@NonNull OracleObject referent) {
+    return graph.getReferers(referent.getId()).stream()
+        .filter(
+            from ->
+                graph.getReference(from.getId(), referent.getId()).getType()
+                    == GReference.Type.STRONG)
+        .map(from -> new OracleObject(this, from))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleObject> getSoftReferents(@NonNull OracleObject referer) {
-        return graph.getReferents(referer.getId()).stream()
-                .filter(to -> graph.getReference(referer.getId(), to.getId())
-                        .getType() == GReference.Type.SOFT)
-                .map(to -> new OracleObject(this, to)).collect(Collectors.toSet());
-    }
+  /* package */ Set<OracleObject> getSoftReferers(@NonNull OracleObject referent) {
+    return graph.getReferers(referent.getId()).stream()
+        .filter(
+            from ->
+                graph.getReference(from.getId(), referent.getId()).getType()
+                    == GReference.Type.SOFT)
+        .map(from -> new OracleObject(this, from))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleObject> getWeakReferents(@NonNull OracleObject referer) {
-        return graph.getReferents(referer.getId()).stream()
-                .filter(to -> graph.getReference(referer.getId(), to.getId())
-                        .getType() == GReference.Type.WEAK)
-                .map(to -> new OracleObject(this, to)).collect(Collectors.toSet());
-    }
+  /* package */ Set<OracleObject> getWeakReferers(@NonNull OracleObject referent) {
+    return graph.getReferers(referent.getId()).stream()
+        .filter(
+            from ->
+                graph.getReference(from.getId(), referent.getId()).getType()
+                    == GReference.Type.WEAK)
+        .map(from -> new OracleObject(this, from))
+        .collect(Collectors.toSet());
+  }
 
-    /* package */ Set<OracleObject> getReferers(@NonNull OracleObject referent) {
-        return graph.getReferers(referent.getId()).stream()
-                .map(from -> new OracleObject(this, from)).collect(Collectors.toSet());
-    }
+  /* package */ void strongReference(
+      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
+    reference(referenceId, referer, referent, GReference.Type.STRONG);
+  }
 
-    /* package */ Set<OracleObject> getStrongReferers(@NonNull OracleObject referent) {
-        return graph.getReferers(referent.getId()).stream()
-                .filter(from -> graph.getReference(from.getId(), referent.getId())
-                        .getType() == GReference.Type.STRONG)
-                .map(from -> new OracleObject(this, from)).collect(Collectors.toSet());
-    }
+  /* package */ void softReference(
+      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
+    reference(referenceId, referer, referent, GReference.Type.SOFT);
+  }
 
-    /* package */ Set<OracleObject> getSoftReferers(@NonNull OracleObject referent) {
-        return graph.getReferers(referent.getId()).stream()
-                .filter(from -> graph.getReference(from.getId(), referent.getId())
-                        .getType() == GReference.Type.SOFT)
-                .map(from -> new OracleObject(this, from)).collect(Collectors.toSet());
-    }
+  /* package */ void weakReference(
+      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
+    reference(referenceId, referer, referent, GReference.Type.WEAK);
+  }
 
-    /* package */ Set<OracleObject> getWeakReferers(@NonNull OracleObject referent) {
-        return graph.getReferers(referent.getId()).stream()
-                .filter(from -> graph.getReference(from.getId(), referent.getId())
-                        .getType() == GReference.Type.WEAK)
-                .map(from -> new OracleObject(this, from)).collect(Collectors.toSet());
-    }
+  /* package */ void reference(
+      @NonNull GID referenceId,
+      @NonNull OracleObject referer,
+      @NonNull OracleObject referent,
+      GReference.Type type) {
+    lvm.onOracleReference(referenceId, referer, referent, type);
+    graph.addReference(referenceId, referer.getId(), referent.getId(), type);
+  }
 
-    /* package */ void strongReference(@NonNull GID referenceId, @NonNull OracleObject referer,
-            @NonNull OracleObject referent) {
-        reference(referenceId, referer, referent, GReference.Type.STRONG);
-    }
+  /* package */ void unlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {
+    lvm.onOracleUnlink(referer, referent);
+    graph.removeReference(referer.getId(), referent.getId());
+  }
 
-    /* package */ void softReference(@NonNull GID referenceId, @NonNull OracleObject referer,
-            @NonNull OracleObject referent) {
-        reference(referenceId, referer, referent, GReference.Type.SOFT);
-    }
+  /* package */ void redirect(
+      @NonNull OracleReference reference, @NonNull OracleObject newReferent) {
+    GAssert.set(
+        !newReferent.getId().equals(reference.getReferent().getId()),
+        "Cannot redirect reference %s to the same referent",
+        reference.getId());
+    unlink(reference.getReferer(), reference.getReferent());
+    reference(reference.getId(), reference.getReferer(), newReferent, reference.getType());
+  }
 
-    /* package */ void weakReference(@NonNull GID referenceId, @NonNull OracleObject referer,
-            @NonNull OracleObject referent) {
-        reference(referenceId, referer, referent, GReference.Type.WEAK);
-    }
+  // -========================================================================
+  // Heap Helper Methods
+  // -========================================================================
 
-    /* package */ void reference(@NonNull GID referenceId, @NonNull OracleObject referer,
-            @NonNull OracleObject referent, GReference.Type type) {
-        lvm.onOracleReference(referenceId, referer, referent, type);
-        graph.addReference(referenceId, referer.getId(), referent.getId(), type);
-    }
+  /* package */ long estimateNewObjectHeapSize(long requestedSize, GObject.Type type) {
+    return lvm.estimateNewObjectHeapSize(requestedSize);
+  }
 
-    /* package */ void unlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {
-        lvm.onOracleUnlink(referer, referent);
-        graph.removeReference(referer.getId(), referent.getId());
-    }
-
-    /* package */ void redirect(@NonNull OracleReference reference,
-            @NonNull OracleObject newReferent) {
-        GAssert.set(!newReferent.getId().equals(reference.getReferent().getId()),
-                "Cannot redirect reference %s to the same referent", reference.getId());
-        unlink(reference.getReferer(), reference.getReferent());
-        reference(reference.getId(), reference.getReferer(), newReferent, reference.getType());
-    }
-
-    // -========================================================================
-    // Heap Helper Methods
-    // -========================================================================
-
-    /* package */ long estimateNewObjectHeapSize(long requestedSize, GObject.Type type) {
-        return lvm.estimateNewObjectHeapSize(requestedSize);
-    }
-
-    /* package */ long estimateObjectHeapSize(OracleObject object) {
-        return lvm.estimateObjectHeapSize(object);
-    }
+  /* package */ long estimateObjectHeapSize(OracleObject object) {
+    return lvm.estimateObjectHeapSize(object);
+  }
 }

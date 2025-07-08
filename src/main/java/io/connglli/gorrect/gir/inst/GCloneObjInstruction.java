@@ -43,16 +43,16 @@ import lombok.experimental.FieldDefaults;
 @GIROpCode("clone-obj")
 public class GCloneObjInstruction extends GInstruction {
 
-    /** The object to be cloned. */
-    @GIRInput(0)
-    GID objectId;
+  /** The object to be cloned. */
+  @GIRInput(0)
+  GID objectId;
 
-    /** The cloned object. */
-    @GIROutput(0)
-    GID cloneId;
+  /** The cloned object. */
+  @GIROutput(0)
+  GID cloneId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

@@ -24,13 +24,12 @@
 
 package io.connglli.gorrect.gir.model.visitor;
 
-import java.util.HashSet;
-import java.util.Set;
-import java.util.Stack;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.ObjectGraph;
+import java.util.HashSet;
+import java.util.Set;
+import java.util.Stack;
 import lombok.NonNull;
 
 /**
@@ -39,24 +38,24 @@ import lombok.NonNull;
  */
 public abstract class ObjectDepthFirstVisitor implements ObjectVisitor {
 
-    @Override
-    public void visit(@NonNull ObjectGraph graph) {
-        Set<GID> visited = new HashSet<>();
-        Stack<GID> stack = new Stack<>();
-        for (GObject root : graph.getRoots()) {
-            stack.push(root.getId());
-        }
-        while (!stack.isEmpty()) {
-            GID refererId = stack.pop();
-            GObject obj = graph.getObject(refererId);
-            if (visited.contains(refererId)) {
-                continue;
-            }
-            visited.add(refererId);
-            obj.accept(graph, this);
-            for (GObject referent : graph.getReferents(refererId)) {
-                stack.push(referent.getId());
-            }
-        }
+  @Override
+  public void visit(@NonNull ObjectGraph graph) {
+    Set<GID> visited = new HashSet<>();
+    Stack<GID> stack = new Stack<>();
+    for (GObject root : graph.getRoots()) {
+      stack.push(root.getId());
     }
+    while (!stack.isEmpty()) {
+      GID refererId = stack.pop();
+      GObject obj = graph.getObject(refererId);
+      if (visited.contains(refererId)) {
+        continue;
+      }
+      visited.add(refererId);
+      obj.accept(graph, this);
+      for (GObject referent : graph.getReferents(refererId)) {
+        stack.push(referent.getId());
+      }
+    }
+  }
 }

@@ -28,25 +28,23 @@ import io.connglli.gorrect.gir.model.ObjectGraph;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * Set instruction for configuring heap settings and initial state.
- */
+/** Set instruction for configuring heap settings and initial state. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("set-heap")
 public class GSetHeapInstruction extends GInstruction {
-    @GIRInput(0)
-    @NonNull
-    Long heapSize;
+  @GIRInput(0)
+  @NonNull
+  Long heapSize;
 
-    @GIRInput(1)
-    @NonNull
-    ObjectGraph initState;
+  @GIRInput(1)
+  @NonNull
+  ObjectGraph initState;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

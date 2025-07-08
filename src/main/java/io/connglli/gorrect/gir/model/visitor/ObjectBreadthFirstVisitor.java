@@ -24,14 +24,13 @@
 
 package io.connglli.gorrect.gir.model.visitor;
 
+import io.connglli.gorrect.gir.model.GID;
+import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.gir.model.ObjectGraph;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
 import java.util.Set;
-
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import lombok.NonNull;
 
 /**
@@ -40,24 +39,24 @@ import lombok.NonNull;
  */
 public abstract class ObjectBreadthFirstVisitor implements ObjectVisitor {
 
-    @Override
-    public void visit(@NonNull ObjectGraph graph) {
-        Set<GID> visited = new HashSet<>();
-        Queue<GID> queue = new LinkedList<>();
-        for (GObject root : graph.getRoots()) {
-            queue.offer(root.getId());
-        }
-        while (!queue.isEmpty()) {
-            GID refererId = queue.poll();
-            GObject obj = graph.getObject(refererId);
-            if (visited.contains(refererId)) {
-                continue;
-            }
-            visited.add(refererId);
-            obj.accept(graph, this);
-            for (GObject referent : graph.getReferents(refererId)) {
-                queue.offer(referent.getId());
-            }
-        }
+  @Override
+  public void visit(@NonNull ObjectGraph graph) {
+    Set<GID> visited = new HashSet<>();
+    Queue<GID> queue = new LinkedList<>();
+    for (GObject root : graph.getRoots()) {
+      queue.offer(root.getId());
     }
+    while (!queue.isEmpty()) {
+      GID refererId = queue.poll();
+      GObject obj = graph.getObject(refererId);
+      if (visited.contains(refererId)) {
+        continue;
+      }
+      visited.add(refererId);
+      obj.accept(graph, this);
+      for (GObject referent : graph.getReferents(refererId)) {
+        queue.offer(referent.getId());
+      }
+    }
+  }
 }

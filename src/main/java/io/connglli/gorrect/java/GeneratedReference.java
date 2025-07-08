@@ -37,55 +37,45 @@ import lombok.Setter;
  */
 @RequiredArgsConstructor
 class GeneratedReference {
-    @NonNull
-    private final GeneratedHeap heap;
+  @NonNull private final GeneratedHeap heap;
 
-    @Getter
-    @NonNull
-    GID id;
+  @Getter @NonNull GID id;
 
-    @Getter
-    @NonNull
-    private String field;
+  @Getter @NonNull private String field;
 
-    @NonNull
-    GID refererId;
+  @NonNull GID refererId;
 
-    @NonNull
-    GID referentId;
+  @NonNull GID referentId;
 
-    @Getter
-    @Setter
-    @NonNull
-    GReference.Type type;
+  @Getter @Setter @NonNull GReference.Type type;
 
-    @NonNull
-    GeneratedObject getReferer() {
-        return heap.getObject(refererId);
-    }
+  @NonNull
+  GeneratedObject getReferer() {
+    return heap.getObject(refererId);
+  }
 
-    @NonNull
-    GeneratedObject getReferent() {
-        return heap.getObject(referentId);
-    }
+  @NonNull
+  GeneratedObject getReferent() {
+    return heap.getObject(referentId);
+  }
 
-    void setReferent(@NonNull GeneratedObject referent) {
-        this.referentId = referent.getId();
-    }
+  void setReferent(@NonNull GeneratedObject referent) {
+    this.referentId = referent.getId();
+  }
 
-    void strengthen() {
-        setType(getType().strengthen());
-    }
+  void strengthen() {
+    setType(getType().strengthen());
+  }
 
-    void soften() {
-        setType(getType().soften());
-    }
+  void soften() {
+    setType(getType().soften());
+  }
 
-    void unlink() {
-        heap.unlink(this);
-    }
+  void unlink() {
+    heap.unlink(this);
+  }
 
-    void redirect(@NonNull GeneratedObject newReferent) {
-        heap.redirect(this, newReferent);
-    }
+  void redirect(@NonNull GeneratedObject newReferent) {
+    heap.redirect(this, newReferent);
+  }
 }

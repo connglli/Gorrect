@@ -28,32 +28,30 @@ import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GAddStrongRefInstruction adds a strong reference between two objects.
- */
+/** GAddStrongRefInstruction adds a strong reference between two objects. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-strong-ref")
 public class GAddStrongRefInstruction extends GInstruction {
-    /** The ID of the object that will be the source of the strong reference. */
-    @GIRInput(0)
-    @NonNull
-    GID refererId;
+  /** The ID of the object that will be the source of the strong reference. */
+  @GIRInput(0)
+  @NonNull
+  GID refererId;
 
-    /** The ID of the object that will be the target of the strong reference. */
-    @GIRInput(1)
-    @NonNull
-    GID referentId;
+  /** The ID of the object that will be the target of the strong reference. */
+  @GIRInput(1)
+  @NonNull
+  GID referentId;
 
-    /** The unique ID assigned to the newly created strong reference. */
-    @GIROutput(0)
-    @NonNull
-    GID referenceId;
+  /** The unique ID assigned to the newly created strong reference. */
+  @GIROutput(0)
+  @NonNull
+  GID referenceId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

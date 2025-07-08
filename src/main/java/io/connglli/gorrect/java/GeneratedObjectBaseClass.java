@@ -24,12 +24,10 @@
 
 package io.connglli.gorrect.java;
 
-import javax.lang.model.element.Modifier;
-
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.MethodSpec;
-
+import javax.lang.model.element.Modifier;
 import lombok.NonNull;
 
 /**
@@ -40,37 +38,38 @@ import lombok.NonNull;
  * another object in its own class.
  */
 final class GeneratedObjectBaseClass extends GeneratedClass {
-    static final ClassName clazzName = ClassName.get("", "GGeneratedBase");
-    static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8; // 1MB
+  static final ClassName clazzName = ClassName.get("", "GGeneratedBase");
+  static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8; // 1MB
 
-    private static final FieldSpec objectId =
-            FieldSpec.builder(String.class, "id", Modifier.PUBLIC, Modifier.FINAL).build();
-    private static final FieldSpec objectSize =
-            FieldSpec.builder(byte[][].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
-    private static final MethodSpec constructor = MethodSpec.constructorBuilder()
-            .addParameter(String.class, "id").addParameter(long.class, "size")
-            // @formatter:off
-            .addCode(
-                """
-                    this.id = id;
-                    if (size <= 0) {
-                        throw new IllegalArgumentException("Object size must be a positive value, got " + size);
-                    }
-                    int numChunks = (int) ((size + $L - 1) / $L);
-                    this.padding = new byte[numChunks][];
-                    for (int i = 0; i < numChunks; i++) {
-                        int chunkSize = (int) Math.min(size, $L);
-                        this.padding[i] = new byte[chunkSize];
-                        size -= chunkSize;
-                    }
-                """,
-                MAX_ARRAY_SIZE, MAX_ARRAY_SIZE, MAX_ARRAY_SIZE
-            )
-            // @formatter:on
-            .build();
+  private static final FieldSpec objectId =
+      FieldSpec.builder(String.class, "id", Modifier.PUBLIC, Modifier.FINAL).build();
+  private static final FieldSpec objectSize =
+      FieldSpec.builder(byte[][].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
+  private static final MethodSpec constructor =
+      MethodSpec.constructorBuilder()
+          .addParameter(String.class, "id")
+          .addParameter(long.class, "size")
+          .addCode(
+              """
+                  this.id = id;
+                  if (size <= 0) {
+                      throw new IllegalArgumentException("Object size must be a positive value, got " + size);
+                  }
+                  int numChunks = (int) ((size + $L - 1) / $L);
+                  this.padding = new byte[numChunks][];
+                  for (int i = 0; i < numChunks; i++) {
+                      int chunkSize = (int) Math.min(size, $L);
+                      this.padding[i] = new byte[chunkSize];
+                      size -= chunkSize;
+                  }
+              """,
+              MAX_ARRAY_SIZE,
+              MAX_ARRAY_SIZE,
+              MAX_ARRAY_SIZE)
+          .build();
 
-    GeneratedObjectBaseClass(@NonNull GeneratedHeap heap) {
-        super(heap, clazzName.canonicalName(), Modifier.ABSTRACT);
-        addField(objectId).addField(objectSize).addMethod(constructor);
-    }
+  GeneratedObjectBaseClass(@NonNull GeneratedHeap heap) {
+    super(heap, clazzName.canonicalName(), Modifier.ABSTRACT);
+    addField(objectId).addField(objectSize).addMethod(constructor);
+  }
 }

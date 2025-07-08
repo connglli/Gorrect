@@ -38,18 +38,18 @@ import lombok.experimental.FieldDefaults;
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("swap-referents")
 public class GSwapReferentsInstruction extends GInstruction {
-    /** The ID of the first reference involved in the swap operation. */
-    @GIRInput(0)
-    @NonNull
-    GID referenceId1;
+  /** The ID of the first reference involved in the swap operation. */
+  @GIRInput(0)
+  @NonNull
+  GID referenceId1;
 
-    /** The ID of the second reference involved in the swap operation. */
-    @GIRInput(1)
-    @NonNull
-    GID referenceId2;
+  /** The ID of the second reference involved in the swap operation. */
+  @GIRInput(1)
+  @NonNull
+  GID referenceId2;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

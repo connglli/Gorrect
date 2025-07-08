@@ -28,22 +28,20 @@ import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GStrengthRefInstruction strengthens the type of a reference by one level.
- */
+/** GStrengthRefInstruction strengthens the type of a reference by one level. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("strength-ref")
 public class GStrengthRefInstruction extends GInstruction {
-    /** The ID of the reference to be strengthened by one level. */
-    @GIRInput(0)
-    @NonNull
-    GID referenceId;
+  /** The ID of the reference to be strengthened by one level. */
+  @GIRInput(0)
+  @NonNull
+  GID referenceId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

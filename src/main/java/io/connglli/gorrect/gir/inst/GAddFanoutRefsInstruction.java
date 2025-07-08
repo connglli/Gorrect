@@ -24,44 +24,41 @@
 
 package io.connglli.gorrect.gir.inst;
 
-import java.util.List;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/**
- * GAddFanoutRefsInstruction enables a referer to reference a list of different referents.
- */
+/** GAddFanoutRefsInstruction enables a referer to reference a list of different referents. */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-fanout-refs")
 public class GAddFanoutRefsInstruction extends GInstruction {
-    /** The source object of the new references */
-    @GIRInput(0)
-    @NonNull
-    GID refererId;
+  /** The source object of the new references */
+  @GIRInput(0)
+  @NonNull
+  GID refererId;
 
-    /** The target objects being referenced */
-    @GIRInput(1)
-    @NonNull
-    List<GID> referentIds;
+  /** The target objects being referenced */
+  @GIRInput(1)
+  @NonNull
+  List<GID> referentIds;
 
-    /** The target objects being referenced by which strength */
-    @GIRInput(2)
-    @NonNull
-    List<GReference.Type> referenceTypes;
+  /** The target objects being referenced by which strength */
+  @GIRInput(2)
+  @NonNull
+  List<GReference.Type> referenceTypes;
 
-    /** The newly created references */
-    @GIROutput(0)
-    @NonNull
-    List<GID> referenceIds;
+  /** The newly created references */
+  @GIROutput(0)
+  @NonNull
+  List<GID> referenceIds;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }

@@ -24,12 +24,11 @@
 
 package io.connglli.gorrect.java;
 
-import java.util.List;
-
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.utility.GAssert;
+import java.util.List;
 import lombok.*;
 
 /**
@@ -38,110 +37,110 @@ import lombok.*;
  */
 @AllArgsConstructor
 class GeneratedObject {
-    @NonNull
-    private final GeneratedHeap heap;
+  @NonNull private final GeneratedHeap heap;
 
-    @NonNull
-    @Getter(AccessLevel.PACKAGE)
-    private GeneratedObjectClass clazz;
+  @NonNull
+  @Getter(AccessLevel.PACKAGE)
+  private GeneratedObjectClass clazz;
 
-    @NonNull
-    @Getter(AccessLevel.PACKAGE)
-    @Setter(AccessLevel.PACKAGE)
-    private GObject.Type type;
+  @NonNull
+  @Getter(AccessLevel.PACKAGE)
+  @Setter(AccessLevel.PACKAGE)
+  private GObject.Type type;
 
-    @NonNull
-    @Getter(AccessLevel.PACKAGE)
-    @Setter(AccessLevel.PACKAGE)
-    private String identifier;
+  @NonNull
+  @Getter(AccessLevel.PACKAGE)
+  @Setter(AccessLevel.PACKAGE)
+  private String identifier;
 
-    // Null means unreachable
-    @Getter(AccessLevel.PACKAGE)
-    @Setter(AccessLevel.PACKAGE)
-    private GReference.Type reachability;
+  // Null means unreachable
+  @Getter(AccessLevel.PACKAGE)
+  @Setter(AccessLevel.PACKAGE)
+  private GReference.Type reachability;
 
-    @NonNull
-    GID getId() {
-        return clazz.getId();
-    }
+  @NonNull
+  GID getId() {
+    return clazz.getId();
+  }
 
-    long getSize() {
-        return clazz.getSize();
-    }
+  long getSize() {
+    return clazz.getSize();
+  }
 
-    boolean isRoot() {
-        return type == GObject.Type.GCROOT;
-    }
+  boolean isRoot() {
+    return type == GObject.Type.GCROOT;
+  }
 
-    void toRoot() {
-        GAssert.set(!isRoot(), "Object with id %s is already a root", getId());
-        heap.makeRoot(this);
-    }
+  void toRoot() {
+    GAssert.set(!isRoot(), "Object with id %s is already a root", getId());
+    heap.makeRoot(this);
+  }
 
-    void toNonRoot() {
-        GAssert.set(isRoot(), "Object with id %s is already a non-root", getId());
-        heap.makeNonRoot(this);
-    }
+  void toNonRoot() {
+    GAssert.set(isRoot(), "Object with id %s is already a non-root", getId());
+    heap.makeNonRoot(this);
+  }
 
-    List<GeneratedObject> getReferers() {
-        return heap.getReferers(this);
-    }
+  List<GeneratedObject> getReferers() {
+    return heap.getReferers(this);
+  }
 
-    List<GeneratedObject> getReferents() {
-        return heap.getReferents(this);
-    }
+  List<GeneratedObject> getReferents() {
+    return heap.getReferents(this);
+  }
 
-    List<GeneratedReference> getReferences() {
-        return heap.getReferences(this);
-    }
+  List<GeneratedReference> getReferences() {
+    return heap.getReferences(this);
+  }
 
-    @NonNull
-    GeneratedReference strongReference(@NonNull GID referenceId,
-            @NonNull GeneratedObject referent) {
-        return heap.reference(referenceId, this, referent, GReference.Type.STRONG);
-    }
+  @NonNull
+  GeneratedReference strongReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
+    return heap.reference(referenceId, this, referent, GReference.Type.STRONG);
+  }
 
-    @NonNull
-    GeneratedReference softReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
-        return heap.reference(referenceId, this, referent, GReference.Type.SOFT);
-    }
+  @NonNull
+  GeneratedReference softReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
+    return heap.reference(referenceId, this, referent, GReference.Type.SOFT);
+  }
 
-    @NonNull
-    GeneratedReference weakReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
-        return heap.reference(referenceId, this, referent, GReference.Type.WEAK);
-    }
+  @NonNull
+  GeneratedReference weakReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
+    return heap.reference(referenceId, this, referent, GReference.Type.WEAK);
+  }
 
-    @NonNull
-    GeneratedReference reference(@NonNull GID referenceId, @NonNull GeneratedObject referent,
-            @NonNull GReference.Type referenceType) {
-        return heap.reference(referenceId, this, referent, referenceType);
-    }
+  @NonNull
+  GeneratedReference reference(
+      @NonNull GID referenceId,
+      @NonNull GeneratedObject referent,
+      @NonNull GReference.Type referenceType) {
+    return heap.reference(referenceId, this, referent, referenceType);
+  }
 
-    void free() {
-        heap.freeObject(this);
-    }
+  void free() {
+    heap.freeObject(this);
+  }
 
-    String getTypeCastIdentifier() {
-        return switch (reachability) {
-            case STRONG -> "((%s)(%s))".formatted(clazz.getClazzName(), identifier);
-            case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), identifier);
-            case null -> identifier; // Unreachable object, no type cast needed
-            default -> {
-                GAssert.panic("Cannot reach here: %s", reachability);
-                yield "";
-            }
-        };
-    }
+  String getTypeCastIdentifier() {
+    return switch (reachability) {
+      case STRONG -> "((%s)(%s))".formatted(clazz.getClazzName(), identifier);
+      case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), identifier);
+      case null -> identifier; // Unreachable object, no type cast needed
+      default -> {
+        GAssert.panic("Cannot reach here: %s", reachability);
+        yield "";
+      }
+    };
+  }
 
-    static String computeFieldName(@NonNull GReference.Type type, @NonNull GID referentId) {
-        return switch (type) {
-            case STRONG -> "strong_ref_to_" + referentId;
-            case SOFT -> "soft_ref_to_" + referentId;
-            case WEAK -> "weak_ref_to_" + referentId;
-            default -> {
-                GAssert.panic("Cannot reach here");
-                yield "";
-            }
-        };
-    }
+  static String computeFieldName(@NonNull GReference.Type type, @NonNull GID referentId) {
+    return switch (type) {
+      case STRONG -> "strong_ref_to_" + referentId;
+      case SOFT -> "soft_ref_to_" + referentId;
+      case WEAK -> "weak_ref_to_" + referentId;
+      default -> {
+        GAssert.panic("Cannot reach here");
+        yield "";
+      }
+    };
+  }
 }

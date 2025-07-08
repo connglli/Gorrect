@@ -39,13 +39,13 @@ import lombok.experimental.FieldDefaults;
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-obj")
 public class GRemoveObjInstruction extends GInstruction {
-    /** The ID of the object to be removed from the graph. */
-    @GIRInput(0)
-    @NonNull
-    GID objectId;
+  /** The ID of the object to be removed from the graph. */
+  @GIRInput(0)
+  @NonNull
+  GID objectId;
 
-    @Override
-    public <T> T accept(GInstructionVisitor<T> visitor) {
-        return visitor.visit(this);
-    }
+  @Override
+  public <T> T accept(GInstructionVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
 }
