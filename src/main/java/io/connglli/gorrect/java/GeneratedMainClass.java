@@ -27,7 +27,6 @@ package io.connglli.gorrect.java;
 import javax.lang.model.element.Modifier;
 
 import com.palantir.javapoet.ClassName;
-import com.palantir.javapoet.CodeBlock;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeSpec;
 
@@ -50,12 +49,8 @@ final class GeneratedMainClass extends GeneratedClass {
         super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
     }
 
-    void addStatement(String stmtFormat, Object... stmtArgs) {
+    void addStatement(@NonNull String stmtFormat, Object... stmtArgs) {
         mainMethodSpec.addStatement(stmtFormat, stmtArgs);
-    }
-
-    void addStatement(CodeBlock block) {
-        mainMethodSpec.addStatement(block);
     }
 
     @Override

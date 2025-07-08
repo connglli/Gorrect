@@ -29,6 +29,7 @@ import java.util.List;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.GAssert;
 import lombok.Getter;
 import lombok.NonNull;
@@ -52,8 +53,16 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
         program.accept(this);
     }
 
-    public void toJavaCode(String directory) {
-        heap.toJavaCode(directory);
+    public ObjectGraph getState() {
+        return heap.getState();
+    }
+
+    public String toJavaCode(String directory) {
+        String file = heap.toJavaCode(directory);
+        System.out.println("Java code generated: " + file);
+        System.out.println(
+                "WARNING: The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
+        return file;
     }
 
     public Void visit(GProgram program) {

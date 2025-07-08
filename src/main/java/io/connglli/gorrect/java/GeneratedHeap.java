@@ -103,10 +103,11 @@ class GeneratedHeap {
                         reference.getReferent().getId(), reference.getType());
             }
         }
+        graph.removeUnreachableObjects();
         return graph;
     }
 
-    void toJavaCode(String directory) {
+    String toJavaCode(String directory) {
         String filePath = directory + File.separator + mainClazz.getClazzName() + ".java";
         try (FileOutputStream fout = new FileOutputStream(filePath)) {
             fout.write(mainClazz.toJavaCode().getBytes());
@@ -123,8 +124,10 @@ class GeneratedHeap {
             for (GeneratedObject obj : deadObjects.values()) {
                 fout.write(obj.getClazz().toJavaCode().getBytes());
             }
+            return filePath;
         } catch (IOException e) {
             GAssert.panic("Cannot write to file %s: %s", filePath, e.getMessage());
+            return null; // Unreachable, but required by the compiler
         }
     }
 
@@ -230,8 +233,8 @@ class GeneratedHeap {
         public void close() {
             // We clear the pool to release all the strong references
             appendStatement("$S.clear()", OBJECT_POOL_NAME);
-            // The reference relationship is changed, we should update all objects' identifier
-            updateIdentifiersGlobally();
+            // The reference relationship is changed, we should update the heap
+            updateHeap();
         }
     }
 
@@ -289,8 +292,8 @@ class GeneratedHeap {
         putReference(new GeneratedReference(this, referenceId, fieldName, referer.getId(),
                 object.getId(), referenceType));
 
-        // The reference relationship is changed, we should update all objects' identifier
-        updateIdentifiersGlobally();
+        // The reference relationship is changed, we should update the heap
+        updateHeap();
 
         return object;
     }
@@ -328,8 +331,8 @@ class GeneratedHeap {
         // Transfer the ownership of the object to the main class
         appendStatement("$S = $S", fieldName, object.getIdentifier());
         object.setType(GObject.Type.GCROOT);
-        // The object turns to a root object, we should update all objects' identifiers globally
-        updateIdentifiersGlobally();
+        // The object turns to a root object, we should update the heap globally
+        updateHeap();
     }
 
     void makeNonRoot(@NonNull GeneratedObject root) {
@@ -337,103 +340,14 @@ class GeneratedHeap {
         String fieldName = GeneratedMainClass.computeFieldName(root.getId());
         GAssert.set(mainClazz.hasField(fieldName),
                 "Cannot remove root reference to %s, as it does not exist", fieldName);
-        appendStatement("%S = null", fieldName);
+        appendStatement("$S = null", fieldName);
         root.setType(GObject.Type.ORDINARY);
-        // The object turns to a non-root object, we should update all objects' identifiers globally
-        updateIdentifiersGlobally();
+        // The object turns to a non-root object, we should update the heap globally
+        updateHeap();
     }
 
     // -========================================================================
     // Reference Addition and Deletion
-    // -========================================================================
-
-    @NonNull
-    GeneratedReference reference(@NonNull GID referenceId, @NonNull GeneratedObject referer,
-            @NonNull GeneratedObject referent, @NonNull GReference.Type referenceType) {
-        String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
-        GeneratedObjectClass refererClazz = referer.getClazz();
-
-        switch (referenceType) {
-            case STRONG: {
-                // Create a field in our class so that we can reference the referent
-                refererClazz.addField(FieldSpec
-                        .builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
-                        .initializer("null").build());
-                // Reference the referent object by our new field
-                appendStatement("$S.$S = $S", referer.getIdentifier(), fieldName,
-                        referent.getIdentifier());
-                break;
-            }
-
-            case SOFT: {
-                ClassName softRefClazz = ClassName.get(SoftReference.class);
-                // Create a field in our class so that we can reference the referent
-                refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
-                        .initializer("null").build());
-                // Reference the referent object by our new field
-                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
-                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
-                break;
-            }
-
-            case WEAK: {
-                ClassName softRefClazz = ClassName.get(WeakReference.class);
-                // Create a field in our class so that we can reference the referent
-                refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
-                        .initializer("null").build());
-                // Reference the referent object by our new field
-                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
-                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
-                break;
-            }
-
-            default:
-                GAssert.panic("Cannot reach here");
-                break;
-        }
-
-        // The reference relationship is changed, we should update all objects' identifier
-        GeneratedReference reference = putReference(new GeneratedReference(this, referenceId,
-                fieldName, referer.getId(), referent.getId(), referenceType));
-        updateIdentifiersGlobally();
-
-        return reference;
-    }
-
-    void redirect(GeneratedReference reference, GeneratedObject newReferent) {
-        GeneratedObject referer = reference.getReferer();
-        GeneratedObject referent = reference.getReferent();
-
-        String fieldName = GeneratedObject.computeFieldName(reference.getType(), referent.getId());
-        GAssert.set(referer.getClazz().hasField(fieldName),
-                "Cannot replace reference's referent %s to %s, as it does not exist",
-                reference.getReferent(), newReferent.getId());
-
-        appendStatement("$S = $S", referent.getIdentifier(), newReferent.getIdentifier());
-        reference.setReferentId(newReferent.getId());
-
-        // The reference relationship is changed, we should update all objects' identifier
-        updateIdentifiersGlobally();
-    }
-
-    void unlink(@NonNull GeneratedReference reference) {
-        GeneratedObject referer = reference.getReferer();
-        GeneratedObject referent = reference.getReferent();
-        String fieldName = GeneratedObject.computeFieldName(reference.getType(),
-                reference.getReferent().getId());
-        GAssert.set(referer.getClazz().hasField(fieldName),
-                "Cannot remove reference to %s, as it does not exist", fieldName);
-        appendStatement("$S = null", referent.getIdentifier());
-
-        // Remove the reference from the referents map
-        moveReferenceToDead(reference);
-
-        // The reference relationship is changed, we should update all objects' identifier
-        updateIdentifiersGlobally();
-    }
-
-    // -========================================================================
-    // Helper Methods for Reference and Object Management
     // -========================================================================
 
     List<GeneratedObject> getReferers(@NonNull GeneratedObject referent) {
@@ -497,11 +411,100 @@ class GeneratedHeap {
         return null; // Unreachable, but required by the compiler
     }
 
+    @NonNull
+    GeneratedReference reference(@NonNull GID referenceId, @NonNull GeneratedObject referer,
+            @NonNull GeneratedObject referent, @NonNull GReference.Type referenceType) {
+        String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
+        GeneratedObjectClass refererClazz = referer.getClazz();
+
+        switch (referenceType) {
+            case STRONG: {
+                // Create a field in our class so that we can reference the referent
+                refererClazz.addField(FieldSpec
+                        .builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
+                        .initializer("null").build());
+                // Reference the referent object by our new field
+                appendStatement("$S.$S = $S", referer.getIdentifier(), fieldName,
+                        referent.getIdentifier());
+                break;
+            }
+
+            case SOFT: {
+                ClassName softRefClazz = ClassName.get(SoftReference.class);
+                // Create a field in our class so that we can reference the referent
+                refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
+                        .initializer("null").build());
+                // Reference the referent object by our new field
+                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
+                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
+                break;
+            }
+
+            case WEAK: {
+                ClassName softRefClazz = ClassName.get(WeakReference.class);
+                // Create a field in our class so that we can reference the referent
+                refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
+                        .initializer("null").build());
+                // Reference the referent object by our new field
+                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
+                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
+                break;
+            }
+
+            default:
+                GAssert.panic("Cannot reach here");
+                break;
+        }
+
+        // The reference relationship is changed, we should update the heap
+        GeneratedReference reference = putReference(new GeneratedReference(this, referenceId,
+                fieldName, referer.getId(), referent.getId(), referenceType));
+        updateHeap();
+
+        return reference;
+    }
+
+    void redirect(GeneratedReference reference, GeneratedObject newReferent) {
+        GeneratedObject referer = reference.getReferer();
+        GeneratedObject referent = reference.getReferent();
+
+        String fieldName = reference.getField();
+        GAssert.set(referer.getClazz().hasField(fieldName),
+                "Cannot replace reference's referent %s to %s, as it does not exist",
+                reference.getReferent().getId(), newReferent.getId());
+
+        appendStatement("$S = $S", referent.getIdentifier(), newReferent.getIdentifier());
+        reference.setReferent(newReferent);
+
+        // The reference relationship is changed, we should update the heap
+        updateHeap();
+    }
+
+    void unlink(@NonNull GeneratedReference reference) {
+        GeneratedObject referer = reference.getReferer();
+        GeneratedObject referent = reference.getReferent();
+        String fieldName = reference.getField();
+        GAssert.set(referer.getClazz().hasField(fieldName),
+                "Cannot remove reference to %s, as it does not exist", fieldName);
+        appendStatement("$S = null", referent.getIdentifier());
+
+        // Remove the reference from the referents map
+        moveReferenceToDead(reference);
+
+        // The reference relationship is changed, we should update the heap
+        updateHeap();
+    }
+
+    // -========================================================================
+    // Helper Methods for Reference and Object Management
+    // -========================================================================
+
     private GeneratedObject putObject(@NonNull GeneratedObject object) {
         GAssert.set(!hasObject(object.getId()), "The object with id %s already exists",
                 object.getId());
         referents.put(object.getId(), new LinkedList<>());
-        return objects.put(object.getId(), object);
+        objects.put(object.getId(), object);
+        return object;
     }
 
     private void moveObjectToDead(@NonNull GeneratedObject object) {
@@ -532,8 +535,9 @@ class GeneratedHeap {
         deadReferences.put(reference.getId(), reference);
     }
 
-    private void updateIdentifiersGlobally() {
+    private void updateHeap() {
         ObjectGraph graph = getState();
+        // Update the identifiers of all objects based on the strongest reference
         graph.accept(new ObjectReversePostorderVisitor() {
             private final Set<GID> visited = new HashSet<>();
 

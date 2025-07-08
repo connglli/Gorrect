@@ -51,7 +51,6 @@ class GeneratedReference {
     @NonNull
     GID refererId;
 
-    @Setter
     @NonNull
     GID referentId;
 
@@ -68,6 +67,10 @@ class GeneratedReference {
     @NonNull
     GeneratedObject getReferent() {
         return heap.getObject(referentId);
+    }
+
+    void setReferent(@NonNull GeneratedObject referent) {
+        this.referentId = referent.getId();
     }
 
     void strengthen() {
