@@ -25,14 +25,15 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.GID;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GMakeNonRootInstruction makes a root object non-root.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("make-root-obj-non-root")
 public class GMakeNonRootInstruction extends GInstruction {

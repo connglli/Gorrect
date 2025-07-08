@@ -61,4 +61,14 @@ public class GProgram extends GInstruction {
     public <T> T accept(GInstructionVisitor<T> visitor) {
         return visitor.visit(this);
     }
+
+    @Override
+    public String toString() {
+        StringBuilder sb = new StringBuilder();
+        sb.append(configuration).append("\n");
+        for (GInstruction instruction : instructions) {
+            sb.append(instruction).append("\n");
+        }
+        return sb.toString();
+    }
 }

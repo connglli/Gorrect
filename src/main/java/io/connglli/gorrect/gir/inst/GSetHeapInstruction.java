@@ -25,14 +25,15 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.ObjectGraph;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * Set instruction for configuring heap settings and initial state.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("set-heap")
 public class GSetHeapInstruction extends GInstruction {

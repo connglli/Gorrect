@@ -228,8 +228,8 @@ class OracleInterpreterTest {
         List<GReference.Type> faninReferenceTypes =
                 List.of(GReference.Type.STRONG, GReference.Type.SOFT);
         List<GID> faninReferenceIds = List.of(new GID("ref-r1_r2"), new GID("ref-o2_r2"));
-        program.addInstruction(new GAddFaninRefsInstruction(faninRefererIds, faninReferenceTypes,
-                r2, faninReferenceIds));
+        program.addInstruction(new GAddFaninRefsInstruction(faninRefererIds, r2,
+                faninReferenceTypes, faninReferenceIds));
 
         // Clone object
         GID o2c = new GID("o2c");
@@ -292,6 +292,5 @@ class OracleInterpreterTest {
         assertTrue(stronglyReachable.contains(r1), "r1 should be strongly reachable");
         assertTrue(stronglyReachable.contains(r2), "r2 should be strongly reachable");
         assertTrue(softlyReachable.contains(o2), "o2 should be softly reachable");
-
     }
 }

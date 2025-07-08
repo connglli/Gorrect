@@ -27,8 +27,11 @@ package io.connglli.gorrect.gir.inst;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.reflect.Field;
-import java.util.List;
+import java.util.LinkedHashMap;
+import java.util.Map;
+import java.util.stream.Collectors;
 
+import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.GAssert;
 import io.connglli.gorrect.utility.Reflections;
 
@@ -55,16 +58,17 @@ public abstract class GInstruction {
         return opCode;
     }
 
-    public Object[] getInputs() {
-        List<Field> fields = Reflections.getAnnotatedFields(this, GIRInput.class);
-        Object[] inputs = new Object[fields.size()];
+    public Map<String, Object> getInputMap() {
+        Field[] fields = Reflections.getAnnotatedFields(this, GIRInput.class);
+        String[] names = new String[fields.length];
+        Object[] inputs = new Object[fields.length];
         for (Field field : fields) {
             GIRInput annot = field.getAnnotation(GIRInput.class);
             GAssert.set(annot != null, "The GIRInput annotation is missing in the field %s",
                     field.getName());
             GAssert.set(annot.value() >= 0, "GIRInput value must be non-negative, got %d",
                     annot.value());
-            GAssert.set(annot.value() < fields.size(),
+            GAssert.set(annot.value() < inputs.length,
                     "GIRInput value must be less than the number of inputs");
             field.setAccessible(true); // Make private fields accessible
             Object value = null;
@@ -82,23 +86,31 @@ public abstract class GInstruction {
                             + "This is perhaps your indices are not continuous."),
                     annot.value(), inputs.length);
             int index = annot.value();
-            GAssert.set(inputs[index] != null,
+            GAssert.set(inputs[index] == null,
                     "GIRInput has conflict indices, got multiple GIRInput(%d)", index);
             inputs[index] = value;
+            names[index] = Formats.toSnakeCase(field.getName());
         }
-        return inputs;
+        Map<String, Object> inputMap = new LinkedHashMap<>();
+        for (int i = 0; i < names.length; i++) {
+            GAssert.set(inputs[i] != null && names[i] != null,
+                    "GIRInput fields are not continuous, GIRInput(%d) is missing", i);
+            inputMap.put(names[i], inputs[i]);
+        }
+        return inputMap;
     }
 
-    public Object[] getOutputs() {
-        List<Field> fields = Reflections.getAnnotatedFields(this, GIROutput.class);
-        Object[] outputs = new Object[fields.size()];
+    public Map<String, Object> getOutputMap() {
+        Field[] fields = Reflections.getAnnotatedFields(this, GIROutput.class);
+        String[] names = new String[fields.length];
+        Object[] outputs = new Object[fields.length];
         for (Field field : fields) {
             GIROutput annot = field.getAnnotation(GIROutput.class);
             GAssert.set(annot != null, "The GIROutput annotation is missing in the field %s",
                     field.getName());
             GAssert.set(annot.value() >= 0, "GIROutput value must be non-negative, got %d",
                     annot.value());
-            GAssert.set(annot.value() < fields.size(),
+            GAssert.set(annot.value() < outputs.length,
                     "GIROutput value must be less than the number of outputs");
             field.setAccessible(true); // Make private fields accessible
             Object value = null;
@@ -116,11 +128,26 @@ public abstract class GInstruction {
                             + "This is perhaps your indices are not continuous."),
                     annot.value(), outputs.length);
             int index = annot.value();
-            GAssert.set(outputs[index] != null,
+            GAssert.set(outputs[index] == null,
                     "GIROutput has conflict indices, got multiple GIROutput(%d)", index);
             outputs[index] = value;
+            names[index] = Formats.toSnakeCase(field.getName());
         }
-        return outputs;
+        Map<String, Object> outputMap = new LinkedHashMap<>();
+        for (int i = 0; i < names.length; i++) {
+            GAssert.set(outputs[i] != null && names[i] != null,
+                    "GIROutput fields are not continuous, GIROutput(%d) is missing", i);
+            outputMap.put(names[i], outputs[i]);
+        }
+        return outputMap;
+    }
+
+    public Object[] getInputs() {
+        return getInputMap().values().toArray();
+    }
+
+    public Object[] getOutputs() {
+        return getOutputMap().values().toArray();
     }
 
     /**
@@ -132,6 +159,28 @@ public abstract class GInstruction {
      * @return The result of the visitor's visit method
      */
     public abstract <T> T accept(GInstructionVisitor<T> visitor);
+
+    /**
+     * Returns a string representation of the instruction, which includes the opcode and the inputs
+     * and outputs.
+     *
+     * @return A string representation of the instruction
+     */
+    public String toString() {
+        Map<String, Object> inputs = getInputMap();
+        Map<String, Object> outputs = getOutputMap();
+        if (!outputs.isEmpty()) {
+            return String.format("%s <- %s %s",
+                    outputs.values().stream().map(Object::toString)
+                            .collect(Collectors.joining(", ")),
+                    getOpCode(),
+                    inputs.entrySet().stream().map(e -> e.getKey() + "=" + e.getValue())
+                            .collect(Collectors.joining(", ")));
+        } else {
+            return String.format("_ <- %s %s", getOpCode(), inputs.entrySet().stream()
+                    .map(e -> e.getKey() + "=" + e.getValue()).collect(Collectors.joining(", ")));
+        }
+    }
 }
 
 

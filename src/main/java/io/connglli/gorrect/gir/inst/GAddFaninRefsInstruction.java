@@ -28,32 +28,32 @@ import java.util.List;
 
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GAddFaninRefsInstruction enables a list of referers to reference a single referent.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
-@GIROpCode("add-fanout-refs")
+@GIROpCode("add-fanin-refs")
 public class GAddFaninRefsInstruction extends GInstruction {
     /** The source objects of the new references */
     @GIRInput(0)
     @NonNull
     List<GID> refererIds;
 
-    /** The target objects being referenced by which strength */
+    /** The target object being referenced */
     @GIRInput(1)
     @NonNull
-    List<GReference.Type> referenceTypes;
+    GID referentId;
 
-
-    /** The target object being referenced */
+    /** The target objects being referenced by which strength */
     @GIRInput(2)
     @NonNull
-    GID referentId;
+    List<GReference.Type> referenceTypes;
 
     /** The newly created references */
     @GIROutput(0)

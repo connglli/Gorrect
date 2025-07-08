@@ -28,16 +28,17 @@ import java.util.List;
 
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GAddFanoutRefsInstruction enables a referer to reference a list of different referents.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
-@GIROpCode("add-fanin-refs")
+@GIROpCode("add-fanout-refs")
 public class GAddFanoutRefsInstruction extends GInstruction {
     /** The source object of the new references */
     @GIRInput(0)
@@ -50,6 +51,8 @@ public class GAddFanoutRefsInstruction extends GInstruction {
     List<GID> referentIds;
 
     /** The target objects being referenced by which strength */
+    @GIRInput(2)
+    @NonNull
     List<GReference.Type> referenceTypes;
 
     /** The newly created references */

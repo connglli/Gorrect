@@ -25,14 +25,15 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.GID;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GSwapReferentsInstruction swaps the referents of two references.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("swap-referents")
 public class GSwapReferentsInstruction extends GInstruction {

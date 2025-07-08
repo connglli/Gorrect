@@ -25,15 +25,16 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.GID;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GRemoveAllReferentsInstruction removes all references that the object servers as referers. This
  * instruction may cause certain objects to be unreachable, but it does not handle their removal.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-all-referents")
 public class GRemoveAllReferentsInstruction extends GInstruction {

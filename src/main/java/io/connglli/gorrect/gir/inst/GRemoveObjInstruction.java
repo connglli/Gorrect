@@ -25,16 +25,17 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.GID;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GRemoveObjInstruction removes an object from the object graph. It also removes all references
  * either where it is a referer or where it is a referent. This instruction may lead to the
  * unreachability of other objects. However, the instruction does not take care of them.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-obj")
 public class GRemoveObjInstruction extends GInstruction {

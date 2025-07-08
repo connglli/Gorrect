@@ -35,7 +35,7 @@ public class Reflections {
      * Returns a list of fields in the given class and its superclasses that are annotated with the
      * specified annotation. The fields are made accessible if they are private.
      */
-    public static List<Field> getAnnotatedFields(Object object,
+    public static Field[] getAnnotatedFields(Object object,
             Class<? extends Annotation> annotation) {
         Class<?> clazz = object.getClass();
         List<Field> fields = new ArrayList<>();
@@ -47,6 +47,6 @@ public class Reflections {
             }
             clazz = clazz.getSuperclass();
         }
-        return fields;
+        return fields.toArray(new Field[0]);
     }
 }

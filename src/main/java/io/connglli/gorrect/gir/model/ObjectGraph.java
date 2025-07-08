@@ -397,4 +397,44 @@ public class ObjectGraph {
         });
         return result;
     }
+
+    /// Helper method to convert the object graph in a human-readable format.
+    public String formatToText() {
+        StringBuilder sb = new StringBuilder();
+
+        sb.append("Roots: ").append(getRoots().size()).append("\n");
+        for (GObject obj : getRoots()) {
+            sb.append("- ").append(obj).append("\n");
+        }
+
+        sb.append("NonRoots: ").append(getObjects().size() - getRoots().size()).append("\n");
+        for (GObject obj : getObjects()) {
+            if (obj.isRoot()) {
+                continue;
+            }
+            sb.append("- ").append(obj).append("\n");
+        }
+
+        sb.append("References: ").append(getReferences().size()).append("\n");
+        for (GReference ref : getReferences()) {
+            sb.append("- ").append(ref).append("\n");
+        }
+
+        if (!objects.isEmpty()) {
+            sb.append("Adjacent Table:").append("\n");
+            for (GID source : refTo.keySet()) {
+                sb.append("- ").append(source).append(": ");
+                if (refTo.get(source).isEmpty()) {
+                    sb.append("<empty>").append("\n");
+                } else {
+                    sb.append(refTo.get(source).stream()
+                            .map(t -> t + ":" + getReference(source, t).getType().name())
+                            .collect(Collectors.joining(", "))).append("\n");
+                }
+            }
+
+        }
+
+        return sb.toString();
+    }
 }

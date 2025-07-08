@@ -26,15 +26,16 @@ package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import lombok.EqualsAndHashCode;
-import lombok.NonNull;
-import lombok.Value;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
 
 /**
  * GAddNonRootObjInstruction adds a new object to the graph as one of a non-root object. To make the
  * object reachable, this operation requires a referer object to reference it.
  */
-@Value
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-non-root")
 public class GAddNonRootObjInstruction extends GInstruction {
