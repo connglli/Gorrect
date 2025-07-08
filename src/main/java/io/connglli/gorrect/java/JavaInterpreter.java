@@ -160,7 +160,6 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
                 "The number of referers must match the number of reference types");
         GAssert.set(refererIds.size() == referenceIds.size(),
                 "The number of referers must match the number of references");
-
         for (int i = 0; i < refererIds.size(); i++) {
             heap.getObject(refererIds.get(i)).reference(referenceIds.get(i), referent,
                     referenceTypes.get(i));
@@ -177,7 +176,6 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
                 "The number of referers must match the number of reference types");
         GAssert.set(referentIds.size() == referenceIds.size(),
                 "The number of referers must match the number of references");
-
         for (int i = 0; i < referentIds.size(); i++) {
             referer.reference(referenceIds.get(i), heap.getObject(referentIds.get(i)),
                     referenceTypes.get(i));
@@ -196,9 +194,17 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
                 "Cannot swap the referents of the same reference");
         GeneratedReference ref1 = heap.getReference(instruction.getReferenceId1());
         GeneratedReference ref2 = heap.getReference(instruction.getReferenceId2());
+        GAssert.set(ref1.getType() == ref2.getType(),
+                "Cannot swap referents of different reference types: %s and %s", ref1.getType(),
+                ref2.getType());
+        GAssert.set(!ref1.getReferer().getId().equals(ref2.getReferer().getId()),
+                "Reference %s and reference %s have the same referer %s", ref1.getId(),
+                ref2.getId(), ref1.getReferer().getId());
         GAssert.set(!ref1.getReferent().getId().equals(ref2.getReferent().getId()),
                 "Reference %s and reference %s have the same referent %s", ref1.getId(),
                 ref2.getId(), ref1.getReferent().getId());
+        // FIXME: Require a temporary object to mediate between the two references.
+        // We can do this by adding two new pools for soft and weak references.
         ref1.redirect(ref2.getReferent());
         ref2.redirect(ref1.getReferent());
         return null;

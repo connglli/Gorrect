@@ -29,7 +29,8 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /**
- * GSwapReferentsInstruction swaps the referents of two references.
+ * GSwapReferentsInstruction swaps the referents of two references. Note that, this instruction
+ * requires the two reference are of the same type, of different referers and different referents.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)

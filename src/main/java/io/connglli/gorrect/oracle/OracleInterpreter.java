@@ -224,6 +224,12 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
                 "Cannot swap the referents of the same reference");
         OracleReference ref1 = heap.getReference(instruction.getReferenceId1());
         OracleReference ref2 = heap.getReference(instruction.getReferenceId2());
+        GAssert.set(ref1.getType() == ref2.getType(),
+                "Cannot swap referents of different reference types: %s and %s", ref1.getType(),
+                ref2.getType());
+        GAssert.set(!ref1.getReferer().getId().equals(ref2.getReferer().getId()),
+                "Reference %s and reference %s have the same referer %s", ref1.getId(),
+                ref2.getId(), ref1.getReferer().getId());
         GAssert.set(!ref1.getReferent().getId().equals(ref2.getReferent().getId()),
                 "Reference %s and reference %s have the same referent %s", ref1.getId(),
                 ref2.getId(), ref1.getReferent().getId());
