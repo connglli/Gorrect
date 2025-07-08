@@ -43,6 +43,7 @@ import lombok.NonNull;
  */
 public class OracleInterpreter implements GInstructionVisitor<Void> {
 
+    @SuppressWarnings("FieldCanBeLocal")
     @NonNull
     private final LangVM lvm;
 
@@ -52,18 +53,21 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
     @NonNull
     private final OracleHeap heap;
 
-    @NonNull
-    private final GSetHeapInstruction config;
-
     public OracleInterpreter(@NonNull LangVM lvm, @NonNull GProgram program) {
         this.lvm = lvm;
         this.program = program;
-        this.config = program.getConfiguration();
-        this.heap = new OracleHeap(lvm, config.getInitState());
+        this.heap = new OracleHeap(lvm);
     }
 
     public void interpret() {
         program.accept(this);
+        heap.clean();
+    }
+
+    public void interpret(GInstruction... instructions) {
+        for (GInstruction instruction : instructions) {
+            instruction.accept(this);
+        }
         heap.clean();
     }
 
@@ -73,6 +77,7 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     @Override
     public Void visit(GProgram program) {
+        program.getConfiguration().accept(this);
         for (GInstruction instruction : program.getInstructions()) {
             instruction.accept(this);
         }
@@ -81,7 +86,7 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     @Override
     public Void visit(GSetHeapInstruction instruction) {
-        GAssert.panic("Cannot reach here, GSetHeapInstruction is already handled");
+        heap.initialize(instruction.getInitState());
         return null;
     }
 
@@ -109,7 +114,7 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     @Override
     public Void visit(GMakeNonRootInstruction instruction) {
-        heap.getNonRootObject(instruction.getObjectId()).toNonRoot();
+        heap.getRootObject(instruction.getObjectId()).toNonRoot();
         return null;
     }
 
@@ -215,8 +220,13 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
 
     @Override
     public Void visit(GSwapReferentsInstruction instruction) {
+        GAssert.set(!instruction.getReferenceId1().equals(instruction.getReferenceId2()),
+                "Cannot swap the referents of the same reference");
         OracleReference ref1 = heap.getReference(instruction.getReferenceId1());
         OracleReference ref2 = heap.getReference(instruction.getReferenceId2());
+        GAssert.set(!ref1.getReferent().getId().equals(ref2.getReferent().getId()),
+                "Reference %s and reference %s have the same referent %s", ref1.getId(),
+                ref2.getId(), ref1.getReferent().getId());
         ref1.redirect(ref2.getReferent());
         ref2.redirect(ref1.getReferent());
         return null;

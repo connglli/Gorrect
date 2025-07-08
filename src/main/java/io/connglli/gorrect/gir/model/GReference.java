@@ -24,12 +24,14 @@
 
 package io.connglli.gorrect.gir.model;
 
+import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
+import io.connglli.gorrect.utility.GAssert;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
 
 /**
- * GRef represents a reference between two objects
+ * GReference represents a reference between two objects
  */
 @Data
 @AllArgsConstructor
@@ -64,6 +66,34 @@ public class GReference {
         public boolean weakerThanOrEqual(Type other) {
             return !strongerThan(other);
         }
+
+        public Type soften() {
+            if (this == STRONG) {
+                return SOFT;
+            } else if (this == SOFT) {
+                return WEAK;
+            } else if (this == WEAK) {
+                GAssert.panic("Weak reference cannot be further soften");
+                return WEAK;
+            } else {
+                GAssert.panic("Cannot reach here");
+                return WEAK;
+            }
+        }
+
+        public Type strengthen() {
+            if (this == WEAK) {
+                return SOFT;
+            } else if (this == SOFT) {
+                return STRONG;
+            } else if (this == STRONG) {
+                GAssert.panic("Strong reference cannot be further strengthen");
+                return STRONG;
+            } else {
+                GAssert.panic("Cannot reach here");
+                return STRONG;
+            }
+        }
     }
 
     private final GID id; // Unique identifier for the reference
@@ -88,6 +118,10 @@ public class GReference {
 
     public boolean isWeak() {
         return type == Type.WEAK;
+    }
+
+    public void accept(ObjectGraph graph, @NonNull ReferenceVisitor visitor) {
+        visitor.visit(graph, this);
     }
 
     @Override

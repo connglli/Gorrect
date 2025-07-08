@@ -24,12 +24,13 @@
 
 package io.connglli.gorrect.gir.model;
 
+import io.connglli.gorrect.gir.model.visitor.ObjectVisitor;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
 
 /**
- * GObj represents an object
+ * GObject represents an object
  */
 @Data
 @AllArgsConstructor
@@ -54,6 +55,10 @@ public class GObject {
 
     public boolean isRoot() {
         return type == Type.GCROOT;
+    }
+
+    public void accept(ObjectGraph graph, @NonNull ObjectVisitor visitor) {
+        visitor.visit(graph, this);
     }
 
     @Override

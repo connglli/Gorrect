@@ -29,6 +29,7 @@ import java.util.List;
 
 import io.connglli.gorrect.utility.GAssert;
 import lombok.Getter;
+import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
 /**
@@ -37,7 +38,9 @@ import lombok.RequiredArgsConstructor;
 @Getter
 @RequiredArgsConstructor
 public class GProgram extends GInstruction {
+    @NonNull
     private final GSetHeapInstruction configuration;
+
     private final List<GInstruction> instructions = new ArrayList<>();
 
     public void addInstruction(GInstruction instruction) {

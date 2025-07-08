@@ -203,9 +203,9 @@ class ObjectGraphTest {
         // Remove some references and validate reachability again
         for (int i = 1; i <= 10; i++) {
             final GID refererId = objects.get(i);
-            Set<GID> referentIds = graph.getReferents(refererId);
-            for (GID referentId : referentIds) {
-                graph.removeReference(refererId, referentId);
+            List<GObject> referents = graph.getReferents(refererId);
+            for (GObject referent : referents) {
+                graph.removeReference(refererId, referent.getId());
             }
             graph.removeReference(graph.getReference(objects.getFirst(), refererId).getId());
         }

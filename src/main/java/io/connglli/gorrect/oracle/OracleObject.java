@@ -29,9 +29,10 @@ import java.util.Set;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.utility.GAssert;
 import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
+@RequiredArgsConstructor
 public class OracleObject {
 
     @NonNull
@@ -39,11 +40,6 @@ public class OracleObject {
 
     @NonNull
     private final GObject object;
-
-    public OracleObject(@NonNull OracleHeap heap, @NonNull GObject object) {
-        this.heap = heap;
-        this.object = object;
-    }
 
     public GID getId() {
         return object.getId();
@@ -53,14 +49,20 @@ public class OracleObject {
         return object.getType();
     }
 
+    public boolean isRoot() {
+        return object.isRoot();
+    }
+
     public void toRoot() {
-        GAssert.set(!object.isRoot(), "Object with id %s is not a non-root object", getId());
-        object.setType(GObject.Type.GCROOT);
+        heap.makeRoot(this);
     }
 
     public void toNonRoot() {
-        GAssert.set(object.isRoot(), "Object with id %s is not a root object", getId());
-        object.setType(GObject.Type.ORDINARY);
+        heap.makeNonRoot(this);
+    }
+
+    /* package */ void setType(@NonNull GObject.Type type) {
+        object.setType(type);
     }
 
     public long getSize() {

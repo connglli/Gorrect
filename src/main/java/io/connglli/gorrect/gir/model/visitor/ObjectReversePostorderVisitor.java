@@ -47,7 +47,7 @@ public abstract class ObjectReversePostorderVisitor implements ObjectVisitor {
             visit0(graph, root.getId(), order, visited);
         }
         while (!order.isEmpty()) {
-            visit(graph, graph.getObject(order.pop()));
+            graph.getObject(order.pop()).accept(graph, this);
         }
     }
 
@@ -57,8 +57,8 @@ public abstract class ObjectReversePostorderVisitor implements ObjectVisitor {
             return;
         }
         visited.add(refererId);
-        for (GID referentId : graph.getReferents(refererId)) {
-            visit0(graph, referentId, order, visited);
+        for (GObject referent : graph.getReferents(refererId)) {
+            visit0(graph, referent.getId(), order, visited);
         }
         order.push(refererId);
     }

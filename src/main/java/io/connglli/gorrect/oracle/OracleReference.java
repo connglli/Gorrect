@@ -26,11 +26,10 @@ package io.connglli.gorrect.oracle;
 
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.utility.GAssert;
-import lombok.AllArgsConstructor;
 import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
-@AllArgsConstructor
+@RequiredArgsConstructor
 public class OracleReference {
 
     @NonNull
@@ -56,45 +55,11 @@ public class OracleReference {
     }
 
     public void strengthen() {
-        switch (getType()) {
-            case GReference.Type.STRONG:
-                GAssert.panic(
-                        "Reference with id %d is already a strong reference".formatted(getId()));
-                break;
-
-            case GReference.Type.SOFT:
-                reference.setType(GReference.Type.STRONG);
-                break;
-
-            case GReference.Type.WEAK:
-                reference.setType(GReference.Type.SOFT);
-                break;
-
-            default:
-                GAssert.panic("Cannot reach here");
-                break;
-        }
+        reference.setType(reference.getType().strengthen());
     }
 
     public void soften() {
-        switch (getType()) {
-            case GReference.Type.WEAK:
-                GAssert.panic(
-                        "Reference with id %d is already a weak reference".formatted(getId()));
-                break;
-
-            case GReference.Type.SOFT:
-                reference.setType(GReference.Type.WEAK);
-                break;
-
-            case GReference.Type.STRONG:
-                reference.setType(GReference.Type.SOFT);
-                break;
-
-            default:
-                GAssert.panic("Cannot reach here");
-                break;
-        }
+        reference.setType(reference.getType().soften());
     }
 
     public void unlink() {
@@ -102,9 +67,6 @@ public class OracleReference {
     }
 
     public void redirect(@NonNull OracleObject newReferent) {
-        GAssert.set(newReferent.getId() != getReferent().getId(),
-                "Cannot redirect reference %s to the same referent", getId());
-        heap.unlink(getReferer(), getReferent());
-        heap.reference(getId(), getReferer(), newReferent, getType());
+        heap.redirect(this, newReferent);
     }
 }

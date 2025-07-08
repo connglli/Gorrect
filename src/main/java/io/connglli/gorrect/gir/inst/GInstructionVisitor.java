@@ -31,13 +31,22 @@ package io.connglli.gorrect.gir.inst;
  */
 public interface GInstructionVisitor<T> {
 
-    /// The entry point for visiting a program
+    // -=======================================================
+    // The entry point for visiting a program
+    // -=======================================================
+
     T visit(GProgram program);
 
-    /// Setup instructions
+    // -=======================================================
+    // Setup instructions
+    // -=======================================================
+
     T visit(GSetHeapInstruction instruction);
 
-    /// Object management instructions
+    // -=======================================================
+    // Object management instructions
+    // -=======================================================
+
     T visit(GAddRootObjInstruction instruction);
 
     T visit(GAddNonRootObjInstruction instruction);
@@ -50,10 +59,13 @@ public interface GInstructionVisitor<T> {
 
     T visit(GRemoveObjInstruction instruction);
 
-    /// Reference management instructions
-    T visit(GAddSoftRefInstruction instruction);
+    // -=======================================================
+    // Reference management instructions
+    // -=======================================================
 
     T visit(GAddStrongRefInstruction instruction);
+
+    T visit(GAddSoftRefInstruction instruction);
 
     T visit(GAddWeakRefInstruction instruction);
 
@@ -63,11 +75,11 @@ public interface GInstructionVisitor<T> {
 
     T visit(GReplaceReferentInstruction instruction);
 
+    T visit(GSwapReferentsInstruction instruction);
+
     T visit(GSoftenRefInstruction instruction);
 
     T visit(GStrengthRefInstruction instruction);
-
-    T visit(GSwapReferentsInstruction instruction);
 
     T visit(GRemoveRefInstruction instruction);
 

@@ -32,7 +32,6 @@ import java.util.Set;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.ObjectGraph;
-import io.connglli.gorrect.utility.GAssert;
 import lombok.NonNull;
 
 /**
@@ -51,14 +50,13 @@ public abstract class ObjectBreadthFirstVisitor implements ObjectVisitor {
         while (!queue.isEmpty()) {
             GID refererId = queue.poll();
             GObject obj = graph.getObject(refererId);
-            GAssert.set(obj != null, "The referer object with id %s is null", refererId);
             if (visited.contains(refererId)) {
                 continue;
             }
             visited.add(refererId);
-            visit(graph, obj);
-            for (GID referentId : graph.getReferents(refererId)) {
-                queue.offer(referentId);
+            obj.accept(graph, this);
+            for (GObject referent : graph.getReferents(refererId)) {
+                queue.offer(referent.getId());
             }
         }
     }

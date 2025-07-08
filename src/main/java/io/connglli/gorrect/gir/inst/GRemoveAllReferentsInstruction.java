@@ -30,8 +30,8 @@ import lombok.NonNull;
 import lombok.Value;
 
 /**
- * GRemoveAllReferentsInstruction removes all referents of a specified object. For each referent
- * being removed, all the references relating to it are also removed.
+ * GRemoveAllReferentsInstruction removes all references that the object servers as referers. This
+ * instruction may cause certain objects to be unreachable, but it does not handle their removal.
  */
 @Value
 @EqualsAndHashCode(callSuper = true)

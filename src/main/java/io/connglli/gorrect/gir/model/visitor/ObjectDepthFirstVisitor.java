@@ -31,7 +31,6 @@ import java.util.Stack;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.ObjectGraph;
-import io.connglli.gorrect.utility.GAssert;
 import lombok.NonNull;
 
 /**
@@ -50,14 +49,13 @@ public abstract class ObjectDepthFirstVisitor implements ObjectVisitor {
         while (!stack.isEmpty()) {
             GID refererId = stack.pop();
             GObject obj = graph.getObject(refererId);
-            GAssert.set(obj != null, "The referer object with id %s is null", refererId);
             if (visited.contains(refererId)) {
                 continue;
             }
             visited.add(refererId);
-            visit(graph, obj);
-            for (GID referentId : graph.getReferents(refererId)) {
-                stack.push(referentId);
+            obj.accept(graph, this);
+            for (GObject referent : graph.getReferents(refererId)) {
+                stack.push(referent.getId());
             }
         }
     }

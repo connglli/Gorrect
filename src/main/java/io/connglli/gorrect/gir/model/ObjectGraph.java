@@ -55,10 +55,15 @@ public class ObjectGraph {
     }
 
     public ObjectGraph(@NonNull ObjectGraph other) {
-        this.objects = new HashMap<>();
-        this.references = new HashMap<>();
-        this.refTo = new HashMap<>();
-        this.refBy = new HashMap<>();
+        this();
+        reset(other);
+    }
+
+    public void reset(@NonNull ObjectGraph other) {
+        this.objects.clear();
+        this.references.clear();
+        this.refTo.clear();
+        this.refBy.clear();
 
         for (GObject obj : other.objects.values()) {
             this.objects.put(obj.getId(), new GObject(obj));
@@ -80,7 +85,7 @@ public class ObjectGraph {
     }
 
     public List<GObject> getRoots() {
-        return objects.values().stream().filter(o -> o.isRoot()).collect(Collectors.toList());
+        return objects.values().stream().filter(GObject::isRoot).collect(Collectors.toList());
     }
 
     public List<GObject> getObjects() {
@@ -148,16 +153,16 @@ public class ObjectGraph {
         return references.get(new GID("null"));
     }
 
-    public Set<GID> getReferents(@NonNull GID refererId) {
+    public List<GObject> getReferents(@NonNull GID refererId) {
         GAssert.set(hasObject(refererId),
                 String.format("Object with id %s does not exist", refererId));
-        return new HashSet<>(refTo.get(refererId));
+        return refTo.get(refererId).stream().map(this::getObject).collect(Collectors.toList());
     }
 
-    public Set<GID> getReferers(@NonNull GID referentId) {
+    public List<GObject> getReferers(@NonNull GID referentId) {
         GAssert.set(hasObject(referentId),
                 String.format("Object with id %s does not exist", referentId));
-        return new HashSet<>(refBy.get(referentId));
+        return refBy.get(referentId).stream().map(this::getObject).collect(Collectors.toList());
     }
 
     /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
@@ -204,6 +209,7 @@ public class ObjectGraph {
 
     /// Add a reference into the graph. Note that it is the user's responsibility to ensure that the
     /// referrer and the referent all exist in the graph.
+    @SuppressWarnings("UnusedReturnValue")
     public GID addReference(@NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId,
             GReference.Type type) {
         GAssert.set(objects.containsKey(refererId), String.format(
@@ -272,9 +278,13 @@ public class ObjectGraph {
      * - Unreachable: Finally, an object is unreachable, and therefore eligible for reclamation,
      *   when it is not reachable in any of the above ways.
      *
+     * More: https://docs.oracle.com/javase/10/docs/api/java/lang/ref/package-summary.html
+     *
      * @formatter:on
      */
 
+    /// Remove unreachable objects from the graph. An unreachable object is an object that is not
+    /// reachable from any root object.
     public void removeUnreachableObjects() {
         Set<GID> reachableObjs = getReachableObjects();
         Set<GID> unreachableObjs = objects.keySet().stream()
@@ -286,6 +296,9 @@ public class ObjectGraph {
         });
     }
 
+    /// Remove weakly reachable objects from the graph. A weakly reachable object is an object that
+    /// is reachable from a root object through weak references, but not strongly or softly
+    /// reachable.
     public void removeWeaklyReachableObjects() {
         Set<GID> weaklyReachableObjs = getWeaklyReachableObjects();
         weaklyReachableObjs.forEach(id -> {
@@ -296,6 +309,8 @@ public class ObjectGraph {
         removeUnreachableObjects();
     }
 
+    /// Remove softly reachable objects from the graph. A softly reachable object is an object that
+    /// is reachable from a root object through soft references, but not strongly reachable.
     public void removeSoftlyReachableObjects() {
         Set<GID> stronglyRechableObjects = getStronglyReachableObjects();
         Set<GID> otherObjects = objects.keySet().stream()
@@ -308,28 +323,39 @@ public class ObjectGraph {
         removeUnreachableObjects();
     }
 
+    /// Get all strongly reachable objects in the graph. A strongly reachable object is an object
+    /// that is reachable from a root object without traversing any reference objects.
     public Set<GID> getStronglyReachableObjects() {
         return markReachability().entrySet().stream()
                 .filter(entry -> entry.getValue() == GReference.Type.STRONG).map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
 
+    /// Get all softly reachable objects in the graph. A softly reachable object is an object
+    /// that is reachable from a root object through soft references, but not strongly reachable.
     public Set<GID> getSoftlyReachableObjects() {
         return markReachability().entrySet().stream()
                 .filter(entry -> entry.getValue() == GReference.Type.SOFT).map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
 
+    /// Get all weakly reachable objects in the graph. A weakly reachable object is an object that
+    /// is reachable from a root object through weak references, but not strongly or softly
+    /// reachable.
     public Set<GID> getWeaklyReachableObjects() {
         return markReachability().entrySet().stream()
                 .filter(entry -> entry.getValue() == GReference.Type.WEAK).map(Map.Entry::getKey)
                 .collect(Collectors.toSet());
     }
 
+    /// Get all reachable objects in the graph. A reachable object is an object that is reachable
+    /// from a root object through any type of reference (strong, soft, or weak).
     public Set<GID> getReachableObjects() {
         return markReachability().keySet();
     }
 
+    /// Mark the reachability of each object in the graph. The reachability is determined by the
+    /// references between objects. The result is a map from object ID to its reachability type.
     private Map<GID, GReference.Type> markReachability() {
         Map<GID, GReference.Type> result = new HashMap<>();
         accept(new ObjectBreadthFirstVisitor() {
@@ -341,7 +367,8 @@ public class ObjectGraph {
                     return;
                 }
                 GReference.Type referStrongestType = null;
-                for (GID refererId : graph.getReferers(referentId)) {
+                for (GObject referer : graph.getReferers(referentId)) {
+                    GID refererId = referer.getId();
                     GReference.Type referType = result.getOrDefault(refererId, null);
                     if (referType == null) {
                         continue; // Back-edges doesn't matter as the referer relies on us
