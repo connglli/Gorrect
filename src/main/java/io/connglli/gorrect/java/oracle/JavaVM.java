@@ -75,7 +75,8 @@ public class JavaVM extends LangVM {
 
   @Override
   public long estimateNewObjectHeapSize(long requestedSize) {
-    System.out.println("WARNING: OracleHeap.estimateNewObjectSize() is current NOT reliable");
+    System.out.println(
+        "WARNING(JavaVM.estimateNewObjectHeapSize): OracleHeap.estimateNewObjectSize() is current NOT reliable");
     // TODO: Consider metadata, vtable, type, etc.
     // We know that class have a base class GGeneratedClassBase.
     return requestedSize;
@@ -83,7 +84,8 @@ public class JavaVM extends LangVM {
 
   @Override
   public long estimateObjectHeapSize(OracleObject object) {
-    System.out.println("WARNING: OracleHeap.estimateObjectSize() is current NOT reliable");
+    System.out.println(
+        "WARNING(JavaVM.estimateObjectHeapSize): OracleHeap.estimateObjectSize() is current NOT reliable");
     // TODO: Consider referents, etc.
     // We know that each reference <u,v,s> has a field in
     // GGeneratedClassU.s_ref_to_v and the class has a super class called

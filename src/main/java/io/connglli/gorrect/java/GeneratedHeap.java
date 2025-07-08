@@ -455,6 +455,8 @@ class GeneratedHeap {
       @NonNull GeneratedObject referent,
       @NonNull GReference.Type referenceType) {
     // FIXME: Wrong when reference is strong while the referent is soft/weakly reachable.
+    System.out.println(
+        "WARNING(GeneratedHeap.reference): Wrong when reference is strong while the referent is soft/weakly reachable.");
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
     GeneratedObjectClass refererClazz = referer.getClazz();
@@ -530,6 +532,9 @@ class GeneratedHeap {
 
   void redirect(GeneratedReference reference, GeneratedObject newReferent) {
     // FIXME: Wrong when reference is strong while the new referent is soft/weakly reachable.
+    System.out.println(
+        "WARNING(GeneratedHeap.redirect): Wrong when reference is strong while the new referent is soft/weakly reachable.");
+
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
 

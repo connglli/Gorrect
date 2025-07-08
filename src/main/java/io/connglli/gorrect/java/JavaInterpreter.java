@@ -56,7 +56,7 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
     String file = heap.toJavaCode(directory);
     System.out.println("Java code generated: " + file);
     System.out.println(
-        "WARNING: The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
+        "WARNING(JavaInterpreter.toJavaCode): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
     return file;
   }
 
@@ -66,14 +66,14 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
       instruction.accept(this);
     }
     System.out.println(
-        "WARNING: The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
+        "WARNING(JavaInterpreter.visit(GProgram)): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
     return null;
   }
 
   public Void visit(GSetHeapInstruction instruction) {
     // TODO: Save HEAP configuration to use when running the generation program
     System.out.println(
-        "WARNING: The heap configurations (size, type, etc.) has not been written or saved");
+        "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (size, type, etc.) has not been written or saved");
     heap.initialize(instruction.getInitState());
     return null;
   }
@@ -223,6 +223,8 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
         ref1.getReferent().getId());
     // FIXME: Require a temporary object to mediate between the two references.
     // We can do this by adding two new pools for soft and weak references.
+    System.out.println(
+        "WARNING(JavaInterpreter.visit(GSwapReferentsInstruction): Require a temporary object to mediate between the two references.");
     ref1.redirect(ref2.getReferent());
     ref2.redirect(ref1.getReferent());
     return null;
