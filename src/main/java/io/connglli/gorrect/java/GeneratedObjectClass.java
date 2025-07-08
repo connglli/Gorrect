@@ -56,7 +56,7 @@ final class GeneratedObjectClass extends GeneratedClass {
     GeneratedObjectClass(@NonNull GeneratedHeap heap, GID objectId, long objectSize) {
         super(heap, clazzNameFor(objectId).canonicalName(), GeneratedObjectBaseClass.clazzName,
                 Modifier.FINAL);
-        addMethod(MethodSpec.constructorBuilder().addParameter(String.class, "id")
+        addMethod(MethodSpec.constructorBuilder()
                 .addStatement("super($S, $L)", objectId, objectSize).build());
         this.id = objectId;
         this.size = objectSize;
@@ -68,6 +68,6 @@ final class GeneratedObjectClass extends GeneratedClass {
     }
 
     private static ClassName clazzNameFor(@NonNull GID objectId) {
-        return ClassName.get("", "GGeneratedObject" + objectId);
+        return ClassName.get("", "GGeneratedObject$" + objectId);
     }
 }
