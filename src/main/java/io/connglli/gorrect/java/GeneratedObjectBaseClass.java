@@ -41,14 +41,33 @@ import lombok.NonNull;
  */
 final class GeneratedObjectBaseClass extends GeneratedClass {
     static final ClassName clazzName = ClassName.get("", "GGeneratedBase");
+    static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8; // 1MB
 
     private static final FieldSpec objectId =
             FieldSpec.builder(String.class, "id", Modifier.PUBLIC, Modifier.FINAL).build();
     private static final FieldSpec objectSize =
-            FieldSpec.builder(byte[].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
+            FieldSpec.builder(byte[][].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
     private static final MethodSpec constructor = MethodSpec.constructorBuilder()
             .addParameter(String.class, "id").addParameter(long.class, "size")
-            .addStatement("this.id = id").addStatement("this.padding = new byte[size]").build();
+            // @formatter:off
+            .addCode(
+                """
+                    this.id = id;
+                    if (size <= 0) {
+                        throw new IllegalArgumentException("Object size must be a positive value, got " + size);
+                    }
+                    int numChunks = (int) ((size + $L - 1) / $L);
+                    this.padding = new byte[numChunks][];
+                    for (int i = 0; i < numChunks; i++) {
+                        int chunkSize = (int) Math.min(size, $L);
+                        this.padding[i] = new byte[chunkSize];
+                        size -= chunkSize;
+                    }
+                """,
+                MAX_ARRAY_SIZE, MAX_ARRAY_SIZE, MAX_ARRAY_SIZE
+            )
+            // @formatter:on
+            .build();
 
     GeneratedObjectBaseClass(@NonNull GeneratedHeap heap) {
         super(heap, clazzName.canonicalName(), Modifier.ABSTRACT);
