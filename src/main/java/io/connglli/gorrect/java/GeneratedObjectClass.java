@@ -30,7 +30,7 @@ import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.MethodSpec;
 
 import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.utility.Formats;
 import lombok.Getter;
 import lombok.NonNull;
 
@@ -63,11 +63,7 @@ final class GeneratedObjectClass extends GeneratedClass {
         this.clazzName = clazzNameFor(objectId);
     }
 
-    GeneratedObjectClass(@NonNull GeneratedHeap heap, GObject object) {
-        this(heap, object.getId(), object.getSize());
-    }
-
     private static ClassName clazzNameFor(@NonNull GID objectId) {
-        return ClassName.get("", "GGeneratedObject$" + objectId);
+        return ClassName.get("", "GGeneratedObject" + Formats.toCamelCase(objectId.get(), true));
     }
 }
