@@ -356,7 +356,7 @@ public class ObjectGraph {
 
     /// Mark the reachability of each object in the graph. The reachability is determined by the
     /// references between objects. The result is a map from object ID to its reachability type.
-    private Map<GID, GReference.Type> markReachability() {
+    public Map<GID, GReference.Type> markReachability() {
         Map<GID, GReference.Type> result = new HashMap<>();
         accept(new ObjectBreadthFirstVisitor() {
             @Override

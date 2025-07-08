@@ -47,7 +47,7 @@ public class JavaInterpreterTest {
         GProgram program = new GProgram(setHeap);
 
         // Add a root object of size 30MB
-        GID rootId = new GID("$1");
+        GID rootId = new GID("r1");
         GAddRootObjInstruction addRootObj = new GAddRootObjInstruction(30L * 1024 * 1024, rootId);
         program.addInstruction(addRootObj);
 
@@ -87,7 +87,6 @@ public class JavaInterpreterTest {
         // Execute the program
         JavaInterpreter interpreter = new JavaInterpreter(program);
         interpreter.interpret();
-        System.out.println(interpreter.toJavaCode("/tmp/"));
 
         ObjectGraph finalState = interpreter.getState();
 

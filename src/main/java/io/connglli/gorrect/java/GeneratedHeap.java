@@ -111,6 +111,7 @@ class GeneratedHeap {
         String filePath = directory + File.separator + mainClazz.getClazzName() + ".java";
         try (FileOutputStream fout = new FileOutputStream(filePath)) {
             fout.write(mainClazz.toJavaCode().getBytes());
+            fout.write(new GeneratedObjectBaseClass(this).toJavaCode().getBytes());
             List<GID> sorted = new LinkedList<>();
             sorted.addAll(objects.keySet());
             sorted.addAll(deadObjects.keySet());
@@ -119,9 +120,6 @@ class GeneratedHeap {
                 GeneratedObject obj =
                         objects.getOrDefault(objId, deadObjects.getOrDefault(objId, null));
                 GAssert.set(obj != null, "The object with id %s does not exist", objId);
-                fout.write(obj.getClazz().toJavaCode().getBytes());
-            }
-            for (GeneratedObject obj : deadObjects.values()) {
                 fout.write(obj.getClazz().toJavaCode().getBytes());
             }
             return filePath;
@@ -188,7 +186,8 @@ class GeneratedHeap {
                         .builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC,
                                 Modifier.STATIC)
                         .initializer("new $T()", rootClazz.clazzName).build());
-        return putObject(new GeneratedObject(this, rootClazz, GObject.Type.GCROOT, fieldName));
+        return putObject(new GeneratedObject(this, rootClazz, GObject.Type.GCROOT, fieldName,
+                GReference.Type.STRONG));
     }
 
     @NonNull
@@ -206,8 +205,9 @@ class GeneratedHeap {
                                         Modifier.PUBLIC, Modifier.STATIC)
                                 .initializer("null").build());
         // Instantiate the root object in the main method
-        appendStatement("$S = new $T()", fieldName, rootClazz.clazzName);
-        return putObject(new GeneratedObject(this, rootClazz, GObject.Type.GCROOT, fieldName));
+        appendStatement(fieldName + " = new $T()", rootClazz.clazzName);
+        return putObject(new GeneratedObject(this, rootClazz, GObject.Type.GCROOT, fieldName,
+                GReference.Type.STRONG));
     }
 
     NonRootInPoolAllocator getNonRootInPoolAllocator() {
@@ -221,18 +221,18 @@ class GeneratedHeap {
             GeneratedObjectClass objectClazz =
                     new GeneratedObjectClass(GeneratedHeap.this, objectId, objectSize);
             // Create a temporary object in the pool so that it can be referenced later.
-            GeneratedObject object =
+            GeneratedObject object = // The reachability will be updated after the pool is closed
                     new GeneratedObject(GeneratedHeap.this, objectClazz, GObject.Type.ORDINARY,
-                            "%s.get(%s)".formatted(OBJECT_POOL_NAME, objectClazz.getId()));
-            appendStatement("$S.put($S, new $T())", OBJECT_POOL_NAME, objectClazz.getId(),
-                    objectClazz.clazzName);
+                            "%s.get(%s)".formatted(OBJECT_POOL_NAME, objectClazz.getId()), null);
+            appendStatement(OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(),
+                    objectClazz.clazzName); //
             return putObject(object);
         }
 
         @Override
         public void close() {
             // We clear the pool to release all the strong references
-            appendStatement("$S.clear()", OBJECT_POOL_NAME);
+            appendStatement(OBJECT_POOL_NAME + ".clear()");
             // The reference relationship is changed, we should update the heap
             updateHeap();
         }
@@ -246,8 +246,8 @@ class GeneratedHeap {
         GeneratedClass refererClazz = referer.getClazz();
 
         GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
-        GeneratedObject object =
-                putObject(new GeneratedObject(this, objectClazz, GObject.Type.ORDINARY, ""));
+        GeneratedObject object = // The reachability will be updated after the pool is closed
+                putObject(new GeneratedObject(this, objectClazz, GObject.Type.ORDINARY, "", null));
 
         String fieldName = GeneratedObject.computeFieldName(referenceType, objectClazz.getId());
         switch (referenceType) {
@@ -257,7 +257,8 @@ class GeneratedHeap {
                         .builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the object object by our new field
-                appendStatement("$S.$S = new $T()", referer.getIdentifier(), fieldName,
+                appendStatement(
+                        "%s.%s = new $T()".formatted(referer.getTypeCastIdentifier(), fieldName),
                         objectClazz.clazzName);
                 break;
             }
@@ -268,7 +269,9 @@ class GeneratedHeap {
                 refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the object object by our new field
-                appendStatement("$S.$S = new $T<$T>(new $T)", referer.getIdentifier(), fieldName,
+                appendStatement(
+                        "%s.%s = new $T<$T>(new $T())".formatted(referer.getTypeCastIdentifier(),
+                                fieldName),
                         softRefClazz, objectClazz.clazzName, objectClazz.clazzName);
                 break;
             }
@@ -279,7 +282,9 @@ class GeneratedHeap {
                 refererClazz.addField(FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the object object by our new field
-                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
+                appendStatement(
+                        "%s.%s = new $T<$T>(new $T())".formatted(referer.getTypeCastIdentifier(),
+                                fieldName),
                         weakRefClazz, objectClazz.clazzName, objectClazz.clazzName);
                 break;
             }
@@ -329,7 +334,7 @@ class GeneratedHeap {
                                         Modifier.PUBLIC, Modifier.STATIC)
                                 .initializer("null").build());
         // Transfer the ownership of the object to the main class
-        appendStatement("$S = $S", fieldName, object.getIdentifier());
+        appendStatement(fieldName + " = " + object.getTypeCastIdentifier());
         object.setType(GObject.Type.GCROOT);
         // The object turns to a root object, we should update the heap globally
         updateHeap();
@@ -340,7 +345,7 @@ class GeneratedHeap {
         String fieldName = GeneratedMainClass.computeFieldName(root.getId());
         GAssert.set(mainClazz.hasField(fieldName),
                 "Cannot remove root reference to %s, as it does not exist", fieldName);
-        appendStatement("$S = null", fieldName);
+        appendStatement(fieldName + " = null");
         root.setType(GObject.Type.ORDINARY);
         // The object turns to a non-root object, we should update the heap globally
         updateHeap();
@@ -414,6 +419,8 @@ class GeneratedHeap {
     @NonNull
     GeneratedReference reference(@NonNull GID referenceId, @NonNull GeneratedObject referer,
             @NonNull GeneratedObject referent, @NonNull GReference.Type referenceType) {
+        // FIXME: Wrong when reference is strong while the referent is soft/weakly reachable.
+
         String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
         GeneratedObjectClass refererClazz = referer.getClazz();
 
@@ -424,8 +431,8 @@ class GeneratedHeap {
                         .builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the referent object by our new field
-                appendStatement("$S.$S = $S", referer.getIdentifier(), fieldName,
-                        referent.getIdentifier());
+                appendStatement("%s.%s = %s".formatted(referer.getTypeCastIdentifier(), fieldName,
+                        referent.getTypeCastIdentifier()));
                 break;
             }
 
@@ -435,19 +442,23 @@ class GeneratedHeap {
                 refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the referent object by our new field
-                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
-                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
+                appendStatement(
+                        "%s.%s = new $T<$T>(%s)".formatted(referer.getTypeCastIdentifier(),
+                                fieldName, referent.getTypeCastIdentifier()),
+                        softRefClazz, referent.getClazz().clazzName);
                 break;
             }
 
             case WEAK: {
-                ClassName softRefClazz = ClassName.get(WeakReference.class);
+                ClassName weakRefClazz = ClassName.get(WeakReference.class);
                 // Create a field in our class so that we can reference the referent
-                refererClazz.addField(FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
+                refererClazz.addField(FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
                         .initializer("null").build());
                 // Reference the referent object by our new field
-                appendStatement("$S.$S = new $T<$T>($S)", referer.getIdentifier(), fieldName,
-                        softRefClazz, referent.getClazz().clazzName, referent.getIdentifier());
+                appendStatement(
+                        "%s.%s = new $T<$T>(%s)".formatted(referer.getTypeCastIdentifier(),
+                                fieldName, referent.getTypeCastIdentifier()),
+                        weakRefClazz, referent.getClazz().clazzName);
                 break;
             }
 
@@ -465,6 +476,7 @@ class GeneratedHeap {
     }
 
     void redirect(GeneratedReference reference, GeneratedObject newReferent) {
+        // FIXME: Wrong when reference is strong while the new referent is soft/weakly reachable.
         GeneratedObject referer = reference.getReferer();
         GeneratedObject referent = reference.getReferent();
 
@@ -473,7 +485,7 @@ class GeneratedHeap {
                 "Cannot replace reference's referent %s to %s, as it does not exist",
                 reference.getReferent().getId(), newReferent.getId());
 
-        appendStatement("$S = $S", referent.getIdentifier(), newReferent.getIdentifier());
+        appendStatement(referent.getIdentifier() + " = " + newReferent.getTypeCastIdentifier());
         reference.setReferent(newReferent);
 
         // The reference relationship is changed, we should update the heap
@@ -486,7 +498,7 @@ class GeneratedHeap {
         String fieldName = reference.getField();
         GAssert.set(referer.getClazz().hasField(fieldName),
                 "Cannot remove reference to %s, as it does not exist", fieldName);
-        appendStatement("$S = null", referent.getIdentifier());
+        appendStatement(referent.getIdentifier() + " = null");
 
         // Remove the reference from the referents map
         moveReferenceToDead(reference);
@@ -537,6 +549,12 @@ class GeneratedHeap {
 
     private void updateHeap() {
         ObjectGraph graph = getState();
+        // Update the reachability of all objects based on the current state
+        Map<GID, GReference.Type> reachableObjects = graph.markReachability();
+        for (GID objId : objects.keySet()) {
+            GeneratedObject obj = objects.get(objId);
+            obj.setReachability(reachableObjects.getOrDefault(objId, null));
+        }
         // Update the identifiers of all objects based on the strongest reference
         graph.accept(new ObjectReversePostorderVisitor() {
             private final Set<GID> visited = new HashSet<>();
@@ -575,8 +593,8 @@ class GeneratedHeap {
                 // We update the reference according to the strongest reference.
                 GeneratedObject strongestGenReferer = getObject(strongestRef.getReferer());
                 GeneratedReference strongestGenRef = getReference(strongestRef.getId());
-                genObj.setIdentifier(
-                        strongestGenReferer.getIdentifier() + "." + strongestGenRef.getField());
+                genObj.setIdentifier(strongestGenReferer.getTypeCastIdentifier() + "."
+                        + strongestGenRef.getField());
 
                 visited.add(obj.getId());
             }

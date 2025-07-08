@@ -36,7 +36,7 @@ import lombok.*;
  * GeneratedObject represents a generated object in the Java code generation. It contains methods to
  * manage the object's class, type, identifier, and references.
  */
-@RequiredArgsConstructor
+@AllArgsConstructor
 class GeneratedObject {
     @NonNull
     private final GeneratedHeap heap;
@@ -54,6 +54,11 @@ class GeneratedObject {
     @Getter(AccessLevel.PACKAGE)
     @Setter(AccessLevel.PACKAGE)
     private String identifier;
+
+    // Null means unreachable
+    @Getter(AccessLevel.PACKAGE)
+    @Setter(AccessLevel.PACKAGE)
+    private GReference.Type reachability;
 
     @NonNull
     GID getId() {
@@ -114,6 +119,18 @@ class GeneratedObject {
 
     void free() {
         heap.freeObject(this);
+    }
+
+    String getTypeCastIdentifier() {
+        return switch (reachability) {
+            case STRONG -> "((%s)(%s))".formatted(clazz.getClazzName(), identifier);
+            case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), identifier);
+            case null -> identifier; // Unreachable object, no type cast needed
+            default -> {
+                GAssert.panic("Cannot reach here: %s", reachability);
+                yield "";
+            }
+        };
     }
 
     static String computeFieldName(@NonNull GReference.Type type, @NonNull GID referentId) {

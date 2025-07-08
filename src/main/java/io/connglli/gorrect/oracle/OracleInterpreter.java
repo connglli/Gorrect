@@ -125,11 +125,11 @@ public class OracleInterpreter implements GInstructionVisitor<Void> {
                 heap.allocateObject(instruction.getCloneId(), object.getSize(), object.getType());
         object.getReferents().forEach(referent -> {
             OracleReference reference = heap.getReference(object, referent);
-            clone.reference(new GID(reference.getId() + "$cloned"), referent, reference.getType());
+            clone.reference(new GID(reference.getId() + "__cloned"), referent, reference.getType());
         });
         object.getReferers().forEach(referer -> {
             OracleReference reference = heap.getReference(referer, object);
-            referer.reference(new GID(reference.getId() + "$cloned"), clone, reference.getType());
+            referer.reference(new GID(reference.getId() + "__cloned"), clone, reference.getType());
         });
         return null;
     }
