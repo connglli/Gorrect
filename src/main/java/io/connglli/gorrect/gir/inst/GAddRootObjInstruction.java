@@ -30,7 +30,8 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /***
- * GAddRootObjInstruction adds a new object to the graph as one of a root object.
+ * GAddRootObjInstruction adds a new object to the graph as one of a root object. This instruction
+ * requires the new object not to exist. Otherwise, an exception should be thrown.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
@@ -45,6 +46,7 @@ public class GAddRootObjInstruction extends GInstruction {
 
   /** The unique ID assigned to the newly created root object. */
   @GIROutput(0)
+  @GIRNotExist(GIRNotExist.Type.OBJECT)
   @NonNull
   GID objectId;
 

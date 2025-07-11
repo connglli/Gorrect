@@ -25,11 +25,16 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GSoftenRefInstruction softens the type of a reference by one level. */
+/**
+ * GSoftenRefInstruction softens the type of a reference by one level. This instruction requires the
+ * referer and the referent to be reachable, the reference exists, and the reference is not weak.
+ * Otherwise, an exception should be thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -38,11 +43,20 @@ import lombok.experimental.FieldDefaults;
 public class GSoftenRefInstruction extends GInstruction {
   /** The ID of the reference to be softened (weakened) by one level. */
   @GIRInput(0)
+  @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)
   @NonNull
   GID referenceId;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    super.checkValidity(graph);
+    if (graph.getReference(referenceId).isWeak()) {
+      throw new InvalidInputException("The reference " + referenceId + " is already weak.");
+    }
   }
 }

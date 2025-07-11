@@ -31,7 +31,12 @@ import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GAddFaninRefsInstruction enables a list of referers to reference a single referent. */
+/**
+ * GAddFaninRefsInstruction enables a list of referers to reference a single referent. The
+ * instruction requires that all referers and the referent are reachable, and no existing references
+ * are among them. Otherwise, some reference cannot be added and an exception should be thereby
+ * thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -40,11 +45,13 @@ import lombok.experimental.FieldDefaults;
 public class GAddFaninRefsInstruction extends GInstruction {
   /** The source objects of the new references */
   @GIRInput(0)
+  @GIRReachable
   @NonNull
   List<GID> refererIds;
 
   /** The target object being referenced */
   @GIRInput(1)
+  @GIRReachable
   @NonNull
   GID referentId;
 
@@ -55,6 +62,7 @@ public class GAddFaninRefsInstruction extends GInstruction {
 
   /** The newly created references */
   @GIROutput(0)
+  @GIRNotExist(GIRNotExist.Type.REFERENCE)
   @NonNull
   List<GID> referenceIds;
 

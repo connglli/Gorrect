@@ -30,8 +30,10 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /**
- * GRemoveRefInstruction removes a reference from the graph. This may cause other objects to become
- * unreachable any more. However, the instruction itself only removes the reference, nothing else.
+ * GRemoveRefInstruction removes a reference from the graph. This instruction requires the referer
+ * and the referent to be reachable and the reference exists. Otherwise, an exception should be
+ * thrown. This may cause other objects to become unreachable any more. However, the instruction
+ * itself only removes the reference, nothing else.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
@@ -41,6 +43,7 @@ import lombok.experimental.FieldDefaults;
 public class GRemoveRefInstruction extends GInstruction {
   /** The ID of the reference to be removed from the graph. */
   @GIRInput(0)
+  @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)
   @NonNull
   GID referenceId;
 

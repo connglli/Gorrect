@@ -29,7 +29,11 @@ import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GAddSoftRefInstruction adds a soft reference between two objects. */
+/**
+ * GAddSoftRefInstruction adds a soft reference between two objects. The instructions requires the
+ * referer and referent to be reachable, and no existing reference between them exists. Otherwise,
+ * the reference can not be added and an exception should be thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -38,16 +42,19 @@ import lombok.experimental.FieldDefaults;
 public class GAddSoftRefInstruction extends GInstruction {
   /** The ID of the object that will be the source of the soft reference. */
   @GIRInput(0)
+  @GIRReachable
   @NonNull
   GID refererId;
 
   /** The ID of the object that will be the target of the soft reference. */
   @GIRInput(1)
+  @GIRReachable
   @NonNull
   GID referentId;
 
   /** The unique ID assigned to the newly created soft reference. */
   @GIROutput(0)
+  @GIRNotExist(GIRNotExist.Type.REFERENCE)
   @NonNull
   GID referenceId;
 

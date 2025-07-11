@@ -31,6 +31,7 @@ import lombok.experimental.FieldDefaults;
 
 /**
  * GRemoveAllReferentsInstruction removes all references that the object servers as referers. This
+ * instruction requires the referer to be reachable. Otherwise, an exception should be thrown. This
  * instruction may cause certain objects to be unreachable, but it does not handle their removal.
  */
 @RequiredArgsConstructor
@@ -41,6 +42,7 @@ import lombok.experimental.FieldDefaults;
 public class GRemoveAllReferentsInstruction extends GInstruction {
 
   @GIRInput(0)
+  @GIRReachable
   @NonNull
   GID refererId;
 

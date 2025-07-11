@@ -130,7 +130,9 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
               referer -> {
                 GeneratedReference reference = heap.getReference(referer, object);
                 referer.reference(
-                    new GID(reference.getId() + "__cloned"), clone, reference.getType());
+                    new GID(reference.getId() + instruction.getReferenceSuffix()),
+                    clone,
+                    reference.getType());
               });
       object
           .getReferents()
@@ -138,7 +140,9 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
               referent -> {
                 GeneratedReference reference = heap.getReference(object, referent);
                 clone.reference(
-                    new GID(reference.getId() + "__cloned"), referent, reference.getType());
+                    new GID(reference.getId() + instruction.getReferenceSuffix()),
+                    referent,
+                    reference.getType());
               });
     }
 

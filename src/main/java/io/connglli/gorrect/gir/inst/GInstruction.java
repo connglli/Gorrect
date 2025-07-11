@@ -25,27 +25,50 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
+import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.Reflections;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
 import java.lang.reflect.Field;
+import java.util.Collection;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
  * GInstruction represents an instruction of the Gorrect IR (GIR). All instructions of GIR operate
- * closely over an object graph (and nothing else) assuming unlimited heap memory, specifically the
- * operations are on objects and references in the graph.
+ * closely over an object graph (and nothing else), specifically on its objects and references.
  *
  * <p>Each instruction has an opcode, which is defined by the {@link GIROpCode} annotation.
  *
  * <p>The inputs and outputs of the instruction are annotated with {@link GIRInput} and {@link
  * GIROutput}, respectively.
+ *
+ * <p>The interpreter of a {@link io.connglli.gorrect.gir.GProgram} can assume limited or unlimited
+ * heap memory. For unlimited memory, each instruction will definitely success as long as the
+ * inputs/outputs of the instruction are valid. If the instruction is not valid, an {@link
+ * InvalidInputException} or {@link InvalidOutputException} will be thrown. For limited memory, some
+ * instruction may fail due to for example weakly/softly reachable objects are garbage collected. In
+ * these cases, an exception will be thrown.
  */
 public abstract class GInstruction {
+
+  public static class InvalidInputException extends RuntimeException {
+    public InvalidInputException(String message) {
+      super(message);
+    }
+  }
+
+  public static class InvalidOutputException extends RuntimeException {
+    public InvalidOutputException(String message) {
+      super(message);
+    }
+  }
+
   private String opCode;
 
   /**
@@ -192,6 +215,141 @@ public abstract class GInstruction {
   }
 
   /**
+   * Check the validity of the instruction on the given graph. This method should be called before
+   * the instruction is executed to ensure that the inputs and outputs are valid.
+   *
+   * @param graph The graph on which the instruction is executed
+   */
+  public void checkValidity(GGraph graph) {
+    Set<GID> reachableObjects = graph.getReachableObjects();
+
+    // Check all objects marked with @GIRReachable are indeed reachable
+    for (Field field : Reflections.getAnnotatedFields(this, GIRReachable.class)) {
+      field.setAccessible(true); // Make private fields accessible
+      String fieldName = field.getName();
+      try {
+        Object value = field.get(this);
+        if (value instanceof GID gid) {
+          if (!reachableObjects.contains(gid)) {
+            throw new InvalidInputException(
+                "Object %s is not reachable (field: %s, instruction: %s)"
+                    .formatted(gid, fieldName, this));
+          }
+        } else if (value instanceof Collection<?> gids) {
+          for (Object gid : gids) {
+            Assert.set(
+                gid instanceof GID,
+                "@GIRReachable field %s is not of type Collection<? extends GID>, got %s for value %s (instruction: %s)",
+                fieldName,
+                gid.getClass().getName(),
+                gid,
+                this);
+            if (!reachableObjects.contains((GID) gid)) {
+              throw new InvalidInputException(
+                  "Object %s is not reachable (field: %s, instruction: %s)"
+                      .formatted(gid, fieldName, this));
+            }
+          }
+        } else {
+          Assert.panic(
+              "@GIRReachable can only be applied to GID or Collection<? extends GID>, got %s (field: %s, instruction: %s)",
+              value.getClass().getName(), fieldName, this);
+        }
+      } catch (IllegalAccessException e) {
+        Assert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
+      }
+    }
+
+    // Check all inputs marked with @GIRNotExist do (not) exist
+    for (Field field : Reflections.getAnnotatedFields(this, GIRNotExist.class)) {
+      field.setAccessible(true); // Make private fields accessible
+      String fieldName = field.getName();
+      try {
+        Object value = field.get(this);
+        GIRNotExist annot = field.getAnnotation(GIRNotExist.class);
+        Assert.set(
+            annot != null, "The @GIRNotExist annotation is missing in the field %s", fieldName);
+        if (annot.value() == GIRNotExist.Type.OBJECT) {
+          if (value instanceof GID gid) {
+            if (annot.reverse() && !graph.hasObject(gid)) {
+              throw new InvalidInputException(
+                  "Object %s does not exist (field: %s, instruction: %s)"
+                      .formatted(gid, fieldName, this));
+            } else if (!annot.reverse() && graph.hasObject(gid)) {
+              throw new InvalidInputException(
+                  "Object %s already exists (field: %s, instruction: %s)"
+                      .formatted(gid, fieldName, this));
+            }
+          } else if (value instanceof Collection<?> gids) {
+            for (Object gid : gids) {
+              Assert.set(
+                  gid instanceof GID,
+                  "@GIRNotExist field %s is not of type Collection<? extends GID>, got %s for value %s (instruction: %s)",
+                  fieldName,
+                  gid.getClass().getName(),
+                  gid,
+                  this);
+              if (annot.reverse() && !graph.hasObject((GID) gid)) {
+                throw new InvalidInputException(
+                    "Object %s does not exist (field: %s, instruction: %s)"
+                        .formatted(gid, fieldName, this));
+              } else if (!annot.reverse() && graph.hasObject((GID) gid)) {
+                throw new InvalidInputException(
+                    "Object %s already exists (field: %s, instruction: %s)"
+                        .formatted(gid, fieldName, this));
+              }
+            }
+          } else {
+            Assert.panic(
+                "@GIRNotExist can only be applied to GID or Collection<? extends GID>, got %s (field: %s, instruction: %s)",
+                value.getClass().getName(), fieldName, this);
+          }
+        } else if (annot.value() == GIRNotExist.Type.REFERENCE) {
+          if (value instanceof GID gid) {
+            if (annot.reverse() && !graph.hasReference(gid)) {
+              throw new InvalidInputException(
+                  "Reference %s does not exist (field: %s, instruction: %s)"
+                      .formatted(gid, fieldName, this));
+            } else if (!annot.reverse() && graph.hasReference(gid)) {
+              throw new InvalidInputException(
+                  "Reference %s already exists (field: %s, instruction: %s)"
+                      .formatted(gid, fieldName, this));
+            }
+          } else if (value instanceof Collection<?> gids) {
+            for (Object gid : gids) {
+              Assert.set(
+                  gid instanceof GID,
+                  "@GIRNotExist field %s is not of type Collection<? extends GID>, got %s for value %s (instruction: %s)",
+                  fieldName,
+                  gid.getClass().getName(),
+                  gid,
+                  this);
+              if (annot.reverse() && !graph.hasReference((GID) gid)) {
+                throw new InvalidInputException(
+                    "Reference %s does not exist (field: %s, instruction: %s)"
+                        .formatted(gid, fieldName, this));
+              } else if (!annot.reverse() && graph.hasReference((GID) gid)) {
+                throw new InvalidInputException(
+                    "Reference %s already exists (field: %s, instruction: %s)"
+                        .formatted(gid, fieldName, this));
+              }
+            }
+          } else {
+            Assert.panic(
+                "@GIRNotExist can only be applied to GID or Collection<? extends GID>, got %s (field: %s, instruction: %s)",
+                value.getClass().getName(), fieldName, this);
+          }
+        } else {
+          Assert.panic("Unknown @GIRNotExist.Type: %s", annot.value());
+        }
+
+      } catch (IllegalAccessException e) {
+        Assert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
+      }
+    }
+  }
+
+  /**
    * Accept a visitor for this instruction. This method enables the visitor pattern by dispatching
    * to the appropriate visit method based on the runtime type of the instruction.
    *
@@ -245,4 +403,23 @@ public abstract class GInstruction {
 @Retention(RetentionPolicy.RUNTIME)
 @interface GIROpCode {
   String value(); // The opcode of the instruction
+}
+
+/// GIRReachable indicates that some objects (a {@link io.connglli.gorrect.gir.model.GID} or a list
+/// of {@link io.connglli.gorrect.gir.model.GID}) must be reachable
+@Retention(RetentionPolicy.RUNTIME)
+@interface GIRReachable {}
+
+/// GIRNotExist indicates that some input (a {@link io.connglli.gorrect.gir.model.GID} or a list
+/// of {@link io.connglli.gorrect.gir.model.GID}) cannot exist
+@Retention(RetentionPolicy.RUNTIME)
+@interface GIRNotExist {
+  enum Type {
+    OBJECT, // The object cannot be a root object
+    REFERENCE // The object cannot be a non-root object
+  }
+
+  Type value(); // The type of the input that cannot exist
+
+  boolean reverse() default false; // If true, the input must exist, otherwise it must not exist.
 }

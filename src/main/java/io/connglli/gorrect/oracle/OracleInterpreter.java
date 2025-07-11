@@ -90,12 +90,14 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GAddRootObjInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());
     return null;
   }
 
   @Override
   public Void visit(GAddNonRootObjInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     OracleObject referentObject =
         heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
     OracleObject refererObject = heap.getObject(instruction.getRefererId());
@@ -106,18 +108,21 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GMakeRootInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getNonRootObject(instruction.getObjectId()).toRoot();
     return null;
   }
 
   @Override
   public Void visit(GMakeNonRootInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getRootObject(instruction.getObjectId()).toNonRoot();
     return null;
   }
 
   @Override
   public Void visit(GCloneObjInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     OracleObject object = heap.getObject(instruction.getObjectId());
     OracleObject clone =
         heap.allocateObject(instruction.getCloneId(), object.getSize(), object.getType());
@@ -127,7 +132,9 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
             referent -> {
               OracleReference reference = heap.getReference(object, referent);
               clone.reference(
-                  new GID(reference.getId() + "__cloned"), referent, reference.getType());
+                  new GID(reference.getId() + instruction.getReferenceSuffix()),
+                  referent,
+                  reference.getType());
             });
     object
         .getReferers()
@@ -135,13 +142,16 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
             referer -> {
               OracleReference reference = heap.getReference(referer, object);
               referer.reference(
-                  new GID(reference.getId() + "__cloned"), clone, reference.getType());
+                  new GID(reference.getId() + instruction.getReferenceSuffix()),
+                  clone,
+                  reference.getType());
             });
     return null;
   }
 
   @Override
   public Void visit(GRemoveObjInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getObjectId()).free();
     heap.clean();
     return null;
@@ -149,6 +159,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GAddStrongRefInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getRefererId())
         .strongReference(instruction.getReferenceId(), heap.getObject(instruction.getReferentId()));
     return null;
@@ -156,6 +167,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GAddSoftRefInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getRefererId())
         .softReference(instruction.getReferenceId(), heap.getObject(instruction.getReferentId()));
     return null;
@@ -170,6 +182,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GAddFaninRefsInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     OracleObject referent = heap.getObject(instruction.getReferentId());
     List<GID> refererIds = instruction.getRefererIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
@@ -190,6 +203,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GAddFanoutRefsInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     OracleObject referer = heap.getObject(instruction.getRefererId());
     List<GID> referentIds = instruction.getReferentIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
@@ -210,18 +224,21 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GStrengthRefInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getReference(instruction.getReferenceId()).strengthen();
     return null;
   }
 
   @Override
   public Void visit(GSoftenRefInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getReference(instruction.getReferenceId()).soften();
     return null;
   }
 
   @Override
   public Void visit(GReplaceReferentInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getReference(instruction.getReferenceId())
         .redirect(heap.getObject(instruction.getNewReferentId()));
     heap.clean();
@@ -230,6 +247,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GSwapReferentsInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     Assert.set(
         !instruction.getReferenceId1().equals(instruction.getReferenceId2()),
         "Cannot swap the referents of the same reference");
@@ -259,6 +277,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GRemoveRefInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getReference(instruction.getReferenceId()).unlink();
     heap.clean();
     return null;
@@ -266,6 +285,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GRemoveAllReferentsInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getRefererId()).getReferences().forEach(OracleReference::unlink);
     heap.clean();
     return null;

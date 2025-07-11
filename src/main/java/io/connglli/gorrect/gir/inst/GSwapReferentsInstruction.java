@@ -25,13 +25,16 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
+import io.connglli.gorrect.gir.model.GReference;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /**
- * GSwapReferentsInstruction swaps the referents of two references. Note that, this instruction
- * requires the two reference are of the same type, of different referers and different referents.
+ * GSwapReferentsInstruction swaps the referents of two references. This instruction requires the
+ * two reference are of the same type, of different referers, and different referents. Otherwise, an
+ * exception should be thrown.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
@@ -41,16 +44,43 @@ import lombok.experimental.FieldDefaults;
 public class GSwapReferentsInstruction extends GInstruction {
   /** The ID of the first reference involved in the swap operation. */
   @GIRInput(0)
+  @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)
   @NonNull
   GID referenceId1;
 
   /** The ID of the second reference involved in the swap operation. */
   @GIRInput(1)
+  @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)
   @NonNull
   GID referenceId2;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    super.checkValidity(graph);
+    GReference ref1 = graph.getReference(referenceId1);
+    GReference ref2 = graph.getReference(referenceId2);
+    if (ref1.getType() != ref2.getType()) {
+      throw new InvalidInputException(
+          String.format(
+              "Cannot swap referents of different reference types: %s and %s",
+              ref1.getType(), ref2.getType()));
+    }
+    if (ref1.getReferer().equals(ref2.getReferer())) {
+      throw new InvalidInputException(
+          String.format(
+              "Reference %s and reference %s have the same referer %s",
+              ref1.getId(), ref2.getId(), ref1.getReferer()));
+    }
+    if (ref1.getReferent().equals(ref2.getReferent())) {
+      throw new InvalidInputException(
+          String.format(
+              "Reference %s and reference %s have the same referent %s",
+              ref1.getId(), ref2.getId(), ref1.getReferent()));
+    }
   }
 }

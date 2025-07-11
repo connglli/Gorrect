@@ -25,11 +25,15 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GMakeNonRootInstruction makes a root object non-root. */
+/**
+ * GMakeNonRootInstruction makes a root object non-root. This instruction requires that the object
+ * is a root before applying this instruction. Otherwise, an exception should be thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -39,10 +43,19 @@ public class GMakeNonRootInstruction extends GInstruction {
   /** The ID of the root object that are about to make non-root. */
   @GIRInput(0)
   @NonNull
+  @GIRReachable
   GID objectId;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    super.checkValidity(graph);
+    if (!graph.getObject(objectId).isRoot()) {
+      throw new InvalidInputException("The object " + objectId + " is not a root object.");
+    }
   }
 }

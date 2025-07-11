@@ -32,7 +32,9 @@ import lombok.experimental.FieldDefaults;
 
 /**
  * GAddNonRootObjInstruction adds a new object to the graph as one of a non-root object. To make the
- * object reachable, this operation requires a referer object to reference it.
+ * object reachable, this operation needs a referer object to reference it. This instruction
+ * requires that the referer object is reachable and the new object does not exist. Otherwise, the
+ * non-root object cannot be added and an exception should be thereby thrown.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
@@ -47,6 +49,7 @@ public class GAddNonRootObjInstruction extends GInstruction {
 
   /** The ID of the existing object that will reference the new object. */
   @GIRInput(1)
+  @GIRReachable
   @NonNull
   GID refererId;
 
@@ -57,11 +60,13 @@ public class GAddNonRootObjInstruction extends GInstruction {
 
   /** The unique ID assigned to the newly created object. */
   @GIROutput(0)
+  @GIRNotExist(GIRNotExist.Type.OBJECT)
   @NonNull
   GID objectId;
 
   /** The unique ID assigned to the newly created reference. */
   @GIROutput(1)
+  @GIRNotExist(GIRNotExist.Type.REFERENCE)
   @NonNull
   GID referenceId;
 

@@ -239,7 +239,7 @@ class OracleInterpreterTest {
 
     // Clone object
     GID o2c = new GID("o2c");
-    program.addInstruction(new GCloneObjInstruction(o2, o2c));
+    program.addInstruction(new GCloneObjInstruction(o2, o2c, "__cloned"));
 
     // Execute the program
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);

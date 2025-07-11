@@ -31,7 +31,12 @@ import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GAddFanoutRefsInstruction enables a referer to reference a list of different referents. */
+/**
+ * GAddFanoutRefsInstruction enables a referer to reference a list of different referents. The
+ * instruction requires that the referer and all referents are reachable, and no existing references
+ * are among them.. Otherwise, some reference cannot be added and an exception should be thereby
+ * thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -40,11 +45,13 @@ import lombok.experimental.FieldDefaults;
 public class GAddFanoutRefsInstruction extends GInstruction {
   /** The source object of the new references */
   @GIRInput(0)
+  @GIRReachable
   @NonNull
   GID refererId;
 
   /** The target objects being referenced */
   @GIRInput(1)
+  @GIRReachable
   @NonNull
   List<GID> referentIds;
 
@@ -55,6 +62,7 @@ public class GAddFanoutRefsInstruction extends GInstruction {
 
   /** The newly created references */
   @GIROutput(0)
+  @GIRNotExist(GIRNotExist.Type.REFERENCE)
   @NonNull
   List<GID> referenceIds;
 

@@ -55,6 +55,10 @@ public class OracleHeap {
     graph = new GGraph();
   }
 
+  public boolean hasObject(@NonNull GID objectId) {
+    return graph.hasObject(objectId);
+  }
+
   public @NonNull OracleObject getObject(@NonNull GID objectId) {
     return new OracleObject(this, graph.getObject(objectId));
   }

@@ -25,11 +25,17 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
-/** GReplaceReferentInstruction replaces the referent of a reference by a new referent. */
+/**
+ * GReplaceReferentInstruction replaces the referent of a reference by a new referent. This
+ * instruction requires the referer and the new referent to be reachable, the reference exists, the
+ * new referent is not the old referent, and an existing reference between the referer and the new
+ * referent does not exists. Otherwise, an exception should be thrown.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
@@ -38,16 +44,27 @@ import lombok.experimental.FieldDefaults;
 public class GReplaceReferentInstruction extends GInstruction {
   /** The ID of the reference whose referent will be replaced. */
   @GIRInput(0)
+  @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)
   @NonNull
   GID referenceId;
 
   /** The ID of the object that will become the new referent. */
   @GIRInput(1)
+  @GIRReachable
   @NonNull
   GID newReferentId;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    super.checkValidity(graph);
+    if (graph.getReference(referenceId).getReferent().equals(newReferentId)) {
+      throw new InvalidInputException(
+          "The referent of " + referenceId + " is already " + newReferentId);
+    }
   }
 }
