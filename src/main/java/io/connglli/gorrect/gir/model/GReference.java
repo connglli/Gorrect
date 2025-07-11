@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
+import io.connglli.gorrect.gir.model.visitor.GReferenceVisitor;
 import io.connglli.gorrect.utility.Assert;
 import lombok.AllArgsConstructor;
 import lombok.Data;
@@ -120,7 +120,7 @@ public class GReference {
     return type == Type.WEAK;
   }
 
-  public void accept(ObjectGraph graph, @NonNull ReferenceVisitor visitor) {
+  public void accept(GGraph graph, @NonNull GReferenceVisitor visitor) {
     visitor.visit(graph, this);
   }
 

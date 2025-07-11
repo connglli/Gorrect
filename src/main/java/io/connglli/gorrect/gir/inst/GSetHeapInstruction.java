@@ -25,7 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
-import io.connglli.gorrect.gir.model.ObjectGraph;
+import io.connglli.gorrect.gir.model.GGraph;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -42,7 +42,7 @@ public class GSetHeapInstruction extends GInstruction {
 
   @GIRInput(1)
   @NonNull
-  ObjectGraph initState;
+  GGraph initState;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {

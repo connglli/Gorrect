@@ -24,9 +24,9 @@
 
 package io.connglli.gorrect.gir.model.visitor;
 
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import java.util.HashSet;
 import java.util.LinkedList;
 import java.util.Queue;
@@ -37,10 +37,10 @@ import lombok.NonNull;
  * A visitor that traverses an object graph in breadth-first order. It visits each object and its
  * referents, starting from the roots of the graph.
  */
-public abstract class ObjectBreadthFirstVisitor implements ObjectVisitor {
+public abstract class GObjectBreadthFirstVisitor implements GObjectVisitor {
 
   @Override
-  public void visit(@NonNull ObjectGraph graph) {
+  public void visit(@NonNull GGraph graph) {
     Set<GID> visited = new HashSet<>();
     Queue<GID> queue = new LinkedList<>();
     for (GObject root : graph.getRoots()) {

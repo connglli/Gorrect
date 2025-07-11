@@ -28,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.inst.*;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.Logger;
 import java.util.List;
 import java.util.Set;
@@ -46,7 +46,7 @@ public class JavaInterpreterTest {
   @Test
   void testSimpleGraph() {
     // Use JavaVM and initialize ObjectGraph
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -62,7 +62,7 @@ public class JavaInterpreterTest {
     JavaInterpreter interpreter = new JavaInterpreter(program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     assertTrue(finalState.getObjects().stream().anyMatch(obj -> obj.getId().equals(rootId)));
@@ -70,7 +70,7 @@ public class JavaInterpreterTest {
 
   @Test
   void testComplexGraph() {
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -96,7 +96,7 @@ public class JavaInterpreterTest {
     JavaInterpreter interpreter = new JavaInterpreter(program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -109,7 +109,7 @@ public class JavaInterpreterTest {
 
   @Test
   void testCyclicGraph() {
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -136,7 +136,7 @@ public class JavaInterpreterTest {
     JavaInterpreter interpreter = new JavaInterpreter(program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -147,7 +147,7 @@ public class JavaInterpreterTest {
 
   @Test
   void testSoftReferences() {
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -168,7 +168,7 @@ public class JavaInterpreterTest {
     JavaInterpreter interpreter = new JavaInterpreter(program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -179,7 +179,7 @@ public class JavaInterpreterTest {
 
   @Test
   void testAllInstructions() {
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -241,7 +241,7 @@ public class JavaInterpreterTest {
     JavaInterpreter interpreter = new JavaInterpreter(program);
     interpreter.interpret();
 
-    ObjectGraph intermediateState = interpreter.getState();
+    GGraph intermediateState = interpreter.getState();
     assertFalse(intermediateState.hasObject(o1), "Expected o1 to be unreachable");
     assertTrue(intermediateState.hasReference(r1, r2), "Expected strong reference from r1 to r2");
     assertTrue(intermediateState.hasReference(r1, o2), "Expected strong reference from r1 to o2");
@@ -271,7 +271,7 @@ public class JavaInterpreterTest {
     JavaInterpreter newInterpreter = new JavaInterpreter(newProgram);
     newInterpreter.interpret();
 
-    ObjectGraph finalState = newInterpreter.getState();
+    GGraph finalState = newInterpreter.getState();
     stronglyReachable = finalState.getStronglyReachableObjects();
     Set<GID> softlyReachable = finalState.getSoftlyReachableObjects();
     Set<GID> weaklyReachable = finalState.getWeaklyReachableObjects();

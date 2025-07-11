@@ -24,41 +24,16 @@
 
 package io.connglli.gorrect.gir.model.visitor;
 
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.ObjectGraph;
-import java.util.HashSet;
-import java.util.Set;
-import java.util.Stack;
+import io.connglli.gorrect.gir.model.GGraph;
+import io.connglli.gorrect.gir.model.GReference;
 import lombok.NonNull;
 
 /**
- * A visitor that traverses an object graph in reverse postorder. It visits each object and its
- * referents, starting from the roots of the graph.
+ * A visitor interface for traversing references in an object graph. It allows visiting individual
+ * references or the entire graph.
  */
-public abstract class ObjectReversePostorderVisitor implements ObjectVisitor {
+public interface GReferenceVisitor {
+  void visit(@NonNull GGraph graph, @NonNull GReference ref);
 
-  @Override
-  public void visit(@NonNull ObjectGraph graph) {
-    Stack<GID> order = new Stack<>();
-    Set<GID> visited = new HashSet<>();
-    for (GObject root : graph.getRoots()) {
-      visit0(graph, root.getId(), order, visited);
-    }
-    while (!order.isEmpty()) {
-      graph.getObject(order.pop()).accept(graph, this);
-    }
-  }
-
-  private void visit0(
-      @NonNull ObjectGraph graph, @NonNull GID refererId, Stack<GID> order, Set<GID> visited) {
-    if (visited.contains(refererId)) {
-      return;
-    }
-    visited.add(refererId);
-    for (GObject referent : graph.getReferents(refererId)) {
-      visit0(graph, referent.getId(), order, visited);
-    }
-    order.push(refererId);
-  }
+  void visit(@NonNull GGraph graph);
 }

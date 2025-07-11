@@ -27,9 +27,9 @@ package io.connglli.gorrect.java;
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.GProgramVisitor;
 import io.connglli.gorrect.gir.inst.*;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.util.List;
@@ -53,7 +53,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     program.accept(this);
   }
 
-  public ObjectGraph getState() {
+  public GGraph getState() {
     return heap.getState();
   }
 

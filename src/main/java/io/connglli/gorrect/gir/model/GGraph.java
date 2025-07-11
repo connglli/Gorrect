@@ -24,41 +24,41 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.gir.model.visitor.ObjectBreadthFirstVisitor;
-import io.connglli.gorrect.gir.model.visitor.ObjectVisitor;
-import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
+import io.connglli.gorrect.gir.model.visitor.GObjectBreadthFirstVisitor;
+import io.connglli.gorrect.gir.model.visitor.GObjectVisitor;
+import io.connglli.gorrect.gir.model.visitor.GReferenceVisitor;
 import io.connglli.gorrect.utility.Assert;
 import java.util.*;
 import java.util.stream.Collectors;
 import lombok.NonNull;
 
 /**
- * ObjectGraph represents a directed graph of objects. Where each node represents an object and an
- * edge between two nodes represent a reference. References are also labeled with different
- * strengths to model different types of references. It is important to note that, the object graph
- * is designed as simple as enough, so it is NOT a multi-graph. This means that there is only one
- * reference between any two objects u and v for each direction u->v and v->u, respectively.
- * Currently, we assume there's only one thread and all root objects live on that thread.
+ * GGraph represents a directed graph of objects. Where each node represents an object and an edge
+ * between two nodes represent a reference. References are also labeled with different strengths to
+ * model different types of references. It is important to note that, the object graph is designed
+ * as simple as enough, so it is NOT a multi-graph. This means that there is only one reference
+ * between any two objects u and v for each direction u->v and v->u, respectively. Currently, we
+ * assume there's only one thread and all root objects live on that thread.
  */
-public class ObjectGraph {
+public class GGraph {
   private final Map<GID, GObject> objects; // ID -> Object
   private final Map<GID, GReference> references; // ID -> Reference
   private final Map<GID, Set<GID>> refTo; // ID -> {ID}: Refer-to table
   private final Map<GID, Set<GID>> refBy; // ID -> {ID}: Referred-by table
 
-  public ObjectGraph() {
+  public GGraph() {
     this.objects = new HashMap<>();
     this.references = new HashMap<>();
     this.refTo = new HashMap<>();
     this.refBy = new HashMap<>();
   }
 
-  public ObjectGraph(@NonNull ObjectGraph other) {
+  public GGraph(@NonNull GGraph other) {
     this();
     reset(other);
   }
 
-  public void reset(@NonNull ObjectGraph other) {
+  public void reset(@NonNull GGraph other) {
     this.objects.clear();
     this.references.clear();
     this.refTo.clear();
@@ -245,12 +245,12 @@ public class ObjectGraph {
   }
 
   /// Visit all objects in the object graph in a specific order
-  public void accept(ObjectVisitor visitor) {
+  public void accept(GObjectVisitor visitor) {
     visitor.visit(this);
   }
 
   /// Visit all references in the object graph in a specific order
-  public void accept(ReferenceVisitor visitor) {
+  public void accept(GReferenceVisitor visitor) {
     visitor.visit(this);
   }
 
@@ -365,9 +365,9 @@ public class ObjectGraph {
   public Map<GID, GReference.Type> markReachability() {
     Map<GID, GReference.Type> result = new HashMap<>();
     accept(
-        new ObjectBreadthFirstVisitor() {
+        new GObjectBreadthFirstVisitor() {
           @Override
-          public void visit(@NonNull ObjectGraph graph, @NonNull GObject referent) {
+          public void visit(@NonNull GGraph graph, @NonNull GObject referent) {
             GID referentId = referent.getId();
             if (referent.isRoot()) {
               result.put(referentId, GReference.Type.STRONG);

@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.gir.model.visitor.ObjectVisitor;
+import io.connglli.gorrect.gir.model.visitor.GObjectVisitor;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
@@ -56,7 +56,7 @@ public class GObject {
     return type == Type.GCROOT;
   }
 
-  public void accept(ObjectGraph graph, @NonNull ObjectVisitor visitor) {
+  public void accept(GGraph graph, @NonNull GObjectVisitor visitor) {
     visitor.visit(graph, this);
   }
 

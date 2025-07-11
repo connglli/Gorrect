@@ -24,10 +24,10 @@
 
 package io.connglli.gorrect.oracle;
 
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.Assert;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -48,11 +48,11 @@ public class OracleHeap {
   // The underlying object graph that we're manipulating
   @Getter(lombok.AccessLevel.PACKAGE)
   @NonNull
-  private final ObjectGraph graph;
+  private final GGraph graph;
 
   public OracleHeap(LangVM langVM) {
     lvm = langVM;
-    graph = new ObjectGraph();
+    graph = new GGraph();
   }
 
   public @NonNull OracleObject getObject(@NonNull GID objectId) {
@@ -71,7 +71,7 @@ public class OracleHeap {
   // Initialization and Setup
   // -========================================================================
 
-  public void initialize(@NonNull ObjectGraph initState) {
+  public void initialize(@NonNull GGraph initState) {
     graph.reset(initState);
     // Notify the language VM about the initial state of the heap
     for (GObject object : graph.getObjects()) {

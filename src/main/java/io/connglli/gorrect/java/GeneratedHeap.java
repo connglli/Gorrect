@@ -26,11 +26,11 @@ package io.connglli.gorrect.java;
 
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.FieldSpec;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.ObjectGraph;
-import io.connglli.gorrect.gir.model.visitor.ObjectReversePostorderVisitor;
+import io.connglli.gorrect.gir.model.visitor.GObjectReversePostorderVisitor;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.io.File;
@@ -96,8 +96,8 @@ class GeneratedHeap {
     deadReferences = new HashMap<>();
   }
 
-  ObjectGraph getState() {
-    ObjectGraph graph = new ObjectGraph();
+  GGraph getState() {
+    GGraph graph = new GGraph();
     for (GeneratedObject obj : objects.values()) {
       graph.addObject(obj.getId(), obj.getType(), obj.getSize());
     }
@@ -195,7 +195,7 @@ class GeneratedHeap {
   // Initialization and Setup
   // -========================================================================
 
-  void initialize(ObjectGraph initState) {
+  void initialize(GGraph initState) {
     // Use the object pool to allocate objects during heap state initialization to avoid being
     // collected by the garbage collector.
     try (NonRootInPoolAllocator allocator = getNonRootInPoolAllocator()) {
@@ -662,7 +662,7 @@ class GeneratedHeap {
   }
 
   private void updateHeap() {
-    ObjectGraph graph = getState();
+    GGraph graph = getState();
     // Update the reachability of all objects based on the current state
     Map<GID, GReference.Type> reachableObjects = graph.markReachability();
     for (GID objId : objects.keySet()) {
@@ -671,11 +671,11 @@ class GeneratedHeap {
     }
     // Update the identifiers of all objects based on the strongest reference
     graph.accept(
-        new ObjectReversePostorderVisitor() {
+        new GObjectReversePostorderVisitor() {
           private final Set<GID> visited = new HashSet<>();
 
           @Override
-          public void visit(@NonNull ObjectGraph graph, @NonNull GObject obj) {
+          public void visit(@NonNull GGraph graph, @NonNull GObject obj) {
             GeneratedObject genObj = getObject(obj.getId());
 
             if (obj.isRoot()) {

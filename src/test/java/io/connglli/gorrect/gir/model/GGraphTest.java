@@ -31,11 +31,11 @@ import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
-class ObjectGraphTest {
+class GGraphTest {
 
   @Test
   void testAddAndRemoveObject() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
     GID objId = new GID("obj1");
     graph.addObject(objId, GObject.Type.GCROOT, 100);
 
@@ -47,7 +47,7 @@ class ObjectGraphTest {
 
   @Test
   void testAddAndRemoveReference() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
     GID obj1 = new GID("obj1");
     GID obj2 = new GID("obj2");
     graph.addObject(obj1, GObject.Type.GCROOT, 100);
@@ -64,7 +64,7 @@ class ObjectGraphTest {
 
   @Test
   void testReachability() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
     GID rootId = new GID("root");
     GID obj1 = new GID("obj1");
     GID obj2 = new GID("obj2");
@@ -85,7 +85,7 @@ class ObjectGraphTest {
 
   @Test
   void testRemoveUnreachableObjects() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
     GID rootId = new GID("root");
     GID obj1 = new GID("obj1");
     GID obj2 = new GID("obj2");
@@ -105,7 +105,7 @@ class ObjectGraphTest {
 
   @Test
   void testEdgeCases() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
     GID objId = new GID("obj1");
     GID refId = new GID("ref1");
 
@@ -132,7 +132,7 @@ class ObjectGraphTest {
 
   @Test
   void testComplexGraphStructure() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
 
     GID rootId = new GID("root");
     GID obj1 = new GID("obj1");
@@ -173,7 +173,7 @@ class ObjectGraphTest {
 
   @Test
   void testLargeComplexGraph() {
-    ObjectGraph graph = new ObjectGraph();
+    GGraph graph = new GGraph();
 
     // Create 15 objects
     List<GID> objects = new ArrayList<>();

@@ -28,9 +28,9 @@ import static org.junit.jupiter.api.Assertions.*;
 
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.inst.*;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.java.oracle.JavaVM;
 import java.util.List;
 import java.util.Set;
@@ -42,7 +42,7 @@ class OracleInterpreterTest {
   void testSimpleGraph() {
     // Use JavaVM and initialize ObjectGraph
     JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -58,7 +58,7 @@ class OracleInterpreterTest {
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     assertTrue(finalState.getObjects().stream().anyMatch(obj -> obj.getId().equals(rootId)));
@@ -68,7 +68,7 @@ class OracleInterpreterTest {
   void testComplexGraph() {
     // Use JavaVM and initialize ObjectGraph
     JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -94,7 +94,7 @@ class OracleInterpreterTest {
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -109,7 +109,7 @@ class OracleInterpreterTest {
   void testCyclicGraph() {
     // Use JavaVM and initialize ObjectGraph
     JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -136,7 +136,7 @@ class OracleInterpreterTest {
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -149,7 +149,7 @@ class OracleInterpreterTest {
   void testSoftReferences() {
     // Use JavaVM and initialize ObjectGraph
     JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -170,7 +170,7 @@ class OracleInterpreterTest {
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
     interpreter.interpret();
 
-    ObjectGraph finalState = interpreter.getState();
+    GGraph finalState = interpreter.getState();
 
     // Validate the resulting object graph
     Set<GID> stronglyReachable = finalState.getStronglyReachableObjects();
@@ -183,7 +183,7 @@ class OracleInterpreterTest {
   void testAllInstructions() {
     // Use JavaVM and initialize ObjectGraph
     JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
-    ObjectGraph initState = new ObjectGraph();
+    GGraph initState = new GGraph();
 
     // Initialize GProgram
     GSetHeapInstruction setHeap =
@@ -245,7 +245,7 @@ class OracleInterpreterTest {
     OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
     interpreter.interpret();
 
-    ObjectGraph intermediateState = interpreter.getState();
+    GGraph intermediateState = interpreter.getState();
     assertFalse(intermediateState.hasObject(o1), "Expected o1 to be unreachable");
     assertTrue(intermediateState.hasReference(r1, r2), "Expected strong reference from r1 to r2");
     assertTrue(intermediateState.hasReference(r1, o2), "Expected strong reference from r1 to o2");
@@ -275,7 +275,7 @@ class OracleInterpreterTest {
     OracleInterpreter newInterpreter = new OracleInterpreter(javaVM, newProgram);
     newInterpreter.interpret();
 
-    ObjectGraph finalState = newInterpreter.getState();
+    GGraph finalState = newInterpreter.getState();
     stronglyReachable = finalState.getStronglyReachableObjects();
     Set<GID> softlyReachable = finalState.getSoftlyReachableObjects();
     Set<GID> weaklyReachable = finalState.getWeaklyReachableObjects();

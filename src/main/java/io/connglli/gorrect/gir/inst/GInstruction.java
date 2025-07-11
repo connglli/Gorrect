@@ -131,8 +131,7 @@ public abstract class GInstruction {
       GIROutput annot = field.getAnnotation(GIROutput.class);
       Assert.set(
           annot != null, "The GIROutput annotation is missing in the field %s", field.getName());
-      Assert.set(
-          annot.value() >= 0, "GIROutput value must be non-negative, got %d", annot.value());
+      Assert.set(annot.value() >= 0, "GIROutput value must be non-negative, got %d", annot.value());
       Assert.set(
           annot.value() < outputs.length,
           "GIROutput value must be less than the number of outputs");
