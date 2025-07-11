@@ -32,6 +32,7 @@ import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.gir.model.visitor.ObjectReversePostorderVisitor;
 import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Logger;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.io.IOException;
@@ -52,6 +53,7 @@ import lombok.NonNull;
  * those root object, it generates a static field in the main class to reference them as root.
  */
 class GeneratedHeap {
+  private static final Logger log = Logger.getLogger(GeneratedHeap.class);
 
   @NonNull private final GeneratedMainClass mainClazz;
 
@@ -112,6 +114,18 @@ class GeneratedHeap {
     return graph;
   }
 
+  List<GeneratedObject> getLiveObjects() {
+    List<GeneratedObject> sorted = new ArrayList<>(objects.values());
+    sorted.sort(Comparator.comparing(GeneratedObject::getId));
+    return sorted;
+  }
+
+  List<GeneratedObject> getDeadObjects() {
+    List<GeneratedObject> sorted = new ArrayList<>(deadObjects.values());
+    sorted.sort(Comparator.comparing(GeneratedObject::getId));
+    return sorted;
+  }
+
   String toJavaCode(String directory) {
     String filePath = directory + File.separator + mainClazz.getClazzName() + ".java";
     try (FileOutputStream fout = new FileOutputStream(filePath)) {
@@ -131,6 +145,40 @@ class GeneratedHeap {
       GAssert.panic("Cannot write to file %s: %s", filePath, e.getMessage());
       return null; // Unreachable, but required by the compiler
     }
+  }
+
+  String formatGraphStateToText() {
+    return getState().formatToText();
+  }
+
+  String formatObjectStateToText() {
+    StringBuilder sb = new StringBuilder();
+    for (List<GeneratedObject> objectList : Arrays.asList(getLiveObjects(), getDeadObjects())) {
+      for (GeneratedObject obj : objectList) {
+        if (obj.getReachability() != null) {
+          sb.append("Live Object:").append("\n");
+        } else {
+          sb.append("Dead Object:").append("\n");
+        }
+        sb.append("  ID: ").append(obj.getId()).append("\n");
+        sb.append("  Root: ").append(obj.isRoot()).append("\n");
+        sb.append("  Size: ").append(obj.getSize()).append("\n");
+        sb.append("  Identifier: ").append(obj.getIdentifier()).append("\n");
+        sb.append("  Reachability: ").append(obj.getReachability()).append("\n");
+        sb.append("  Class:").append("\n");
+        sb.append("    Name: ").append(obj.getClazz().getClazzName()).append("\n");
+        List<FieldSpec> fields = obj.getClazz().getFields();
+        if (fields.isEmpty()) {
+          sb.append("    Fields: ").append("<empty>").append("\n");
+        } else {
+          sb.append("    Fields:").append("\n");
+          for (FieldSpec field : fields) {
+            sb.append("    - ").append(field.name()).append("\n");
+          }
+        }
+      }
+    }
+    return sb.toString();
   }
 
   boolean hasObject(@NonNull GID objectId) {
@@ -455,7 +503,7 @@ class GeneratedHeap {
       @NonNull GeneratedObject referent,
       @NonNull GReference.Type referenceType) {
     // FIXME: Wrong when reference is strong while the referent is soft/weakly reachable.
-    System.out.println(
+    log.warning(
         "WARNING(GeneratedHeap.reference): Wrong when reference is strong while the referent is soft/weakly reachable.");
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
@@ -532,7 +580,7 @@ class GeneratedHeap {
 
   void redirect(GeneratedReference reference, GeneratedObject newReferent) {
     // FIXME: Wrong when reference is strong while the new referent is soft/weakly reachable.
-    System.out.println(
+    log.warning(
         "WARNING(GeneratedHeap.redirect): Wrong when reference is strong while the new referent is soft/weakly reachable.");
 
     GeneratedObject referer = reference.getReferer();

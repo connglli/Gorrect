@@ -29,9 +29,12 @@ import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.OracleObject;
+import io.connglli.gorrect.utility.Logger;
 import lombok.NonNull;
 
 public class JavaVM extends LangVM {
+  private static final Logger log = Logger.getLogger(JavaVM.class);
+
   public JavaVM(long heapCapacity) {
     super(heapCapacity);
   }
@@ -75,7 +78,7 @@ public class JavaVM extends LangVM {
 
   @Override
   public long estimateNewObjectHeapSize(long requestedSize) {
-    System.out.println(
+    log.warning(
         "WARNING(JavaVM.estimateNewObjectHeapSize): OracleHeap.estimateNewObjectSize() is current NOT reliable");
     // TODO: Consider metadata, vtable, type, etc.
     // We know that class have a base class GGeneratedClassBase.
@@ -84,7 +87,7 @@ public class JavaVM extends LangVM {
 
   @Override
   public long estimateObjectHeapSize(OracleObject object) {
-    System.out.println(
+    log.warning(
         "WARNING(JavaVM.estimateObjectHeapSize): OracleHeap.estimateObjectSize() is current NOT reliable");
     // TODO: Consider referents, etc.
     // We know that each reference <u,v,s> has a field in

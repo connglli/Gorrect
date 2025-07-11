@@ -29,11 +29,14 @@ import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Logger;
 import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
 
 public class JavaInterpreter implements GInstructionVisitor<Void> {
+
+  private static final Logger log = Logger.getLogger(JavaInterpreter.class);
 
   @Getter @NonNull private final GProgram program;
 
@@ -54,25 +57,35 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
 
   public String toJavaCode(String directory) {
     String file = heap.toJavaCode(directory);
-    System.out.println("Java code generated: " + file);
-    System.out.println(
+    log.info("Java code generated: " + file);
+    log.warning(
         "WARNING(JavaInterpreter.toJavaCode): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
     return file;
   }
 
   public Void visit(GProgram program) {
+    log.fine("--------------");
+    log.fine(">> Executing: " + program.getConfiguration());
     program.getConfiguration().accept(this);
+    log.fine("   State:");
+    log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
+    log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
     for (var instruction : program.getInstructions()) {
+      log.fine("--------------");
+      log.fine(">> Executing: " + instruction);
       instruction.accept(this);
+      log.fine("   State:");
+      log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
+      log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
     }
-    System.out.println(
+    log.warning(
         "WARNING(JavaInterpreter.visit(GProgram)): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
     return null;
   }
 
   public Void visit(GSetHeapInstruction instruction) {
     // TODO: Save HEAP configuration to use when running the generation program
-    System.out.println(
+    log.warning(
         "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (size, type, etc.) has not been written or saved");
     heap.initialize(instruction.getInitState());
     return null;
@@ -223,7 +236,7 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
         ref1.getReferent().getId());
     // FIXME: Require a temporary object to mediate between the two references.
     // We can do this by adding two new pools for soft and weak references.
-    System.out.println(
+    log.warning(
         "WARNING(JavaInterpreter.visit(GSwapReferentsInstruction): Require a temporary object to mediate between the two references.");
     ref1.redirect(ref2.getReferent());
     ref2.redirect(ref1.getReferent());
@@ -247,7 +260,6 @@ public class JavaInterpreter implements GInstructionVisitor<Void> {
 
   public Void visit(GRemoveAllReferentsInstruction instruction) {
     heap.getObject(instruction.getRefererId()).getReferences().forEach(GeneratedReference::unlink);
-    ;
     return null;
   }
 }

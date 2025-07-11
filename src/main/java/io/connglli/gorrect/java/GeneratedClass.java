@@ -30,6 +30,7 @@ import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
 import io.connglli.gorrect.utility.GAssert;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import javax.lang.model.element.Modifier;
 import lombok.Getter;
@@ -76,9 +77,17 @@ abstract class GeneratedClass {
     return methodSpecs.containsKey(methodName);
   }
 
+  List<FieldSpec> getFields() {
+    return List.copyOf(fieldSpecs.values());
+  }
+
   FieldSpec getField(@NonNull String fieldName) {
     GAssert.set(hasField(fieldName), "Field %s does not exist in class %s", fieldName, clazzName);
     return fieldSpecs.get(fieldName);
+  }
+
+  List<MethodSpec> getMethods() {
+    return List.copyOf(methodSpecs.values());
   }
 
   MethodSpec getMethod(@NonNull String methodName) {

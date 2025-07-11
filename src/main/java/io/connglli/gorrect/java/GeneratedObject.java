@@ -93,21 +93,25 @@ class GeneratedObject {
     return heap.getReferences(this);
   }
 
+  @SuppressWarnings("UnusedReturnValue")
   @NonNull
   GeneratedReference strongReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
     return heap.reference(referenceId, this, referent, GReference.Type.STRONG);
   }
 
+  @SuppressWarnings("UnusedReturnValue")
   @NonNull
   GeneratedReference softReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
     return heap.reference(referenceId, this, referent, GReference.Type.SOFT);
   }
 
+  @SuppressWarnings("UnusedReturnValue")
   @NonNull
   GeneratedReference weakReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
     return heap.reference(referenceId, this, referent, GReference.Type.WEAK);
   }
 
+  @SuppressWarnings("UnusedReturnValue")
   @NonNull
   GeneratedReference reference(
       @NonNull GID referenceId,
