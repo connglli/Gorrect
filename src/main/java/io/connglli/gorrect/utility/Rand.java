@@ -29,14 +29,14 @@ import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
 
-/** GRandom manages the randomness of Gorrect to enable a reproducible result */
-public class GRandom {
-  private static GRandom instance;
+/** Rand manages the randomness of Gorrect to enable a reproducible result */
+public class Rand {
+  private static Rand instance;
   private final Random random;
 
-  public static GRandom getInstance() {
+  public static Rand getInstance() {
     if (instance == null) {
-      instance = new GRandom();
+      instance = new Rand();
     }
     return instance;
   }
@@ -58,7 +58,7 @@ public class GRandom {
   }
 
   public int nextInt(int min, int max) {
-    GAssert.set(max > min, "Max bound must be greater than min bound");
+    Assert.set(max > min, "Max bound must be greater than min bound");
     return random.nextInt(max - min) + min;
   }
 
@@ -71,7 +71,7 @@ public class GRandom {
   }
 
   public long nextLong(long min, long max) {
-    GAssert.set(max > min, "Max bound must be greater than min bound");
+    Assert.set(max > min, "Max bound must be greater than min bound");
     return random.nextLong(max - min) + min;
   }
 
@@ -96,13 +96,13 @@ public class GRandom {
    * returns - 0 with probability 0.1 - 1 with probability 0.4 - 2 with probability 0.5.
    */
   public int nextIndex(double[] probas) {
-    GAssert.set(probas.length >= 1, "Input probabilities are not sufficient");
+    Assert.set(probas.length >= 1, "Input probabilities are not sufficient");
     double[] newProbas = new double[probas.length + 1];
     newProbas[0] = 0f;
     for (int i = 1; i < newProbas.length; i++) {
       newProbas[i] = newProbas[i - 1] + probas[i - 1];
     }
-    GAssert.set(
+    Assert.set(
         Math.abs(1.0f - newProbas[newProbas.length - 1]) <= 1e-5,
         "Input probabilities does not sum to 1.0");
     double x = nextFloat();
@@ -163,7 +163,7 @@ public class GRandom {
     return random.doubles(randomNumberOrigin, randomNumberBound);
   }
 
-  private GRandom() {
+  private Rand() {
     random = new Random();
   }
 }

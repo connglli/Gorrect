@@ -30,7 +30,7 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.util.List;
 import lombok.Getter;
@@ -176,10 +176,10 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     List<GID> refererIds = instruction.getRefererIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
     List<GID> referenceIds = instruction.getReferenceIds();
-    GAssert.set(
+    Assert.set(
         refererIds.size() == referenceTypes.size(),
         "The number of referers must match the number of reference types");
-    GAssert.set(
+    Assert.set(
         refererIds.size() == referenceIds.size(),
         "The number of referers must match the number of references");
     for (int i = 0; i < refererIds.size(); i++) {
@@ -194,10 +194,10 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     List<GID> referentIds = instruction.getReferentIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
     List<GID> referenceIds = instruction.getReferenceIds();
-    GAssert.set(
+    Assert.set(
         referentIds.size() == referenceTypes.size(),
         "The number of referers must match the number of reference types");
-    GAssert.set(
+    Assert.set(
         referentIds.size() == referenceIds.size(),
         "The number of referers must match the number of references");
     for (int i = 0; i < referentIds.size(); i++) {
@@ -214,23 +214,23 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GSwapReferentsInstruction instruction) {
-    GAssert.set(
+    Assert.set(
         !instruction.getReferenceId1().equals(instruction.getReferenceId2()),
         "Cannot swap the referents of the same reference");
     GeneratedReference ref1 = heap.getReference(instruction.getReferenceId1());
     GeneratedReference ref2 = heap.getReference(instruction.getReferenceId2());
-    GAssert.set(
+    Assert.set(
         ref1.getType() == ref2.getType(),
         "Cannot swap referents of different reference types: %s and %s",
         ref1.getType(),
         ref2.getType());
-    GAssert.set(
+    Assert.set(
         !ref1.getReferer().getId().equals(ref2.getReferer().getId()),
         "Reference %s and reference %s have the same referer %s",
         ref1.getId(),
         ref2.getId(),
         ref1.getReferer().getId());
-    GAssert.set(
+    Assert.set(
         !ref1.getReferent().getId().equals(ref2.getReferent().getId()),
         "Reference %s and reference %s have the same referent %s",
         ref1.getId(),

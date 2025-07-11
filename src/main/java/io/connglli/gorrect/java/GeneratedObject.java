@@ -27,7 +27,7 @@ package io.connglli.gorrect.java;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.List;
 import lombok.*;
 
@@ -72,12 +72,12 @@ class GeneratedObject {
   }
 
   void toRoot() {
-    GAssert.set(!isRoot(), "Object with id %s is already a root", getId());
+    Assert.set(!isRoot(), "Object with id %s is already a root", getId());
     heap.makeRoot(this);
   }
 
   void toNonRoot() {
-    GAssert.set(isRoot(), "Object with id %s is already a non-root", getId());
+    Assert.set(isRoot(), "Object with id %s is already a non-root", getId());
     heap.makeNonRoot(this);
   }
 
@@ -130,7 +130,7 @@ class GeneratedObject {
       case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), identifier);
       case null -> identifier; // Unreachable object, no type cast needed
       default -> {
-        GAssert.panic("Cannot reach here: %s", reachability);
+        Assert.panic("Cannot reach here: %s", reachability);
         yield "";
       }
     };
@@ -142,7 +142,7 @@ class GeneratedObject {
       case SOFT -> "soft_ref_to_" + referentId;
       case WEAK -> "weak_ref_to_" + referentId;
       default -> {
-        GAssert.panic("Cannot reach here");
+        Assert.panic("Cannot reach here");
         yield "";
       }
     };

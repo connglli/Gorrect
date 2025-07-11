@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.utility;
 
-public class GAssert {
+public class Assert {
 
   public static void set(boolean cond, String message, Object... args) {
     if (!cond) {

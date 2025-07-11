@@ -26,7 +26,7 @@ package io.connglli.gorrect.gir;
 
 import io.connglli.gorrect.gir.inst.GInstruction;
 import io.connglli.gorrect.gir.inst.GSetHeapInstruction;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
@@ -42,7 +42,7 @@ public class GProgram {
   private final List<GInstruction> instructions = new ArrayList<>();
 
   public void addInstruction(GInstruction instruction) {
-    GAssert.set(
+    Assert.set(
         !(instruction instanceof GSetHeapInstruction), "GSetHeapInstruction is already added");
     instructions.add(instruction);
   }

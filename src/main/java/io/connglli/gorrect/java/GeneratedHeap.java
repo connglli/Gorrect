@@ -31,7 +31,7 @@ import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
 import io.connglli.gorrect.gir.model.visitor.ObjectReversePostorderVisitor;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.io.File;
 import java.io.FileOutputStream;
@@ -137,12 +137,12 @@ class GeneratedHeap {
       sorted.sort(Comparator.comparing(GID::toString));
       for (GID objId : sorted) {
         GeneratedObject obj = objects.getOrDefault(objId, deadObjects.getOrDefault(objId, null));
-        GAssert.set(obj != null, "The object with id %s does not exist", objId);
+        Assert.set(obj != null, "The object with id %s does not exist", objId);
         fout.write(obj.getClazz().toJavaCode().getBytes());
       }
       return filePath;
     } catch (IOException e) {
-      GAssert.panic("Cannot write to file %s: %s", filePath, e.getMessage());
+      Assert.panic("Cannot write to file %s: %s", filePath, e.getMessage());
       return null; // Unreachable, but required by the compiler
     }
   }
@@ -187,7 +187,7 @@ class GeneratedHeap {
 
   @NonNull
   GeneratedObject getObject(@NonNull GID objectId) {
-    GAssert.set(hasObject(objectId), "The object with id %s does not exist", objectId);
+    Assert.set(hasObject(objectId), "The object with id %s does not exist", objectId);
     return objects.get(objectId);
   }
 
@@ -228,7 +228,7 @@ class GeneratedHeap {
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocRootWithInitializer(@NonNull GID rootId, long rootSize) {
-    GAssert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
+    Assert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
     GeneratedObjectClass rootClazz = new GeneratedObjectClass(this, rootId, rootSize);
     // Create a static field in the main class to reference the root object and at the same
     // time, directly instantiate the root object immediately after the main class is loaded.
@@ -246,7 +246,7 @@ class GeneratedHeap {
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocRootWithoutInitializer(@NonNull GID rootId, long rootSize) {
-    GAssert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
+    Assert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
     GeneratedObjectClass rootClazz = new GeneratedObjectClass(this, rootId, rootSize);
     // Create a static field in the main class to reference the root object but leave the
     // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
@@ -270,7 +270,7 @@ class GeneratedHeap {
   class NonRootInPoolAllocator implements AutoCloseable {
     @SuppressWarnings("UnusedReturnValue")
     public GeneratedObject alloc(@NonNull GID objectId, @NonNull Long objectSize) {
-      GAssert.set(!hasObject(objectId), "The object with id %s already exists", objectId);
+      Assert.set(!hasObject(objectId), "The object with id %s already exists", objectId);
       GeneratedObjectClass objectClazz =
           new GeneratedObjectClass(GeneratedHeap.this, objectId, objectSize);
       // Create a temporary object in the pool so that it can be referenced later.
@@ -360,7 +360,7 @@ class GeneratedHeap {
         }
 
       default:
-        GAssert.panic("Cannot reach here");
+        Assert.panic("Cannot reach here");
         break;
     }
 
@@ -399,7 +399,7 @@ class GeneratedHeap {
   // -========================================================================
 
   void makeRoot(@NonNull GeneratedObject object) {
-    GAssert.set(!object.isRoot(), "The object with id %s is already a root object", object.getId());
+    Assert.set(!object.isRoot(), "The object with id %s is already a root object", object.getId());
     // Create a static field in the main class to reference the root object but leave the
     // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
     String fieldName = GeneratedMainClass.computeFieldName(object.getId());
@@ -416,9 +416,9 @@ class GeneratedHeap {
   }
 
   void makeNonRoot(@NonNull GeneratedObject root) {
-    GAssert.set(root.isRoot(), "The object with id %s is not yet a root object", root.getId());
+    Assert.set(root.isRoot(), "The object with id %s is not yet a root object", root.getId());
     String fieldName = GeneratedMainClass.computeFieldName(root.getId());
-    GAssert.set(
+    Assert.set(
         mainClazz.hasField(fieldName),
         "Cannot remove root reference to %s, as it does not exist",
         fieldName);
@@ -433,7 +433,7 @@ class GeneratedHeap {
   // -========================================================================
 
   List<GeneratedObject> getReferers(@NonNull GeneratedObject referent) {
-    GAssert.set(
+    Assert.set(
         hasObject(referent.getId()), "The referent with id %s does not exist", referent.getId());
     List<GeneratedObject> referers = new ArrayList<>();
     for (GID referId : referents.keySet()) {
@@ -447,7 +447,7 @@ class GeneratedHeap {
   }
 
   List<GeneratedObject> getReferents(@NonNull GeneratedObject referer) {
-    GAssert.set(
+    Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
     return referents.get(referer.getId()).stream()
         .map(GeneratedReference::getReferent)
@@ -455,13 +455,13 @@ class GeneratedHeap {
   }
 
   List<GeneratedReference> getReferences(@NonNull GeneratedObject referer) {
-    GAssert.set(
+    Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
     return referents.get(referer.getId());
   }
 
   boolean hasReference(@NonNull GeneratedObject referer, @NonNull GeneratedObject referent) {
-    GAssert.set(
+    Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
     return referents.get(referer.getId()).stream()
         .anyMatch(ref -> ref.getReferent().getId().equals(referent.getId()));
@@ -470,14 +470,14 @@ class GeneratedHeap {
   @NonNull
   GeneratedReference getReference(
       @NonNull GeneratedObject referer, @NonNull GeneratedObject referent) {
-    GAssert.set(
+    Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
     return referents.get(referer.getId()).stream()
         .filter(ref -> ref.getReferent().getId().equals(referent.getId()))
         .findFirst()
         .orElseGet(
             () -> {
-              GAssert.panic(
+              Assert.panic(
                   "The reference from %s to %s does not exist", referer.getId(), referent.getId());
               return null; // Unreachable, but required by the compiler
             });
@@ -492,7 +492,7 @@ class GeneratedHeap {
         }
       }
     }
-    GAssert.panic("The reference with id %s does not exist", referenceId);
+    Assert.panic("The reference with id %s does not exist", referenceId);
     return null; // Unreachable, but required by the compiler
   }
 
@@ -564,7 +564,7 @@ class GeneratedHeap {
         }
 
       default:
-        GAssert.panic("Cannot reach here");
+        Assert.panic("Cannot reach here");
         break;
     }
 
@@ -587,7 +587,7 @@ class GeneratedHeap {
     GeneratedObject referent = reference.getReferent();
 
     String fieldName = reference.getField();
-    GAssert.set(
+    Assert.set(
         referer.getClazz().hasField(fieldName),
         "Cannot replace reference's referent %s to %s, as it does not exist",
         reference.getReferent().getId(),
@@ -604,7 +604,7 @@ class GeneratedHeap {
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
     String fieldName = reference.getField();
-    GAssert.set(
+    Assert.set(
         referer.getClazz().hasField(fieldName),
         "Cannot remove reference to %s, as it does not exist",
         fieldName);
@@ -622,14 +622,14 @@ class GeneratedHeap {
   // -========================================================================
 
   private GeneratedObject putObject(@NonNull GeneratedObject object) {
-    GAssert.set(!hasObject(object.getId()), "The object with id %s already exists", object.getId());
+    Assert.set(!hasObject(object.getId()), "The object with id %s already exists", object.getId());
     referents.put(object.getId(), new LinkedList<>());
     objects.put(object.getId(), object);
     return object;
   }
 
   private void moveObjectToDead(@NonNull GeneratedObject object) {
-    GAssert.set(hasObject(object.getId()), "The object with id %s does not exist", object.getId());
+    Assert.set(hasObject(object.getId()), "The object with id %s does not exist", object.getId());
     objects.remove(object.getId());
     deadObjects.put(object.getId(), object);
   }
@@ -639,7 +639,7 @@ class GeneratedHeap {
     GeneratedObject referent = reference.getReferent();
     GID refererId = referer.getId();
     GID referentId = referent.getId();
-    GAssert.set(
+    Assert.set(
         !hasReference(referer, referent),
         "The reference from %s to %s already exists",
         refererId,
@@ -650,9 +650,9 @@ class GeneratedHeap {
 
   private void moveReferenceToDead(@NonNull GeneratedReference reference) {
     GID refererId = reference.getReferer().getId();
-    GAssert.set(
+    Assert.set(
         referents.containsKey(refererId), "The referer with id %s does not exist", refererId);
-    GAssert.set(
+    Assert.set(
         referents.get(refererId).contains(reference),
         "The reference %s does not exist in the referer %s",
         reference.getId(),
@@ -702,7 +702,7 @@ class GeneratedHeap {
               }
             }
 
-            GAssert.set(
+            Assert.set(
                 strongestRef != null,
                 "The object %s has no referers, which should not happen",
                 obj.getId());

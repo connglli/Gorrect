@@ -27,7 +27,7 @@ package io.connglli.gorrect.gir.model;
 import io.connglli.gorrect.gir.model.visitor.ObjectBreadthFirstVisitor;
 import io.connglli.gorrect.gir.model.visitor.ObjectVisitor;
 import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.*;
 import java.util.stream.Collectors;
 import lombok.NonNull;
@@ -97,7 +97,7 @@ public class ObjectGraph {
   }
 
   public @NonNull GObject getObject(@NonNull GID objId) {
-    GAssert.set(hasObject(objId), String.format("Object (with id %s) does not exist", objId));
+    Assert.set(hasObject(objId), String.format("Object (with id %s) does not exist", objId));
     return objects.get(objId);
   }
 
@@ -107,7 +107,7 @@ public class ObjectGraph {
 
   public @NonNull GObject getRoot(@NonNull GID rootId) {
     GObject obj = getObject(rootId);
-    GAssert.set(obj.isRoot(), String.format("Object (with id %s) is not a root object", rootId));
+    Assert.set(obj.isRoot(), String.format("Object (with id %s) is not a root object", rootId));
     return obj;
   }
 
@@ -117,7 +117,7 @@ public class ObjectGraph {
 
   public @NonNull GObject getNonRoot(@NonNull GID objId) {
     GObject obj = getObject(objId);
-    GAssert.set(
+    Assert.set(
         obj.getType() != GObject.Type.GCROOT,
         String.format("Object (with id %s) is a root object", objId));
     return obj;
@@ -132,7 +132,7 @@ public class ObjectGraph {
   }
 
   public @NonNull GReference getReference(@NonNull GID refId) {
-    GAssert.set(hasReference(refId), String.format("Reference with id %s does not exist", refId));
+    Assert.set(hasReference(refId), String.format("Reference with id %s does not exist", refId));
     return references.get(refId);
   }
 
@@ -141,7 +141,7 @@ public class ObjectGraph {
   }
 
   public @NonNull GReference getReference(@NonNull GID refererId, @NonNull GID referentId) {
-    GAssert.set(
+    Assert.set(
         hasReference(refererId, referentId),
         String.format(
             "Reference from object %s to object %s does not exist", refererId, referentId));
@@ -150,17 +150,17 @@ public class ObjectGraph {
         return ref;
       }
     }
-    GAssert.panic("Cannot reach here");
+    Assert.panic("Cannot reach here");
     return references.get(new GID("null"));
   }
 
   public List<GObject> getReferents(@NonNull GID refererId) {
-    GAssert.set(hasObject(refererId), String.format("Object with id %s does not exist", refererId));
+    Assert.set(hasObject(refererId), String.format("Object with id %s does not exist", refererId));
     return refTo.get(refererId).stream().map(this::getObject).collect(Collectors.toList());
   }
 
   public List<GObject> getReferers(@NonNull GID referentId) {
-    GAssert.set(
+    Assert.set(
         hasObject(referentId), String.format("Object with id %s does not exist", referentId));
     return refBy.get(referentId).stream().map(this::getObject).collect(Collectors.toList());
   }
@@ -168,8 +168,8 @@ public class ObjectGraph {
   /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
   /// added object is reachable from our root objects.
   public GID addObject(@NonNull GID objId, GObject.Type type, long size) {
-    GAssert.set(!objects.containsKey(objId), "The id %s is already used by another object", objId);
-    GAssert.set(
+    Assert.set(!objects.containsKey(objId), "The id %s is already used by another object", objId);
+    Assert.set(
         !references.containsKey(objId), "The id %s is already used by another reference", objId);
     objects.put(objId, new GObject(objId, type, size));
     refTo.put(objId, new HashSet<>());
@@ -180,7 +180,7 @@ public class ObjectGraph {
   /// Remove an object from the graph. This operation may cause certain objects unreachable. Call
   /// removeUnreachableObjects() to compact the graph.
   public void removeObject(@NonNull GID objId) {
-    GAssert.set(hasObject(objId), String.format("Object with id %s does not exist", objId));
+    Assert.set(hasObject(objId), String.format("Object with id %s does not exist", objId));
 
     // Remove all references connected to this object
     List<GID> refsToRemove = new ArrayList<>();
@@ -207,17 +207,17 @@ public class ObjectGraph {
   @SuppressWarnings("UnusedReturnValue")
   public GID addReference(
       @NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId, GReference.Type type) {
-    GAssert.set(
+    Assert.set(
         objects.containsKey(refererId),
         String.format(
             "The object with id %s for adding as the referer of a new reference does not exist",
             refererId));
-    GAssert.set(
+    Assert.set(
         objects.containsKey(referentId),
         String.format(
             "The object with id %s for adding as the referent of a new reference does not exist",
             referentId));
-    GAssert.set(
+    Assert.set(
         !hasReference(refererId, referentId),
         String.format(
             "A reference already exists between object %s and object %s", refererId, referentId));
@@ -232,7 +232,7 @@ public class ObjectGraph {
   /// Remove a reference from the graph. This operation may cause certain objects unreachable.
   /// Call removeUnreachableObjects() to compact the graph.
   public void removeReference(@NonNull GID refId) {
-    GAssert.set(hasReference(refId), String.format("Reference with id %s does not exist", refId));
+    Assert.set(hasReference(refId), String.format("Reference with id %s does not exist", refId));
     GReference ref = references.remove(refId);
     refTo.get(ref.getReferer()).remove(ref.getReferent());
     refBy.get(ref.getReferent()).remove(ref.getReferer());
@@ -392,7 +392,7 @@ public class ObjectGraph {
               } else if (referType == GReference.Type.WEAK) {
                 currentReachabilityType = GReference.Type.WEAK;
               } else {
-                GAssert.panic("Unknown reference type: %s", referType);
+                Assert.panic("Unknown reference type: %s", referType);
               }
               if (referStrongestType == null
                   || currentReachabilityType.strongerThan(referStrongestType)) {

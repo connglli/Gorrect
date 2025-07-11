@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.regex.Pattern;
 import lombok.NonNull;
 
@@ -38,8 +38,8 @@ public class GID implements Comparable<GID> {
   @NonNull private final String id;
 
   public GID(@NonNull String id) {
-    GAssert.set(!id.isEmpty(), "GID cannot be empty");
-    GAssert.set(
+    Assert.set(!id.isEmpty(), "GID cannot be empty");
+    Assert.set(
         GID_PATTERN.matcher(id).matches(), "GID must match the pattern: " + GID_PATTERN.pattern());
     this.id = id;
   }

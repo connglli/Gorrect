@@ -28,7 +28,7 @@ import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.ObjectGraph;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.Set;
 import java.util.stream.Collectors;
 import lombok.Getter;
@@ -130,12 +130,12 @@ public class OracleHeap {
   // -========================================================================
 
   void makeRoot(@NonNull OracleObject object) {
-    GAssert.set(!object.isRoot(), "Object with id %s is not a non-root object", object.getId());
+    Assert.set(!object.isRoot(), "Object with id %s is not a non-root object", object.getId());
     object.setType(GObject.Type.GCROOT);
   }
 
   void makeNonRoot(@NonNull OracleObject root) {
-    GAssert.set(root.isRoot(), "Object with id %s is not a root object", root.getId());
+    Assert.set(root.isRoot(), "Object with id %s is not a root object", root.getId());
     root.setType(GObject.Type.ORDINARY);
   }
 
@@ -256,7 +256,7 @@ public class OracleHeap {
 
   /* package */ void redirect(
       @NonNull OracleReference reference, @NonNull OracleObject newReferent) {
-    GAssert.set(
+    Assert.set(
         !newReferent.getId().equals(reference.getReferent().getId()),
         "Cannot redirect reference %s to the same referent",
         reference.getId());

@@ -28,7 +28,7 @@ import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeName;
 import com.palantir.javapoet.TypeSpec;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -82,7 +82,7 @@ abstract class GeneratedClass {
   }
 
   FieldSpec getField(@NonNull String fieldName) {
-    GAssert.set(hasField(fieldName), "Field %s does not exist in class %s", fieldName, clazzName);
+    Assert.set(hasField(fieldName), "Field %s does not exist in class %s", fieldName, clazzName);
     return fieldSpecs.get(fieldName);
   }
 
@@ -91,20 +91,20 @@ abstract class GeneratedClass {
   }
 
   MethodSpec getMethod(@NonNull String methodName) {
-    GAssert.set(
+    Assert.set(
         hasMethod(methodName), "Method %s does not exist in class %s", methodName, clazzName);
     return methodSpecs.get(methodName);
   }
 
   GeneratedClass addField(@NonNull FieldSpec field) {
-    GAssert.set(
+    Assert.set(
         !hasField(field.name()), "Field %s already exists in class %s", field.name(), clazzName);
     fieldSpecs.put(field.name(), field);
     return this;
   }
 
   GeneratedClass addMethod(@NonNull MethodSpec method) {
-    GAssert.set(
+    Assert.set(
         !hasMethod(method.name()), "Field %s already exists in class %s", method.name(), clazzName);
     methodSpecs.put(method.name(), method);
     return this;

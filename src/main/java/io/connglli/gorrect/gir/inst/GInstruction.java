@@ -25,8 +25,8 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Formats;
-import io.connglli.gorrect.utility.GAssert;
 import io.connglli.gorrect.utility.Reflections;
 import java.lang.annotation.Retention;
 import java.lang.annotation.RetentionPolicy;
@@ -57,8 +57,8 @@ public abstract class GInstruction {
   public String getOpCode() {
     if (opCode == null) {
       GIROpCode opCodeAnnot = getClass().getAnnotation(GIROpCode.class);
-      GAssert.set(opCodeAnnot != null, "The GIROpCode annotation is missing");
-      GAssert.set(opCodeAnnot.value() != null, "GIROpCode is assigned a nullptr");
+      Assert.set(opCodeAnnot != null, "The GIROpCode annotation is missing");
+      Assert.set(opCodeAnnot.value() != null, "GIROpCode is assigned a nullptr");
       opCode = opCodeAnnot.value();
     }
     return opCode;
@@ -77,37 +77,37 @@ public abstract class GInstruction {
     Object[] inputs = new Object[fields.length];
     for (Field field : fields) {
       GIRInput annot = field.getAnnotation(GIRInput.class);
-      GAssert.set(
+      Assert.set(
           annot != null, "The GIRInput annotation is missing in the field %s", field.getName());
-      GAssert.set(annot.value() >= 0, "GIRInput value must be non-negative, got %d", annot.value());
-      GAssert.set(
+      Assert.set(annot.value() >= 0, "GIRInput value must be non-negative, got %d", annot.value());
+      Assert.set(
           annot.value() < inputs.length, "GIRInput value must be less than the number of inputs");
       field.setAccessible(true); // Make private fields accessible
       Object value = null;
       try {
         value = field.get(this);
       } catch (IllegalAccessException e) {
-        GAssert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
+        Assert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
       }
       // Ensure the input is of the expected type
-      GAssert.set(value != null, "GIRInput field value must be non-null");
+      Assert.set(value != null, "GIRInput field value must be non-null");
       // Add the value to the inputs list at the index specified by the
       // annotation
-      GAssert.set(
+      Assert.set(
           annot.value() < inputs.length,
           ("GIRInput(%d) is out of bounds for the inputs list of size %d. "
               + "This is perhaps your indices are not continuous."),
           annot.value(),
           inputs.length);
       int index = annot.value();
-      GAssert.set(
+      Assert.set(
           inputs[index] == null, "GIRInput has conflict indices, got multiple GIRInput(%d)", index);
       inputs[index] = value;
       names[index] = Formats.toSnakeCase(field.getName());
     }
     Map<String, Object> inputMap = new LinkedHashMap<>();
     for (int i = 0; i < names.length; i++) {
-      GAssert.set(
+      Assert.set(
           inputs[i] != null && names[i] != null,
           "GIRInput fields are not continuous, GIRInput(%d) is missing",
           i);
@@ -129,11 +129,11 @@ public abstract class GInstruction {
     Object[] outputs = new Object[fields.length];
     for (Field field : fields) {
       GIROutput annot = field.getAnnotation(GIROutput.class);
-      GAssert.set(
+      Assert.set(
           annot != null, "The GIROutput annotation is missing in the field %s", field.getName());
-      GAssert.set(
+      Assert.set(
           annot.value() >= 0, "GIROutput value must be non-negative, got %d", annot.value());
-      GAssert.set(
+      Assert.set(
           annot.value() < outputs.length,
           "GIROutput value must be less than the number of outputs");
       field.setAccessible(true); // Make private fields accessible
@@ -141,20 +141,20 @@ public abstract class GInstruction {
       try {
         value = field.get(this);
       } catch (IllegalAccessException e) {
-        GAssert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
+        Assert.panic("Failed to access field %s: %s", field.getName(), e.getMessage());
       }
       // Ensure the output is of the expected type
-      GAssert.set(value != null, "GIROutput field value must be non-null");
+      Assert.set(value != null, "GIROutput field value must be non-null");
       // Add the value to the outputs list at the index specified by the
       // annotation
-      GAssert.set(
+      Assert.set(
           annot.value() < outputs.length,
           ("GIROutput(%d) is out of bounds for the outputs list of size %d. "
               + "This is perhaps your indices are not continuous."),
           annot.value(),
           outputs.length);
       int index = annot.value();
-      GAssert.set(
+      Assert.set(
           outputs[index] == null,
           "GIROutput has conflict indices, got multiple GIROutput(%d)",
           index);
@@ -163,7 +163,7 @@ public abstract class GInstruction {
     }
     Map<String, Object> outputMap = new LinkedHashMap<>();
     for (int i = 0; i < names.length; i++) {
-      GAssert.set(
+      Assert.set(
           outputs[i] != null && names[i] != null,
           "GIROutput fields are not continuous, GIROutput(%d) is missing",
           i);

@@ -25,7 +25,7 @@
 package io.connglli.gorrect.gir.model;
 
 import io.connglli.gorrect.gir.model.visitor.ReferenceVisitor;
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import lombok.AllArgsConstructor;
 import lombok.Data;
 import lombok.NonNull;
@@ -73,10 +73,10 @@ public class GReference {
       } else if (this == SOFT) {
         return WEAK;
       } else if (this == WEAK) {
-        GAssert.panic("Weak reference cannot be further soften");
+        Assert.panic("Weak reference cannot be further soften");
         return WEAK;
       } else {
-        GAssert.panic("Cannot reach here");
+        Assert.panic("Cannot reach here");
         return WEAK;
       }
     }
@@ -87,10 +87,10 @@ public class GReference {
       } else if (this == SOFT) {
         return STRONG;
       } else if (this == STRONG) {
-        GAssert.panic("Strong reference cannot be further strengthen");
+        Assert.panic("Strong reference cannot be further strengthen");
         return STRONG;
       } else {
-        GAssert.panic("Cannot reach here");
+        Assert.panic("Cannot reach here");
         return STRONG;
       }
     }

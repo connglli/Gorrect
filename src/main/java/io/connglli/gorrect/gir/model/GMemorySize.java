@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.gir.model;
 
-import io.connglli.gorrect.utility.GAssert;
+import io.connglli.gorrect.utility.Assert;
 import java.util.LinkedHashMap;
 import java.util.Map;
 
@@ -47,7 +47,7 @@ public class GMemorySize {
   /** Parse a size string like "30m", "25k", "1g", "512" (bytes) */
   public static long parse(String sizeStr) {
     if (sizeStr == null || sizeStr.trim().isEmpty()) {
-      GAssert.panic("Empty size string");
+      Assert.panic("Empty size string");
     }
 
     String trimmed = sizeStr.trim().toLowerCase();
@@ -55,10 +55,10 @@ public class GMemorySize {
     String unit = trimmed.replaceAll("[\\d]", "").toUpperCase();
 
     if (number.isEmpty()) {
-      GAssert.panic("Invalid size format: " + sizeStr);
+      Assert.panic("Invalid size format: " + sizeStr);
     }
     if (!MULTIPLIERS.containsKey(unit)) {
-      GAssert.panic("Unsupported unit: " + unit);
+      Assert.panic("Unsupported unit: " + unit);
     }
 
     return Long.parseLong(number) * MULTIPLIERS.get(unit);
