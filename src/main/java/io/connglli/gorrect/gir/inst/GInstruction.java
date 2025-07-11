@@ -48,6 +48,12 @@ import java.util.stream.Collectors;
 public abstract class GInstruction {
   private String opCode;
 
+  /**
+   * Returns the opcode of the instruction. The opcode is defined by the {@link GIROpCode}
+   * annotation on the class.
+   *
+   * @return The opcode of the instruction
+   */
   public String getOpCode() {
     if (opCode == null) {
       GIROpCode opCodeAnnot = getClass().getAnnotation(GIROpCode.class);
@@ -58,6 +64,13 @@ public abstract class GInstruction {
     return opCode;
   }
 
+  /**
+   * Returns a map of input names to their values. The inputs are annotated with {@link GIRInput}.
+   * The keys in the map are the snake case names of the fields, and the values are the field
+   * values. The map is ordered by the indices specified in the {@link GIRInput}.
+   *
+   * @return A map of input names to their values
+   */
   public Map<String, Object> getInputMap() {
     Field[] fields = Reflections.getAnnotatedFields(this, GIRInput.class);
     String[] names = new String[fields.length];
@@ -103,6 +116,13 @@ public abstract class GInstruction {
     return inputMap;
   }
 
+  /**
+   * Returns a map of output names to their values. The outputs are annotated with {@link
+   * GIROutput}. The keys in the map are the snake case names of the fields, and the values are the
+   * field values. The map is ordered by the indices specified in the {@link GIROutput}.
+   *
+   * @return A map of output names to their values
+   */
   public Map<String, Object> getOutputMap() {
     Field[] fields = Reflections.getAnnotatedFields(this, GIROutput.class);
     String[] names = new String[fields.length];
@@ -152,10 +172,22 @@ public abstract class GInstruction {
     return outputMap;
   }
 
+  /**
+   * Returns the inputs of the instruction as an array. The inputs are ordered by the indices
+   * specified in the {@link GIRInput} annotations.
+   *
+   * @return An array of input values
+   */
   public Object[] getInputs() {
     return getInputMap().values().toArray();
   }
 
+  /**
+   * Returns the outputs of the instruction as an array. The outputs are ordered by the indices
+   * specified in the {@link GIROutput} annotations.
+   *
+   * @return An array of output values
+   */
   public Object[] getOutputs() {
     return getOutputMap().values().toArray();
   }
