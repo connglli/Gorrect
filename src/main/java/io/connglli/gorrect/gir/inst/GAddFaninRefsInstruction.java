@@ -24,6 +24,7 @@
 
 package io.connglli.gorrect.gir.inst;
 
+import io.connglli.gorrect.gir.GProgramVisitor;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import java.util.List;
@@ -58,7 +59,7 @@ public class GAddFaninRefsInstruction extends GInstruction {
   List<GID> referenceIds;
 
   @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
+  public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
   }
 }

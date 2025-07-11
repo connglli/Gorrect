@@ -24,6 +24,8 @@
 
 package io.connglli.gorrect.java;
 
+import io.connglli.gorrect.gir.GProgram;
+import io.connglli.gorrect.gir.GProgramVisitor;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
@@ -34,7 +36,7 @@ import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
 
-public class JavaInterpreter implements GInstructionVisitor<Void> {
+public class JavaInterpreter implements GProgramVisitor<Void> {
 
   private static final Logger log = Logger.getLogger(JavaInterpreter.class);
 

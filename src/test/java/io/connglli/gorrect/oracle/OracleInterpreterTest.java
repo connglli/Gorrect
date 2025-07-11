@@ -26,6 +26,7 @@ package io.connglli.gorrect.oracle;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
@@ -49,7 +50,7 @@ class OracleInterpreterTest {
     GProgram program = new GProgram(setHeap);
 
     // Add a root object of size 30MB
-    GID rootId = new GID("$1");
+    GID rootId = new GID("r1");
     GAddRootObjInstruction addRootObj = new GAddRootObjInstruction(30L * 1024 * 1024, rootId);
     program.addInstruction(addRootObj);
 

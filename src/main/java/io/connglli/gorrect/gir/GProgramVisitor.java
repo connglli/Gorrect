@@ -22,14 +22,16 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.gir.inst;
+package io.connglli.gorrect.gir;
+
+import io.connglli.gorrect.gir.inst.*;
 
 /**
  * GInstructionVisitor provides a visitor pattern interface for processing GIR instructions. This
  * interface allows for type-safe dispatching of operations on different instruction types without
  * requiring modification of the instruction classes themselves.
  */
-public interface GInstructionVisitor<T> {
+public interface GProgramVisitor<T> {
 
   // -=======================================================
   // The entry point for visiting a program

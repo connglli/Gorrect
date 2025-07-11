@@ -26,6 +26,7 @@ package io.connglli.gorrect.java;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;

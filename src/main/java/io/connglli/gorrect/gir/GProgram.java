@@ -22,8 +22,10 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.gir.inst;
+package io.connglli.gorrect.gir;
 
+import io.connglli.gorrect.gir.inst.GInstruction;
+import io.connglli.gorrect.gir.inst.GSetHeapInstruction;
 import io.connglli.gorrect.utility.GAssert;
 import java.util.ArrayList;
 import java.util.List;
@@ -34,7 +36,7 @@ import lombok.RequiredArgsConstructor;
 /** Represents a complete GIR program containing instructions and metadata. */
 @Getter
 @RequiredArgsConstructor
-public class GProgram extends GInstruction {
+public class GProgram {
   @NonNull private final GSetHeapInstruction configuration;
 
   private final List<GInstruction> instructions = new ArrayList<>();
@@ -53,8 +55,7 @@ public class GProgram extends GInstruction {
     return instructions.isEmpty();
   }
 
-  @Override
-  public <T> T accept(GInstructionVisitor<T> visitor) {
+  public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
   }
 

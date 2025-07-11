@@ -24,6 +24,8 @@
 
 package io.connglli.gorrect.oracle;
 
+import io.connglli.gorrect.gir.GProgram;
+import io.connglli.gorrect.gir.GProgramVisitor;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
@@ -37,10 +39,9 @@ import lombok.NonNull;
  * interpreter should carefully handle the size of the heap. Therefore, it wraps object graph into
  * {@link OracleHeap} and uses it to manage the heap memory. Indeed, methods provided by the {@link
  * OracleHeap} are similar to those in GIR, but they are more memory-aware and more convenient. The
- * interpreter is used to execute a GIR program and simulate the change of the {@link
- * io.connglli.gorrect.gir.model.ObjectGraph}.
+ * interpreter is used to execute a GIR program and simulate the change of the {@link ObjectGraph}.
  */
-public class OracleInterpreter implements GInstructionVisitor<Void> {
+public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @SuppressWarnings("FieldCanBeLocal")
   @NonNull

@@ -24,6 +24,7 @@
 
 package io.connglli.gorrect.gir.inst;
 
+import io.connglli.gorrect.gir.GProgramVisitor;
 import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.GAssert;
 import io.connglli.gorrect.utility.Reflections;
@@ -167,7 +168,7 @@ public abstract class GInstruction {
    * @param visitor The visitor to accept
    * @return The result of the visitor's visit method
    */
-  public abstract <T> T accept(GInstructionVisitor<T> visitor);
+  public abstract <T> T accept(GProgramVisitor<T> visitor);
 
   /**
    * Returns a string representation of the instruction, which includes the opcode and the inputs

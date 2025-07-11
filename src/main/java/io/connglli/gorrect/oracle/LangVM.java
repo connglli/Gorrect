@@ -24,6 +24,7 @@
 
 package io.connglli.gorrect.oracle;
 
+import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
@@ -34,8 +35,7 @@ import lombok.NonNull;
  * LangVM is a helper class to help {@link OracleInterpreter} and {@link OracleHeap} to ensure that
  * the {@link OracleInterpreter}'s and {@link OracleHeap}'s behavior aligns with the actual language
  * virtual machine's behavior, for example whether to allocate an object or not. Without the helper
- * class, we'll get a false object graph after interpreting a {@link
- * io.connglli.gorrect.gir.inst.GProgram}.
+ * class, we'll get a false object graph after interpreting a {@link GProgram}.
  *
  * <p>Note, the helper class should directly complain an error, i.e., throw a specific exception,
  * whenever and whatever unexpected events happen.

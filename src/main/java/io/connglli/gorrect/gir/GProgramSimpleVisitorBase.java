@@ -22,17 +22,22 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.gir.inst;
+package io.connglli.gorrect.gir;
+
+import io.connglli.gorrect.gir.inst.*;
 
 /**
  * GInstructionSimpleVisitorBase provides default implementations for all visitor methods. This
  * class can be extended to implement specific visitor behavior by overriding only the methods of
  * interest.
  */
-public abstract class GInstructionSimpleVisitorBase<T> implements GInstructionVisitor<T> {
+public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T> {
 
   /** Default implementation that can be overridden by subclasses. */
   protected abstract T defaultVisit(GInstruction instruction);
+
+  /** Default implementation that can be overridden by subclasses. */
+  protected abstract T defaultVisit(GProgram program);
 
   @Override
   public T visit(GProgram program) {
