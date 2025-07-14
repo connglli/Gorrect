@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025-2025 Cong Li (cong.li@inf.ethz.ch)
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -22,7 +22,24 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect;
+package io.connglli.gorrect.smith;
 
-public class OpSeqGenerator {
+import io.connglli.gorrect.gir.model.GID;
+import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
+
+@RequiredArgsConstructor
+public class IdSmith {
+
+  @NonNull private final String prefix;
+
+  private long nextId = 0;
+
+  public GID next() {
+    return new GID(prefix + (nextId++));
+  }
+
+  public void reset() {
+    nextId = 0;
+  }
 }
