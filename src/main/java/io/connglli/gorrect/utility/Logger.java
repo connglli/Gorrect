@@ -26,6 +26,7 @@ package io.connglli.gorrect.utility;
 
 import java.io.PrintStream;
 import java.util.logging.*;
+import javax.swing.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -84,12 +85,22 @@ public class Logger {
   // - Logging Methods
   // - ===========================================
 
+  public void error(String message) {
+    log(Level.SEVERE, "--------------------------");
+    log(Level.SEVERE, "[**ERROR**] " + message);
+    log(Level.SEVERE, "--------------------------");
+    Assert.panic(message);
+  }
+
   public void severe(String message) {
     log(Level.SEVERE, message);
+    Assert.panic(message);
   }
 
   public void warning(String message) {
-    log(Level.WARNING, message);
+    log(Level.WARNING, "--------------------------");
+    log(Level.WARNING, "[!!WARNING!!] " + message);
+    log(Level.WARNING, "--------------------------");
   }
 
   public void debug(String message) {
