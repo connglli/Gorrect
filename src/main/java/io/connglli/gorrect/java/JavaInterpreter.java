@@ -55,6 +55,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
 
   public void interpret() {
     program.accept(this);
+    heap.clean();
   }
 
   public GGraph getState() {
@@ -70,6 +71,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   public Void visit(GProgram program) {
     log.fine("--------------");
     log.fine(">> Executing: " + program.getConfiguration());
+    heap.appendComment(program.getConfiguration().toString());
     program.getConfiguration().accept(this);
     log.fine("   State:");
     log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
@@ -77,6 +79,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     for (var instruction : program.getInstructions()) {
       log.fine("--------------");
       log.fine(">> Executing: " + instruction);
+      heap.appendComment(instruction.toString());
       instruction.accept(this);
       log.fine("   State:");
       log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
@@ -122,6 +125,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   public Void visit(GMakeNonRootInstruction instruction) {
     instruction.checkValidity(getState());
     heap.getObject(instruction.getObjectId()).toNonRoot();
+    heap.clean();
     return null;
   }
 
@@ -159,6 +163,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   public Void visit(GRemoveObjInstruction instruction) {
     instruction.checkValidity(getState());
     heap.getObject(instruction.getObjectId()).free();
+    heap.clean();
     return null;
   }
 
@@ -228,6 +233,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId())
         .redirect(heap.getObject(instruction.getNewReferentId()));
+    heap.clean();
     return null;
   }
 
@@ -256,10 +262,15 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
         ref2.getId(),
         ref1.getReferent().getId());
     GeneratedObject ref1Referent = ref1.getReferent();
-    heap.makeRoot(ref1Referent); // Temporarily make the referent a root object to avoid GC
+    boolean isRef1Root = ref1Referent.isRoot();
+    if (!isRef1Root) {
+      heap.makeRoot(ref1Referent); // Temporarily make the referent a root object to avoid GC
+    }
     ref1.redirect(ref2.getReferent());
     ref2.redirect(ref1Referent);
-    heap.makeNonRoot(ref1Referent); // Remove it from the root set
+    if (!isRef1Root) {
+      heap.makeNonRoot(ref1Referent); // Remove it from the root set
+    }
     return null;
   }
 
@@ -278,12 +289,14 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   public Void visit(GRemoveRefInstruction instruction) {
     instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId()).unlink();
+    heap.clean();
     return null;
   }
 
   public Void visit(GRemoveAllReferentsInstruction instruction) {
     instruction.checkValidity(getState());
     heap.getObject(instruction.getRefererId()).getReferences().forEach(GeneratedReference::unlink);
+    heap.clean();
     return null;
   }
 }

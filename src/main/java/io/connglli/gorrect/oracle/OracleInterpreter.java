@@ -117,6 +117,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   public Void visit(GMakeNonRootInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.getRootObject(instruction.getObjectId()).toNonRoot();
+    heap.clean();
     return null;
   }
 

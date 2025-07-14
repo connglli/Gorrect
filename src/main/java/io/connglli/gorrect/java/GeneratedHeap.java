@@ -64,14 +64,14 @@ class GeneratedHeap {
   @NonNull private final Map<GID, GeneratedObject> objects; // All generated objects
 
   @NonNull
-  private final Map<GID, GeneratedObject>
+  private final Map<GID, GeneratedObject> // We do not allow dead objects to be alive again
       deadObjects; // All dead objects, which are not reachable from the root objects
 
   @NonNull
   private final Map<GID, List<GeneratedReference>> referents; // The referents of each object
 
   @NonNull
-  private final Map<GID, GeneratedReference>
+  private final List<GeneratedReference> // We allow the same reference to come back
       deadReferences; // All dead references, which are not reachable from the root objects
 
   // Object pool is a temporary pool to save all created objects when initializing the
@@ -102,7 +102,7 @@ class GeneratedHeap {
     objects = new HashMap<>();
     deadObjects = new HashMap<>();
     referents = new HashMap<>();
-    deadReferences = new HashMap<>();
+    deadReferences = new LinkedList<>();
   }
 
   GGraph getState() {
@@ -137,8 +137,12 @@ class GeneratedHeap {
 
   void insertDumpHeapHook() {
     // Insert a dump heap instruction at the end of the main method
-    appendStatement("// Wait until the heap is dumped");
+    appendComment("Wait until the heap is dumped");
     appendStatement("System.in.read()");
+  }
+
+  void appendComment(String comment) {
+    appendStatement("/* " + comment + " */");
   }
 
   String toJavaCode(String directory) {
@@ -178,7 +182,7 @@ class GeneratedHeap {
         sb.append("  ID: ").append(obj.getId()).append("\n");
         sb.append("  Root: ").append(obj.isRoot()).append("\n");
         sb.append("  Size: ").append(obj.getSize()).append("\n");
-        sb.append("  Identifier: ").append(obj.getIdentifier()).append("\n");
+        sb.append("  Identifier: ").append(obj.getJavaRefId()).append("\n");
         sb.append("  Reachability: ").append(obj.getReachability()).append("\n");
         sb.append("  Class:").append("\n");
         sb.append("    Name: ").append(obj.getClazz().getClazzName()).append("\n");
@@ -255,7 +259,7 @@ class GeneratedHeap {
             .build());
     return putObject(
         new GeneratedObject(
-            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG));
+            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
   }
 
   @NonNull
@@ -275,7 +279,7 @@ class GeneratedHeap {
     appendStatement(fieldName + " = new $T()", rootClazz.clazzName);
     return putObject(
         new GeneratedObject(
-            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG));
+            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
   }
 
   NonRootInPoolAllocator getNonRootInPoolAllocator() {
@@ -294,7 +298,9 @@ class GeneratedHeap {
               GeneratedHeap.this,
               objectClazz,
               GObject.Type.ORDINARY,
-              "%s.get(%s)".formatted(OBJECT_POOL_NAME, objectClazz.getId()),
+              "((%s) %s.get(\"%s\"))"
+                  .formatted(objectClazz.clazzName, OBJECT_POOL_NAME, objectClazz.getId()),
+              null,
               null);
       appendStatement(
           OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName); //
@@ -323,13 +329,14 @@ class GeneratedHeap {
         referer,
         GReference.Type.STRONG,
         "Allocating non-roots to a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
-            .formatted(referer.getId(), referer.getIdentifier()));
+            .formatted(referer.getId(), referer.getJavaRefId()));
 
     GeneratedClass refererClazz = referer.getClazz();
 
     GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
     GeneratedObject object = // The reachability will be updated after the pool is closed
-        putObject(new GeneratedObject(this, objectClazz, GObject.Type.ORDINARY, "", null));
+        putObject(
+            new GeneratedObject(this, objectClazz, GObject.Type.ORDINARY, "", null, referenceType));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, objectClazz.getId());
     switch (referenceType) {
@@ -342,7 +349,7 @@ class GeneratedHeap {
                   .build());
           // Reference the object object by our new field
           appendStatement(
-              "%s.%s = new $T()".formatted(referer.getTypeCastIdentifier(), fieldName),
+              "%s.%s = new $T()".formatted(referer.getJavaDerefId(), fieldName),
               objectClazz.clazzName);
           break;
         }
@@ -357,7 +364,7 @@ class GeneratedHeap {
                   .build());
           // Reference the object object by our new field
           appendStatement(
-              "%s.%s = new $T<$T>(new $T())".formatted(referer.getTypeCastIdentifier(), fieldName),
+              "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
               softRefClazz,
               objectClazz.clazzName,
               objectClazz.clazzName);
@@ -374,7 +381,7 @@ class GeneratedHeap {
                   .build());
           // Reference the object object by our new field
           appendStatement(
-              "%s.%s = new $T<$T>(new $T())".formatted(referer.getTypeCastIdentifier(), fieldName),
+              "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
               weakRefClazz,
               objectClazz.clazzName,
               objectClazz.clazzName);
@@ -416,6 +423,49 @@ class GeneratedHeap {
     moveObjectToDead(object);
   }
 
+  public void clean() {
+    GGraph state = getState();
+    Set<GID> reachableObjects = state.getReachableObjects();
+    Set<GID> objectsToRemove = new HashSet<>();
+    for (GID objectId : objects.keySet()) {
+      if (!reachableObjects.contains(objectId)) {
+        objectsToRemove.add(objectId);
+      }
+    }
+    for (GID objectId : objectsToRemove) {
+      moveObjectAndItsReferencesToDead(objects.get(objectId));
+    }
+  }
+
+  public void compact() {
+    GGraph state = getState();
+    Map<GID, GReference.Type> reachability = state.markReachability();
+    Set<GID> objectsToRemove = new HashSet<>();
+    for (GID objectId : objects.keySet()) {
+      GReference.Type reachType = reachability.get(objectId);
+      if (reachType != GReference.Type.STRONG && reachType != GReference.Type.SOFT) {
+        objectsToRemove.add(objectId);
+      }
+    }
+    for (GID objectId : objectsToRemove) {
+      moveObjectAndItsReferencesToDead(objects.get(objectId));
+    }
+  }
+
+  public void stressCompact() {
+    GGraph state = getState();
+    Set<GID> reachableObjects = state.getStronglyReachableObjects();
+    Set<GID> objectsToRemove = new HashSet<>();
+    for (GID objectId : objects.keySet()) {
+      if (!reachableObjects.contains(objectId)) {
+        objectsToRemove.add(objectId);
+      }
+    }
+    for (GID objectId : objectsToRemove) {
+      moveObjectAndItsReferencesToDead(objects.get(objectId));
+    }
+  }
+
   // -========================================================================
   // Object Role Transition
   // -========================================================================
@@ -425,7 +475,7 @@ class GeneratedHeap {
         object,
         GReference.Type.STRONG,
         "Making a non-strongly reachable object (id=%s, java_identifier=%s) root might introduce NullPointerExceptions"
-            .formatted(object.getId(), object.getIdentifier()));
+            .formatted(object.getId(), object.getJavaRefId()));
 
     Assert.set(!object.isRoot(), "The object with id %s is already a root object", object.getId());
     // Create a static field in the main class to reference the root object but leave the
@@ -437,7 +487,7 @@ class GeneratedHeap {
             .initializer("null")
             .build());
     // Transfer the ownership of the object to the main class
-    appendStatement(fieldName + " = " + object.getTypeCastIdentifier());
+    appendStatement(fieldName + " = " + object.getJavaDerefId());
     object.setType(GObject.Type.GCROOT);
     // The object turns to a root object, we should update the heap globally
     updateHeap();
@@ -534,7 +584,7 @@ class GeneratedHeap {
         referer,
         GReference.Type.STRONG,
         "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
-            .formatted(referer.getId(), referer.getIdentifier()));
+            .formatted(referer.getId(), referer.getJavaRefId()));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
     GeneratedObjectClass refererClazz = referer.getClazz();
@@ -550,10 +600,7 @@ class GeneratedHeap {
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = %s"
-                  .formatted(
-                      referer.getTypeCastIdentifier(),
-                      fieldName,
-                      referent.getTypeCastIdentifier()));
+                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
           break;
         }
 
@@ -568,8 +615,7 @@ class GeneratedHeap {
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(%s)"
-                  .formatted(
-                      referer.getTypeCastIdentifier(), fieldName, referent.getTypeCastIdentifier()),
+                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
               softRefClazz,
               referent.getClazz().clazzName);
           break;
@@ -586,8 +632,7 @@ class GeneratedHeap {
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(%s)"
-                  .formatted(
-                      referer.getTypeCastIdentifier(), fieldName, referent.getTypeCastIdentifier()),
+                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
               weakRefClazz,
               referent.getClazz().clazzName);
           break;
@@ -616,7 +661,7 @@ class GeneratedHeap {
         referer,
         GReference.Type.STRONG,
         "Redirecting referents of a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
-            .formatted(referer.getId(), referer.getIdentifier()));
+            .formatted(referer.getId(), referer.getJavaRefId()));
 
     String fieldName = reference.getField();
     Assert.set(
@@ -625,7 +670,32 @@ class GeneratedHeap {
         reference.getReferent().getId(),
         newReferent.getId());
 
-    appendStatement(referent.getIdentifier() + " = " + newReferent.getTypeCastIdentifier());
+    switch (reference.getType()) {
+      case STRONG:
+        appendStatement(
+            referer.getJavaDerefId() + "." + fieldName + " = " + newReferent.getJavaDerefId());
+        break;
+
+      case SOFT:
+        appendStatement(
+            referer.getJavaDerefId()
+                + "."
+                + fieldName
+                + " = new $T<$T>(%s)".formatted(newReferent.getJavaDerefId()),
+            ClassName.get(SoftReference.class),
+            newReferent.getClazz().clazzName);
+        break;
+
+      case WEAK:
+        appendStatement(
+            referer.getJavaDerefId()
+                + "."
+                + fieldName
+                + " = new $T<$T>(%s)".formatted(newReferent.getJavaDerefId()),
+            ClassName.get(WeakReference.class),
+            newReferent.getClazz().clazzName);
+        break;
+    }
     reference.setReferent(newReferent);
 
     // The reference relationship is changed, we should update the heap
@@ -633,13 +703,33 @@ class GeneratedHeap {
   }
 
   void strengthen(GeneratedReference reference) {
-    reference.setType(reference.getType().strengthen());
+    GeneratedObject referer = reference.getReferer();
+    GeneratedObject referent = reference.getReferent();
+    boolean isRoot = referent.isRoot();
+    if (!isRoot) {
+      referent.toRoot(); // Temporarily make it a root to ensure it is reachable
+    }
+    unlink(reference);
+    reference(reference.getId(), referer, referent, reference.getType().strengthen());
+    if (!isRoot) {
+      referent.toNonRoot(); // Restore the original state
+    }
     // The reachability might change, we should update the heap
     updateHeap();
   }
 
   void soften(GeneratedReference reference) {
-    reference.setType(reference.getType().soften());
+    GeneratedObject referer = reference.getReferer();
+    GeneratedObject referent = reference.getReferent();
+    boolean isRoot = referent.isRoot();
+    if (!isRoot) {
+      referent.toRoot(); // Temporarily make it a root to ensure it is reachable
+    }
+    unlink(reference);
+    reference(reference.getId(), referer, referent, reference.getType().soften());
+    if (!isRoot) {
+      referent.toNonRoot(); // Restore the original state
+    }
     // The reachability might change, we should update the heap
     updateHeap();
   }
@@ -652,7 +742,7 @@ class GeneratedHeap {
         referer.getClazz().hasField(fieldName),
         "Cannot remove reference to %s, as it does not exist",
         fieldName);
-    appendStatement(referent.getIdentifier() + " = null");
+    appendStatement(referer.getJavaDerefId() + "." + reference.getField() + " = null");
 
     // Remove the reference from the referents map
     moveReferenceToDead(reference);
@@ -665,6 +755,29 @@ class GeneratedHeap {
   // Helper Methods for Reference and Object Management
   // -========================================================================
 
+  private void moveObjectAndItsReferencesToDead(@NonNull GeneratedObject object) {
+    GID objectId = object.getId();
+    Assert.set(hasObject(object.getId()), "The object with id %s does not exist", object.getId());
+    // Remove all references to the object
+    List<GeneratedReference> referencesToRemove = new LinkedList<>();
+    for (GID refererId : referents.keySet()) {
+      if (refererId.equals(objectId)) {
+        referencesToRemove.addAll(referents.get(refererId));
+      } else {
+        for (GeneratedReference reference : referents.get(refererId)) {
+          if (reference.getReferent().getId().equals(objectId)) {
+            // Move the reference to dead references
+            referencesToRemove.add(reference);
+          }
+        }
+      }
+    }
+    // Remove all references to the object
+    referencesToRemove.forEach(this::moveReferenceToDead);
+    // Remove the object itself
+    moveObjectToDead(object);
+  }
+
   private GeneratedObject putObject(@NonNull GeneratedObject object) {
     Assert.set(!hasObject(object.getId()), "The object with id %s already exists", object.getId());
     referents.put(object.getId(), new LinkedList<>());
@@ -674,8 +787,11 @@ class GeneratedHeap {
 
   private void moveObjectToDead(@NonNull GeneratedObject object) {
     Assert.set(hasObject(object.getId()), "The object with id %s does not exist", object.getId());
+    Assert.set(
+        referents.get(object.getId()).isEmpty(), "The object %s has references", object.getId());
     objects.remove(object.getId());
     deadObjects.put(object.getId(), object);
+    referents.remove(object.getId());
   }
 
   private GeneratedReference putReference(@NonNull GeneratedReference reference) {
@@ -702,7 +818,7 @@ class GeneratedHeap {
         reference.getId(),
         refererId);
     referents.get(refererId).remove(reference);
-    deadReferences.put(reference.getId(), reference);
+    deadReferences.add(reference);
   }
 
   private void updateHeap() {
@@ -725,7 +841,7 @@ class GeneratedHeap {
 
             if (obj.isRoot()) {
               // Root objects are always referenced by a static field in the main class.
-              genObj.setIdentifier(GeneratedMainClass.computeFieldName(obj.getId()));
+              genObj.setJavaRefId(GeneratedMainClass.computeFieldName(obj.getId()));
               visited.add(obj.getId());
               return;
             }
@@ -755,16 +871,13 @@ class GeneratedHeap {
             // We update the reference according to the strongest reference.
             GeneratedObject strongestGenReferer = getObject(strongestRef.getReferer());
             GeneratedReference strongestGenRef = getReference(strongestRef.getId());
-            genObj.setIdentifier(
-                strongestGenReferer.getTypeCastIdentifier() + "." + strongestGenRef.getField());
+            genObj.setJavaRefId(
+                strongestGenReferer.getJavaDerefId() + "." + strongestGenRef.getField());
+            genObj.setRefToStrongestReferer(strongestGenRef.getType());
 
             visited.add(obj.getId());
           }
         });
-    // Per the semantics of GIR (for example, that in GRemoveAllReferentsInstruction and
-    // GRemoveRefInstruction), an object is released (i.e., moved to dead) only when the
-    // GRemoveObjInstruction is executed. Therefore, we do not move unreachable objects to
-    // deadObjects here.
   }
 
   private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {

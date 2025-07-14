@@ -51,12 +51,17 @@ class GeneratedObject {
   @NonNull
   @Getter(AccessLevel.PACKAGE)
   @Setter(AccessLevel.PACKAGE)
-  private String identifier;
+  private String javaRefId;
 
   // Null means unreachable
   @Getter(AccessLevel.PACKAGE)
   @Setter(AccessLevel.PACKAGE)
   private GReference.Type reachability;
+
+  // Null means no referer (root or unreachable)
+  @Getter(AccessLevel.PACKAGE)
+  @Setter(AccessLevel.PACKAGE)
+  private GReference.Type refToStrongestReferer;
 
   @NonNull
   GID getId() {
@@ -128,11 +133,11 @@ class GeneratedObject {
     heap.freeObject(this);
   }
 
-  String getTypeCastIdentifier() {
-    return switch (reachability) {
-      case STRONG -> "((%s)(%s))".formatted(clazz.getClazzName(), identifier);
-      case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), identifier);
-      case null -> identifier; // Unreachable object, no type cast needed
+  String getJavaDerefId() {
+    return switch (refToStrongestReferer) {
+      case null -> "((%s)(%s))".formatted(clazz.getClazzName(), javaRefId);
+      case STRONG -> "((%s)(%s))".formatted(clazz.getClazzName(), javaRefId);
+      case SOFT, WEAK -> "((%s)(%s.get()))".formatted(clazz.getClazzName(), javaRefId);
       default -> {
         Assert.panic("Cannot reach here: %s", reachability);
         yield "";
