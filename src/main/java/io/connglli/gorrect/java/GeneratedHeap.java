@@ -135,6 +135,12 @@ class GeneratedHeap {
     return sorted;
   }
 
+  void insertDumpHeapHook() {
+    // Insert a dump heap instruction at the end of the main method
+    appendStatement("// Wait until the heap is dumped");
+    appendStatement("System.in.read()");
+  }
+
   String toJavaCode(String directory) {
     String filePath = directory + File.separator + mainClazz.getClazzName() + ".java";
     try (FileOutputStream fout = new FileOutputStream(filePath)) {

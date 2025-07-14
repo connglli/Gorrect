@@ -64,8 +64,6 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   public String toJavaCode(String directory) {
     String file = heap.toJavaCode(directory);
     log.info("Java code generated: " + file);
-    log.warning(
-        "WARNING(JavaInterpreter.toJavaCode): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
     return file;
   }
 
@@ -84,8 +82,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
       log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
       log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
     }
-    log.warning(
-        "WARNING(JavaInterpreter.visit(GProgram)): The dump-heap operation has not been generated, the program has not been executed, only the instructions have been visited");
+    heap.insertDumpHeapHook();
     return null;
   }
 
