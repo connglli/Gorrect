@@ -71,6 +71,10 @@ class GeneratedObject {
     return type == GObject.Type.GCROOT;
   }
 
+  boolean isReachable() {
+    return reachability != null;
+  }
+
   void toRoot() {
     Assert.set(!isRoot(), "Object with id %s is already a root", getId());
     heap.makeRoot(this);

@@ -761,6 +761,10 @@ class GeneratedHeap {
             visited.add(obj.getId());
           }
         });
+    // Per the semantics of GIR (for example, that in GRemoveAllReferentsInstruction and
+    // GRemoveRefInstruction), an object is released (i.e., moved to dead) only when the
+    // GRemoveObjInstruction is executed. Therefore, we do not move unreachable objects to
+    // deadObjects here.
   }
 
   private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {

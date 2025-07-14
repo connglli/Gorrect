@@ -255,12 +255,11 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
         ref1.getId(),
         ref2.getId(),
         ref1.getReferent().getId());
-    // FIXME: Require a temporary object to mediate between the two references.
-    // We can do this by adding two new pools for soft and weak references.
-    log.warning(
-        "WARNING(JavaInterpreter.visit(GSwapReferentsInstruction): Require a temporary object to mediate between the two references.");
+    GeneratedObject ref1Referent = ref1.getReferent();
+    heap.makeRoot(ref1Referent); // Temporarily make the referent a root object to avoid GC
     ref1.redirect(ref2.getReferent());
-    ref2.redirect(ref1.getReferent());
+    ref2.redirect(ref1Referent);
+    heap.makeNonRoot(ref1Referent); // Remove it from the root set
     return null;
   }
 
