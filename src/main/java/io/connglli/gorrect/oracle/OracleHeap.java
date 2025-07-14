@@ -268,6 +268,22 @@ public class OracleHeap {
     reference(reference.getId(), reference.getReferer(), newReferent, reference.getType());
   }
 
+  /* package */ void strengthen(@NonNull OracleReference reference) {
+    Assert.set(
+        reference.getType() != GReference.Type.STRONG,
+        "Cannot strengthen a strong reference %s",
+        reference.getId());
+    reference.setType(reference.getType().strengthen());
+  }
+
+  /* package */ void soften(@NonNull OracleReference reference) {
+    Assert.set(
+        reference.getType() != GReference.Type.WEAK,
+        "Cannot soften a weak reference %s",
+        reference.getId());
+    reference.setType(reference.getType().soften());
+  }
+
   // -========================================================================
   // Heap Helper Methods
   // -========================================================================

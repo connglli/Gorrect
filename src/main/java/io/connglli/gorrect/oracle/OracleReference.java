@@ -44,6 +44,10 @@ public class OracleReference {
     return reference.getType();
   }
 
+  /* package */ void setType(@NonNull GReference.Type type) {
+    reference.setType(type);
+  }
+
   public OracleObject getReferer() {
     return heap.getObject(reference.getReferer());
   }
@@ -53,11 +57,11 @@ public class OracleReference {
   }
 
   public void strengthen() {
-    reference.setType(reference.getType().strengthen());
+    heap.strengthen(this);
   }
 
   public void soften() {
-    reference.setType(reference.getType().soften());
+    heap.soften(this);
   }
 
   public void unlink() {

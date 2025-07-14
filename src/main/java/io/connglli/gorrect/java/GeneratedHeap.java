@@ -55,6 +55,10 @@ import lombok.NonNull;
 class GeneratedHeap {
   private static final Logger log = Logger.getLogger(GeneratedHeap.class);
 
+  // Strict mode means we disable all operations on non-strongly reachable objects as this might
+  // introduce NullPointerExceptions in the generated code.
+  private final boolean strict;
+
   @NonNull private final GeneratedMainClass mainClazz;
 
   @NonNull private final Map<GID, GeneratedObject> objects; // All generated objects
@@ -88,6 +92,11 @@ class GeneratedHeap {
           .build();
 
   GeneratedHeap() {
+    this(true);
+  }
+
+  GeneratedHeap(boolean enableStrictMode) {
+    this.strict = enableStrictMode;
     mainClazz = new GeneratedMainClass(this);
     mainClazz.addField(objectPoolField);
     objects = new HashMap<>();
@@ -303,6 +312,13 @@ class GeneratedHeap {
       @NonNull GeneratedObject referer,
       @NonNull GReference.Type referenceType,
       @NonNull GID referenceId) {
+
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Allocating non-roots to a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getIdentifier()));
+
     GeneratedClass refererClazz = referer.getClazz();
 
     GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
@@ -399,6 +415,12 @@ class GeneratedHeap {
   // -========================================================================
 
   void makeRoot(@NonNull GeneratedObject object) {
+    ensureReachable(
+        object,
+        GReference.Type.STRONG,
+        "Making a non-strongly reachable object (id=%s, java_identifier=%s) root might introduce NullPointerExceptions"
+            .formatted(object.getId(), object.getIdentifier()));
+
     Assert.set(!object.isRoot(), "The object with id %s is already a root object", object.getId());
     // Create a static field in the main class to reference the root object but leave the
     // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
@@ -502,9 +524,11 @@ class GeneratedHeap {
       @NonNull GeneratedObject referer,
       @NonNull GeneratedObject referent,
       @NonNull GReference.Type referenceType) {
-    // FIXME: Wrong when reference is strong while the referent is soft/weakly reachable.
-    log.warning(
-        "WARNING(GeneratedHeap.reference): Wrong when reference is strong while the referent is soft/weakly reachable.");
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getIdentifier()));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
     GeneratedObjectClass refererClazz = referer.getClazz();
@@ -579,12 +603,14 @@ class GeneratedHeap {
   }
 
   void redirect(GeneratedReference reference, GeneratedObject newReferent) {
-    // FIXME: Wrong when reference is strong while the new referent is soft/weakly reachable.
-    log.warning(
-        "WARNING(GeneratedHeap.redirect): Wrong when reference is strong while the new referent is soft/weakly reachable.");
-
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
+
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Redirecting referents of a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getIdentifier()));
 
     String fieldName = reference.getField();
     Assert.set(
@@ -597,6 +623,18 @@ class GeneratedHeap {
     reference.setReferent(newReferent);
 
     // The reference relationship is changed, we should update the heap
+    updateHeap();
+  }
+
+  void strengthen(GeneratedReference reference) {
+    reference.setType(reference.getType().strengthen());
+    // The reachability might change, we should update the heap
+    updateHeap();
+  }
+
+  void soften(GeneratedReference reference) {
+    reference.setType(reference.getType().soften());
+    // The reachability might change, we should update the heap
     updateHeap();
   }
 
@@ -662,6 +700,7 @@ class GeneratedHeap {
   }
 
   private void updateHeap() {
+    // Update the state of the heap based on the current objects and references
     GGraph graph = getState();
     // Update the reachability of all objects based on the current state
     Map<GID, GReference.Type> reachableObjects = graph.markReachability();
@@ -716,6 +755,16 @@ class GeneratedHeap {
             visited.add(obj.getId());
           }
         });
+  }
+
+  private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {
+    if (object.getReachability() != type) {
+      if (strict) {
+        log.error(message);
+      } else {
+        log.warning(message);
+      }
+    }
   }
 
   private void appendStatement(@NonNull String stmtFormat, Object... stmtArgs) {

@@ -64,11 +64,11 @@ class GeneratedReference {
   }
 
   void strengthen() {
-    setType(getType().strengthen());
+    heap.strengthen(this);
   }
 
   void soften() {
-    setType(getType().soften());
+    heap.soften(this);
   }
 
   void unlink() {

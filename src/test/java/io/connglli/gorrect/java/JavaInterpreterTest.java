@@ -93,7 +93,7 @@ public class JavaInterpreterTest {
     program.addInstruction(new GRemoveObjInstruction(r2));
 
     // Execute the program
-    JavaInterpreter interpreter = new JavaInterpreter(program);
+    JavaInterpreter interpreter = new JavaInterpreter(program, false);
     interpreter.interpret();
 
     GGraph finalState = interpreter.getState();
@@ -238,7 +238,7 @@ public class JavaInterpreterTest {
     program.addInstruction(new GCloneObjInstruction(o2, o2c, "__cloned"));
 
     // Execute the program
-    JavaInterpreter interpreter = new JavaInterpreter(program);
+    JavaInterpreter interpreter = new JavaInterpreter(program, false);
     interpreter.interpret();
 
     GGraph intermediateState = interpreter.getState();
@@ -268,7 +268,7 @@ public class JavaInterpreterTest {
     // Remove reference
     newProgram.addInstruction(new GRemoveRefInstruction(new GID("ref-r2_o2")));
 
-    JavaInterpreter newInterpreter = new JavaInterpreter(newProgram);
+    JavaInterpreter newInterpreter = new JavaInterpreter(newProgram, false);
     newInterpreter.interpret();
 
     GGraph finalState = newInterpreter.getState();

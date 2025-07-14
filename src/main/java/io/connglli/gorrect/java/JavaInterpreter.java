@@ -45,8 +45,12 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   @NonNull private final GeneratedHeap heap;
 
   public JavaInterpreter(@NonNull GProgram program) {
+    this(program, true);
+  }
+
+  public JavaInterpreter(@NonNull GProgram program, boolean strict) {
     this.program = program;
-    this.heap = new GeneratedHeap();
+    this.heap = new GeneratedHeap(strict);
   }
 
   public void interpret() {
@@ -86,6 +90,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GSetHeapInstruction instruction) {
+    instruction.checkValidity(getState());
     // TODO: Save HEAP configuration to use when running the generation program
     log.warning(
         "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (size, type, etc.) has not been written or saved");
@@ -94,11 +99,13 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GAddRootObjInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.allocRootWithoutInitializer(instruction.getObjectId(), instruction.getObjectSize());
     return null;
   }
 
   public Void visit(GAddNonRootObjInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referer = heap.getObject(instruction.getRefererId());
     heap.allocNonRootAndReference(
         instruction.getObjectId(),
@@ -110,16 +117,19 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GMakeRootInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getObject(instruction.getObjectId()).toRoot();
     return null;
   }
 
   public Void visit(GMakeNonRootInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getObject(instruction.getObjectId()).toNonRoot();
     return null;
   }
 
   public Void visit(GCloneObjInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject object = heap.getObject(instruction.getObjectId());
 
     try (GeneratedHeap.NonRootInPoolAllocator alloctor = heap.getNonRootInPoolAllocator()) {
@@ -150,11 +160,13 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GRemoveObjInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getObject(instruction.getObjectId()).free();
     return null;
   }
 
   public Void visit(GAddStrongRefInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referer = heap.getObject(instruction.getRefererId());
     GeneratedObject referent = heap.getObject(instruction.getReferentId());
     referer.strongReference(instruction.getReferenceId(), referent);
@@ -162,6 +174,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GAddSoftRefInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referer = heap.getObject(instruction.getRefererId());
     GeneratedObject referent = heap.getObject(instruction.getReferentId());
     referer.softReference(instruction.getReferenceId(), referent);
@@ -169,6 +182,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GAddWeakRefInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referer = heap.getObject(instruction.getRefererId());
     GeneratedObject referent = heap.getObject(instruction.getReferentId());
     referer.weakReference(instruction.getReferenceId(), referent);
@@ -176,6 +190,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GAddFaninRefsInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referent = heap.getObject(instruction.getReferentId());
     List<GID> refererIds = instruction.getRefererIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
@@ -194,6 +209,7 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GAddFanoutRefsInstruction instruction) {
+    instruction.checkValidity(getState());
     GeneratedObject referer = heap.getObject(instruction.getRefererId());
     List<GID> referentIds = instruction.getReferentIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
@@ -212,12 +228,14 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GReplaceReferentInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId())
         .redirect(heap.getObject(instruction.getNewReferentId()));
     return null;
   }
 
   public Void visit(GSwapReferentsInstruction instruction) {
+    instruction.checkValidity(getState());
     Assert.set(
         !instruction.getReferenceId1().equals(instruction.getReferenceId2()),
         "Cannot swap the referents of the same reference");
@@ -250,21 +268,25 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
   }
 
   public Void visit(GSoftenRefInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId()).soften();
     return null;
   }
 
   public Void visit(GStrengthRefInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId()).strengthen();
     return null;
   }
 
   public Void visit(GRemoveRefInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getReference(instruction.getReferenceId()).unlink();
     return null;
   }
 
   public Void visit(GRemoveAllReferentsInstruction instruction) {
+    instruction.checkValidity(getState());
     heap.getObject(instruction.getRefererId()).getReferences().forEach(GeneratedReference::unlink);
     return null;
   }

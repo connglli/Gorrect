@@ -43,7 +43,8 @@ final class GeneratedMainClass extends GeneratedClass {
       MethodSpec.methodBuilder("main")
           .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
           .returns(void.class)
-          .addParameter(String[].class, "args");
+          .addParameter(String[].class, "args")
+          .addException(Exception.class);
 
   GeneratedMainClass(GeneratedHeap heap) {
     super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
