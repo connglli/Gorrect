@@ -120,6 +120,7 @@ public class OracleHeap {
 
   @NonNull
   /* package */ OracleObject allocateObject(@NonNull GID objectId, long size, GObject.Type type) {
+    Assert.set(size >= 0, "Object size must be non-negative, but got %d", size);
     lvm.onOracleAllocate(objectId, size, type);
     return new OracleObject(this, graph.getObject(graph.addObject(objectId, type, size)));
   }

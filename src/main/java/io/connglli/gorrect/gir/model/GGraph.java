@@ -168,6 +168,7 @@ public class GGraph {
   /// Add an object into the graph. Note that it is the user's responsibility to ensure that the
   /// added object is reachable from our root objects.
   public GID addObject(@NonNull GID objId, GObject.Type type, long size) {
+    Assert.set(size >= 0, "Object size must be non-negative, but got %d", size);
     Assert.set(!objects.containsKey(objId), "The id %s is already used by another object", objId);
     Assert.set(
         !references.containsKey(objId), "The id %s is already used by another reference", objId);

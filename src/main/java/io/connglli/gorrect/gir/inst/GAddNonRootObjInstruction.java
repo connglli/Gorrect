@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import lombok.*;
@@ -73,5 +74,18 @@ public class GAddNonRootObjInstruction extends GInstruction {
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    super.checkValidity(graph);
+    if (objectSize < 0) {
+      throw new InvalidInputException(
+          "Object size must be non-negative, but got "
+              + objectSize
+              + " (instruction: "
+              + this
+              + ")");
+    }
   }
 }
