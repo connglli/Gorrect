@@ -26,7 +26,6 @@ package io.connglli.gorrect.utility;
 
 import java.io.PrintStream;
 import java.util.logging.*;
-import javax.swing.*;
 import lombok.AccessLevel;
 import lombok.Getter;
 import lombok.RequiredArgsConstructor;
@@ -85,33 +84,33 @@ public class Logger {
   // - Logging Methods
   // - ===========================================
 
-  public void error(String message) {
+  public void error(String message, Object... args) {
     log(Level.SEVERE, "--------------------------");
-    log(Level.SEVERE, "[**ERROR**] " + message);
+    log(Level.SEVERE, "[**ERROR**] " + message.formatted(args));
     log(Level.SEVERE, "--------------------------");
-    Assert.panic(message);
+    Assert.panic(message.formatted(args));
   }
 
-  public void severe(String message) {
-    log(Level.SEVERE, message);
-    Assert.panic(message);
+  public void severe(String message, Object... args) {
+    log(Level.SEVERE, message.formatted(args));
+    Assert.panic(message.formatted(args));
   }
 
-  public void warning(String message) {
+  public void warning(String message, Object... args) {
     log(Level.WARNING, "--------------------------");
-    log(Level.WARNING, "[!!WARNING!!] " + message);
+    log(Level.WARNING, "[!!WARNING!!] " + message.formatted(args));
     log(Level.WARNING, "--------------------------");
   }
 
-  public void debug(String message) {
-    log(Level.FINE, message);
+  public void debug(String message, Object... args) {
+    log(Level.FINE, message.formatted(args));
   }
 
-  public void fine(String message) {
-    log(Level.FINE, message);
+  public void fine(String message, Object... args) {
+    log(Level.FINE, message.formatted(args));
   }
 
-  public void info(String message) {
-    log(Level.INFO, message);
+  public void info(String message, Object... args) {
+    log(Level.INFO, message.formatted(args));
   }
 }

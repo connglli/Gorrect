@@ -70,6 +70,10 @@ public class OracleObject {
     return heap.estimateObjectHeapSize(this);
   }
 
+  public boolean hasReferent(@NonNull OracleObject referent) {
+    return heap.hasReference(this, referent);
+  }
+
   public Set<OracleReference> getReferences() {
     return heap.getReferences(this);
   }

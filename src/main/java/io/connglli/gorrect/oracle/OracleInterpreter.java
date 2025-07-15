@@ -70,7 +70,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   }
 
   public GGraph getState() {
-    return heap.getGraph();
+    return heap.getState();
   }
 
   @Override

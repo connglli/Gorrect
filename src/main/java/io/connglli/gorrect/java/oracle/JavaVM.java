@@ -29,6 +29,7 @@ import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.OracleObject;
+import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.Logger;
 import lombok.NonNull;
 
@@ -43,10 +44,10 @@ public class JavaVM extends LangVM {
   public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {
     if (heapUnusedBytes < estimateNewObjectHeapSize(size)) {
       throw new OutOfMemError(
-          "Heap out of memory: "
-              + heapUnusedBytes
+          "Java heap out of memory: "
+              + Formats.toCommaString(heapUnusedBytes)
               + " bytes left, "
-              + size
+              + Formats.toCommaString(size)
               + " bytes needed for object of type "
               + type.name());
     }
@@ -82,7 +83,7 @@ public class JavaVM extends LangVM {
         "WARNING(JavaVM.estimateNewObjectHeapSize): OracleHeap.estimateNewObjectSize() is current NOT reliable");
     // TODO: Consider metadata, vtable, type, etc.
     // We know that class have a base class GGeneratedClassBase.
-    return requestedSize;
+    return Math.max(0, requestedSize) + 16; // 16 bytes for the base class overhead
   }
 
   @Override
@@ -93,6 +94,6 @@ public class JavaVM extends LangVM {
     // We know that each reference <u,v,s> has a field in
     // GGeneratedClassU.s_ref_to_v and the class has a super class called
     // GGeneratedClassBase. No other super classes, no other subclasses, etc.
-    return object.getSize();
+    return Math.max(0, object.getSize()) + 16; // 16 bytes for the base class overhead
   }
 }

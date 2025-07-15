@@ -25,6 +25,8 @@
 package io.connglli.gorrect.smith;
 
 import io.connglli.gorrect.gir.model.GID;
+import java.util.Arrays;
+import java.util.stream.Collectors;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 
@@ -36,7 +38,13 @@ public class IdSmith {
   private long nextId = 0;
 
   public GID next() {
-    return new GID(prefix + (nextId++));
+    return new GID(prefix + "_" + (nextId++));
+  }
+
+  public GID next(Object... args) {
+    GID gid = next();
+    String suffix = Arrays.stream(args).map(Object::toString).collect(Collectors.joining("_"));
+    return new GID(gid.get() + "___" + suffix);
   }
 
   public void reset() {

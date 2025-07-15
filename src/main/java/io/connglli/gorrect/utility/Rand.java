@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.utility;
 
-import java.util.Random;
+import java.util.*;
 import java.util.stream.DoubleStream;
 import java.util.stream.IntStream;
 import java.util.stream.LongStream;
@@ -53,26 +53,26 @@ public class Rand {
     return random.nextInt();
   }
 
-  public int nextInt(int bound) {
-    return random.nextInt(bound);
+  public int nextInt(int boundExclusive) {
+    return random.nextInt(boundExclusive);
   }
 
-  public int nextInt(int min, int max) {
-    Assert.set(max > min, "Max bound must be greater than min bound");
-    return random.nextInt(max - min) + min;
+  public int nextInt(int minInclusive, int maxExclusive) {
+    Assert.set(maxExclusive > minInclusive, "Max bound must be greater than min bound");
+    return random.nextInt(maxExclusive - minInclusive) + minInclusive;
   }
 
   public long nextLong() {
     return random.nextLong();
   }
 
-  public long nextLong(long bound) {
-    return random.nextLong(bound);
+  public long nextLong(long boundExclusive) {
+    return random.nextLong(boundExclusive);
   }
 
-  public long nextLong(long min, long max) {
-    Assert.set(max > min, "Max bound must be greater than min bound");
-    return random.nextLong(max - min) + min;
+  public long nextLong(long minInclusive, long maxExclusive) {
+    Assert.set(maxExclusive > minInclusive, "Max bound must be greater than min bound");
+    return random.nextLong(maxExclusive - minInclusive) + minInclusive;
   }
 
   public boolean nextBoolean() {
@@ -91,10 +91,8 @@ public class Rand {
     return random.nextGaussian();
   }
 
-  /**
-   * Return next index from an array of probabilities. For example, nextIndex([0.1, 0.4, 0.5])
-   * returns - 0 with probability 0.1 - 1 with probability 0.4 - 2 with probability 0.5.
-   */
+  /// Return next index from an array of probabilities. For example, nextIndex([0.1, 0.4, 0.5])
+  /// returns - 0 with probability 0.1 - 1 with probability 0.4 - 2 with probability 0.5.
   public int nextIndex(double[] probas) {
     Assert.set(probas.length >= 1, "Input probabilities are not sufficient");
     double[] newProbas = new double[probas.length + 1];
@@ -112,6 +110,53 @@ public class Rand {
       }
     }
     return probas.length - 1;
+  }
+
+  public int nextIndex(int[] weights) {
+    Assert.set(weights.length >= 1, "Input weights are not sufficient");
+    double[] probas =
+        Arrays.stream(weights)
+            .mapToDouble(i -> (double) i / Arrays.stream(weights).sum())
+            .toArray();
+    return nextIndex(probas);
+  }
+
+  public <T> T nextItem(T[] items) {
+    return items[nextInt(0, items.length)];
+  }
+
+  public <T> T nextItem(T[] items, double[] probas) {
+    Assert.set(probas.length == items.length, "Input probabilities must match item count");
+    return items[nextIndex(probas)];
+  }
+
+  public <T> T nextItem(T[] items, int[] weights) {
+    Assert.set(weights.length == items.length, "Input weights must match item count");
+    return items[nextIndex(weights)];
+  }
+
+  public <T> T nextItem(List<T> items) {
+    return items.get(nextInt(0, items.size()));
+  }
+
+  public <T> T nextItem(List<T> items, double[] probas) {
+    Assert.set(probas.length == items.size(), "Input probabilities must match item count");
+    return items.get(nextIndex(probas));
+  }
+
+  public <T> T nextItem(List<T> items, int[] weights) {
+    Assert.set(weights.length == items.size(), "Input weights must match item count");
+    return items.get(nextIndex(weights));
+  }
+
+  public <T> T nextItem(SequencedMap<T, Integer> itemProbaMap) {
+    int sum = itemProbaMap.values().stream().mapToInt(Integer::intValue).sum();
+    double[] probas =
+        itemProbaMap.values().stream()
+            .map(i -> (double) i / sum)
+            .mapToDouble(Double::doubleValue)
+            .toArray();
+    return nextItem(new LinkedList<>(itemProbaMap.sequencedKeySet()), probas);
   }
 
   public IntStream ints(long streamSize) {

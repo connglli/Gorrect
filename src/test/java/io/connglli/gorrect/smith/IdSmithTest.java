@@ -1,0 +1,192 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.connglli.gorrect.smith;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import io.connglli.gorrect.gir.model.GID;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+class IdSmithTest {
+
+  private IdSmith idSmith;
+
+  @BeforeEach
+  void setUp() {
+    idSmith = new IdSmith("test");
+  }
+
+  @Test
+  void testConstructorWithValidPrefix() {
+    IdSmith smith = new IdSmith("prefix");
+    assertNotNull(smith);
+  }
+
+  @Test
+  void testConstructorWithNullPrefix() {
+    assertThrows(NullPointerException.class, () -> new IdSmith(null));
+  }
+
+  @Test
+  void testNextGeneratesSequentialIds() {
+    GID id1 = idSmith.next();
+    GID id2 = idSmith.next();
+    GID id3 = idSmith.next();
+
+    assertEquals("test_0", id1.get());
+    assertEquals("test_1", id2.get());
+    assertEquals("test_2", id3.get());
+  }
+
+  @Test
+  void testNextWithEmptyPrefix() {
+    IdSmith emptyPrefixSmith = new IdSmith("");
+    GID id = emptyPrefixSmith.next();
+    assertEquals("_0", id.get());
+  }
+
+  @Test
+  void testNextWithSingleArg() {
+    GID id = idSmith.next("arg1");
+    assertEquals("test_0___arg1", id.get());
+  }
+
+  @Test
+  void testNextWithMultipleArgs() {
+    GID id = idSmith.next("arg1", "arg2", "arg3");
+    assertEquals("test_0___arg1_arg2_arg3", id.get());
+  }
+
+  @Test
+  void testNextWithMixedArgTypes() {
+    GID id = idSmith.next("string", 42, true, 314);
+    assertEquals("test_0___string_42_true_314", id.get());
+  }
+
+  @Test
+  void testNextWithNullArg() {
+    GID id = idSmith.next("arg1", "null", "arg3");
+    assertEquals("test_0___arg1_null_arg3", id.get());
+  }
+
+  @Test
+  void testNextWithEmptyArgs() {
+    GID id = idSmith.next();
+    assertEquals("test_0", id.get());
+  }
+
+  @Test
+  void testNextWithArgsAfterSequentialCalls() {
+    idSmith.next(); // test_0
+    idSmith.next(); // test_1
+    GID id = idSmith.next("suffix");
+    assertEquals("test_2___suffix", id.get());
+  }
+
+  @Test
+  void testReset() {
+    idSmith.next(); // test_0
+    idSmith.next(); // test_1
+    idSmith.next(); // test_2
+
+    idSmith.reset();
+
+    GID id = idSmith.next();
+    assertEquals("test_0", id.get());
+  }
+
+  @Test
+  void testResetWithArgs() {
+    idSmith.next("arg1"); // test_0___arg1
+    idSmith.next("arg2"); // test_1___arg2
+
+    idSmith.reset();
+
+    GID id = idSmith.next("arg3");
+    assertEquals("test_0___arg3", id.get());
+  }
+
+  @Test
+  void testMultipleResets() {
+    idSmith.next(); // test_0
+    idSmith.reset();
+    idSmith.next(); // test_0
+    idSmith.reset();
+    GID id = idSmith.next();
+    assertEquals("test_0", id.get());
+  }
+
+  @Test
+  void testDifferentPrefixes() {
+    IdSmith smith1 = new IdSmith("prefix1");
+    IdSmith smith2 = new IdSmith("prefix2");
+
+    GID id1 = smith1.next();
+    GID id2 = smith2.next();
+
+    assertEquals("prefix1_0", id1.get());
+    assertEquals("prefix2_0", id2.get());
+  }
+
+  @Test
+  void testLargeSequentialGeneration() {
+    for (int i = 0; i < 100; i++) {
+      GID id = idSmith.next();
+      assertEquals("test_" + i, id.get());
+    }
+  }
+
+  @Test
+  void testSpecialCharactersInPrefix() {
+    IdSmith smith = new IdSmith("test-prefix");
+    GID id = smith.next();
+    assertEquals("test-prefix_0", id.get());
+  }
+
+  @Test
+  void testWithLongPrefix() {
+    String longPrefix = "a".repeat(100);
+    IdSmith smith = new IdSmith(longPrefix);
+    GID id = smith.next();
+    assertEquals(longPrefix + "_0", id.get());
+  }
+
+  @Test
+  void testGeneratedIdIsValidGID() {
+    GID id = idSmith.next();
+    assertNotNull(id);
+    assertNotNull(id.get());
+    assertFalse(id.get().isEmpty());
+  }
+
+  @Test
+  void testGeneratedIdWithArgsIsValidGID() {
+    GID id = idSmith.next("arg1", "arg2");
+    assertNotNull(id);
+    assertNotNull(id.get());
+    assertFalse(id.get().isEmpty());
+  }
+}

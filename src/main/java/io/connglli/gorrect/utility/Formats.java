@@ -55,5 +55,13 @@ public final class Formats {
     return toCamelCase(name, false);
   }
 
+  public static String toCommaString(int number) {
+    return String.format("%,d", number);
+  }
+
+  public static String toCommaString(long number) {
+    return String.format("%,d", number);
+  }
+
   private Formats() {}
 }

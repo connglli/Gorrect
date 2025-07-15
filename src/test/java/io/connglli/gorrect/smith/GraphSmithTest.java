@@ -1,0 +1,346 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.connglli.gorrect.smith;
+
+import static org.junit.jupiter.api.Assertions.*;
+
+import io.connglli.gorrect.gir.model.GGraph;
+import io.connglli.gorrect.gir.model.GID;
+import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.oracle.LangVM;
+import io.connglli.gorrect.utility.Rand;
+import java.util.Set;
+import org.junit.jupiter.api.BeforeEach;
+import org.junit.jupiter.api.Test;
+
+class GraphSmithTest {
+
+  private GraphSmith.Config.ConfigBuilder configBuilder;
+  private LangVM vm;
+  private IdSmith objectIdSmith;
+  private IdSmith referenceIdSmith;
+
+  @BeforeEach
+  void setUp() {
+    Rand.getInstance().setSeed(0);
+    vm = new JavaVM(1024 * 1024 * 1024); // 1GB heap
+    objectIdSmith = new IdSmith("obj");
+    referenceIdSmith = new IdSmith("ref");
+
+    configBuilder =
+        GraphSmith.Config.builder()
+            .vm(vm)
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith);
+  }
+
+  @Test
+  void testCraftBasicGraph() {
+    GraphSmith.Config config = configBuilder.build();
+    GraphSmith smith = new GraphSmith(config);
+
+    GGraph graph = smith.craft();
+
+    assertNotNull(graph, "Graph should not be null");
+    assertFalse(graph.getObjects().isEmpty(), "Graph should contain objects");
+    assertFalse(graph.getRoots().isEmpty(), "Graph should contain root objects");
+  }
+
+  @Test
+  void testCraftWithMinimalConfiguration() {
+    GraphSmith.Config config =
+        configBuilder
+            .minRoots(1)
+            .maxRoots(1)
+            .minNonRoots(1)
+            .maxNonRoots(1)
+            .minRefs(1)
+            .maxRefs(1)
+            .build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    assertEquals(1, graph.getRoots().size(), "Should have exactly 1 root object");
+    assertEquals(
+        2, graph.getObjects().size(), "Should have exactly 2 objects total (1 root + 1 ordinary)");
+    assertEquals(1, graph.getReferences().size(), "Should have exactly 1 reference");
+  }
+
+  @Test
+  void testCraftWithCustomConfiguration() {
+    GraphSmith.Config config =
+        configBuilder
+            .minRoots(2)
+            .maxRoots(3)
+            .minNonRoots(5)
+            .maxNonRoots(10)
+            .minRefs(3)
+            .maxRefs(15)
+            .strongRefWeight(60)
+            .softRefWeight(20)
+            .weakRefWeight(20)
+            .build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    int rootCount = graph.getRoots().size();
+    int totalObjectCount = graph.getObjects().size();
+    int refCount = graph.getReferences().size();
+
+    assertTrue(rootCount >= 2 && rootCount <= 3, "Root count should be between 2 and 3");
+    assertTrue(
+        totalObjectCount >= 7 && totalObjectCount <= 13,
+        "Total object count should be between 7 and 13");
+    assertTrue(refCount >= 3, "Reference count should be more than 3");
+  }
+
+  @Test
+  void testAllObjectsAreReachableFromRoots() {
+    GraphSmith.Config config =
+        configBuilder
+            .minRoots(2)
+            .maxRoots(2)
+            .minNonRoots(8)
+            .maxNonRoots(8)
+            .minRefs(10)
+            .maxRefs(10)
+            .build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    Set<GID> allObjects =
+        graph.getObjects().stream()
+            .map(GObject::getId)
+            .collect(java.util.stream.Collectors.toSet());
+
+    Set<GID> reachableObjects = graph.getReachableObjects();
+
+    assertEquals(
+        allObjects.size(), reachableObjects.size(), "All objects should be reachable from roots");
+    assertTrue(
+        reachableObjects.containsAll(allObjects), "All objects should be reachable from roots");
+  }
+
+  @Test
+  void testReferenceTypesDistribution() {
+    GraphSmith.Config config =
+        configBuilder
+            .minRoots(1)
+            .maxRoots(1)
+            .minNonRoots(20)
+            .maxNonRoots(20)
+            .minRefs(30)
+            .maxRefs(30)
+            .strongRefWeight(50)
+            .softRefWeight(30)
+            .weakRefWeight(20)
+            .build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    long strongRefs =
+        graph.getReferences().stream()
+            .filter(ref -> ref.getType() == GReference.Type.STRONG)
+            .count();
+    long softRefs =
+        graph.getReferences().stream().filter(ref -> ref.getType() == GReference.Type.SOFT).count();
+    long weakRefs =
+        graph.getReferences().stream().filter(ref -> ref.getType() == GReference.Type.WEAK).count();
+
+    assertTrue(strongRefs > 0, "Should have some strong references");
+    assertEquals(
+        graph.getReferences().size(),
+        softRefs + weakRefs + strongRefs,
+        "All references should be accounted for");
+  }
+
+  @Test
+  void testObjectSizeConstraints() {
+    long minSize = 100;
+    long maxSize = 1000;
+
+    GraphSmith.Config config =
+        configBuilder.minObjSizeBytes(minSize).maxObjSizeBytes(maxSize).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    for (GObject obj : graph.getObjects()) {
+      assertTrue(
+          obj.getSize() >= minSize,
+          "Object size should be >= " + minSize + " but was " + obj.getSize());
+      assertTrue(
+          obj.getSize() <= maxSize,
+          "Object size should be <= " + maxSize + " but was " + obj.getSize());
+    }
+  }
+
+  @Test
+  void testUniqueObjectIds() {
+    GraphSmith.Config config =
+        configBuilder.minRoots(5).maxRoots(5).minNonRoots(15).maxNonRoots(15).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    Set<GID> objectIds =
+        graph.getObjects().stream()
+            .map(GObject::getId)
+            .collect(java.util.stream.Collectors.toSet());
+
+    assertEquals(graph.getObjects().size(), objectIds.size(), "All object IDs should be unique");
+  }
+
+  @Test
+  void testUniqueReferenceIds() {
+    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    Set<GID> referenceIds =
+        graph.getReferences().stream()
+            .map(GReference::getId)
+            .collect(java.util.stream.Collectors.toSet());
+
+    assertEquals(
+        graph.getReferences().size(), referenceIds.size(), "All reference IDs should be unique");
+  }
+
+  @Test
+  void testNoSelfReferences() {
+    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    for (GReference ref : graph.getReferences()) {
+      assertNotEquals(
+          ref.getReferer(), ref.getReferent(), "References should not be self-referential");
+    }
+  }
+
+  @Test
+  void testNoDuplicateReferences() {
+    GraphSmith.Config config = configBuilder.minRefs(15).maxRefs(15).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    Set<String> referenceKeys = new java.util.HashSet<>();
+    for (GReference ref : graph.getReferences()) {
+      String key = ref.getReferer() + "->" + ref.getReferent();
+      assertTrue(referenceKeys.add(key), "Duplicate reference found: " + key);
+    }
+  }
+
+  @Test
+  void testMultipleGraphsAreIndependent() {
+    GraphSmith.Config config = configBuilder.build();
+    GraphSmith smith = new GraphSmith(config);
+
+    GGraph graph1 = smith.craft();
+    GGraph graph2 = smith.craft();
+
+    // Reset IdSmiths to ensure independence
+    objectIdSmith.reset();
+    referenceIdSmith.reset();
+
+    GraphSmith smith2 = new GraphSmith(config);
+    GGraph graph3 = smith2.craft();
+
+    assertNotEquals(
+        graph1.getObjects().size(),
+        graph2.getObjects().size(),
+        "Different graphs should likely have different sizes");
+    assertNotNull(graph3, "Third graph should be created successfully");
+  }
+
+  @Test
+  void testHeapCapacityConstraints() {
+    // Create a small heap
+    LangVM smallVM = new JavaVM(1024); // 1KB heap
+
+    GraphSmith.Config config =
+        configBuilder
+            .vm(smallVM)
+            .minObjSizeBytes(100)
+            .maxObjSizeBytes(200)
+            .minNonRoots(20) // This should cause out of memory
+            .maxNonRoots(20)
+            .build();
+
+    GraphSmith smith = new GraphSmith(config);
+
+    assertThrows(
+        AssertionError.class, smith::craft, "Should throw AssertionError when heap is too small");
+  }
+
+  @Test
+  void testConfigBuilderDefaults() {
+    GraphSmith.Config config =
+        GraphSmith.Config.builder()
+            .vm(vm)
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith)
+            .build();
+
+    assertEquals(1, config.getMinRoots());
+    assertEquals(10, config.getMaxRoots());
+    assertEquals(5, config.getMinNonRoots());
+    assertEquals(20, config.getMaxNonRoots());
+    assertEquals(5, config.getMinRefs());
+    assertEquals(30, config.getMaxRefs());
+    assertEquals(50, config.getStrongRefWeight());
+    assertEquals(20, config.getSoftRefWeight());
+    assertEquals(30, config.getWeakRefWeight());
+    assertEquals(1, config.getMinObjSizeBytes());
+    assertEquals(128_000, config.getMaxObjSizeBytes());
+  }
+
+  @Test
+  void testGraphContainsCorrectObjectTypes() {
+    GraphSmith.Config config =
+        configBuilder.minRoots(3).maxRoots(3).minNonRoots(5).maxNonRoots(5).build();
+
+    GraphSmith smith = new GraphSmith(config);
+    GGraph graph = smith.craft();
+
+    long rootCount =
+        graph.getObjects().stream().filter(obj -> obj.getType() == GObject.Type.GCROOT).count();
+
+    long ordinaryCount =
+        graph.getObjects().stream().filter(obj -> obj.getType() == GObject.Type.ORDINARY).count();
+
+    assertEquals(3, rootCount, "Should have exactly 3 root objects");
+    assertEquals(5, ordinaryCount, "Should have exactly 5 ordinary objects");
+  }
+}

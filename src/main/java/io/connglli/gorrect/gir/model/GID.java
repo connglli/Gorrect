@@ -33,7 +33,7 @@ import lombok.NonNull;
  * comparable.
  */
 public class GID implements Comparable<GID> {
-  private static final Pattern GID_PATTERN = Pattern.compile("[a-zA-Z][a-zA-Z0-9_\\-]+");
+  private static final Pattern GID_PATTERN = Pattern.compile("[_a-zA-Z][a-zA-Z0-9_\\-]+");
 
   @NonNull private final String id;
 

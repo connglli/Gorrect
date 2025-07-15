@@ -55,6 +55,19 @@ public class OracleHeap {
     graph = new GGraph();
   }
 
+  public GGraph getState() {
+    return getState(true);
+  }
+
+  public GGraph getState(boolean clean) {
+    // We return a copy of the graph to ensure that the state is immutable
+    GGraph state = new GGraph(graph);
+    if (clean) {
+      state.removeUnreachableObjects();
+    }
+    return state;
+  }
+
   public boolean hasObject(@NonNull GID objectId) {
     return graph.hasObject(objectId);
   }
@@ -147,6 +160,11 @@ public class OracleHeap {
   // -========================================================================
   // Reference Addition and Deletion
   // -========================================================================
+
+  /* package */ boolean hasReference(
+      @NonNull OracleObject referer, @NonNull OracleObject referent) {
+    return graph.hasReference(referer.getId(), referent.getId());
+  }
 
   /* package */ OracleReference getReference(@NonNull GID referenceId) {
     return new OracleReference(this, graph.getReference(referenceId));

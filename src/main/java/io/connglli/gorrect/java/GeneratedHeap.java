@@ -105,7 +105,7 @@ class GeneratedHeap {
     deadReferences = new LinkedList<>();
   }
 
-  GGraph getState() {
+  GGraph getState(boolean clean) {
     GGraph graph = new GGraph();
     for (GeneratedObject obj : objects.values()) {
       graph.addObject(obj.getId(), obj.getType(), obj.getSize());
@@ -119,8 +119,14 @@ class GeneratedHeap {
             reference.getType());
       }
     }
-    graph.removeUnreachableObjects();
+    if (clean) {
+      graph.removeUnreachableObjects();
+    }
     return graph;
+  }
+
+  GGraph getState() {
+    return getState(true);
   }
 
   List<GeneratedObject> getLiveObjects() {
