@@ -22,46 +22,62 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.gir.model;
+package io.connglli.gorrect.utility;
 
-import io.connglli.gorrect.utility.Assert;
-import java.util.LinkedHashMap;
-import java.util.Map;
+import java.util.Arrays;
+import lombok.NonNull;
 
 /** Represents a memory size with different units (bytes, KB, MB, GB). */
-public class GMemorySize {
-  private static final Map<String, Long> MULTIPLIERS = new LinkedHashMap<>();
+public class MemorySize {
+  public enum Unit {
+    B(1L),
+    KB(1024L),
+    MB(1024L * 1024L),
+    GB(1024L * 1024L * 1024L),
+    TB(1024L * 1024L * 1024L * 1024L),
+    PB(1024L * 1024L * 1024L * 1024L * 1024L),
+    EB(1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
 
-  static {
-    MULTIPLIERS.put("B", 1L);
-    MULTIPLIERS.put("KB", 1024L);
-    MULTIPLIERS.put("MB", 1024L * 1024L);
-    MULTIPLIERS.put("GB", 1024L * 1024L * 1024L);
-    MULTIPLIERS.put("TB", 1024L * 1024L * 1024L * 1024L);
-    MULTIPLIERS.put("PB", 1024L * 1024L * 1024L * 1024L * 1024L);
-    MULTIPLIERS.put("EB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
-    // MULTIPLIERS.put("ZB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
-    // MULTIPLIERS.put("YB", 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L * 1024L);
+    public static String[] names() {
+      return Arrays.stream(Unit.values())
+          .map(Unit::name)
+          .map(String::toUpperCase)
+          .toArray(String[]::new);
+    }
+
+    private final long multiplier;
+
+    Unit(long multiplier) {
+      this.multiplier = multiplier;
+    }
+  }
+
+  public static long of(long num, @NonNull final Unit unit) {
+    return num * unit.multiplier;
   }
 
   /** Parse a size string like "30m", "25k", "1g", "512" (bytes) */
-  public static long parse(String sizeStr) {
-    if (sizeStr == null || sizeStr.trim().isEmpty()) {
+  public static long parse(String size) {
+    if (size == null || size.trim().isEmpty()) {
       Assert.panic("Empty size string");
     }
 
-    String trimmed = sizeStr.trim().toLowerCase();
+    String trimmed = size.trim().toLowerCase();
     String number = trimmed.replaceAll("[^\\d]", "");
     String unit = trimmed.replaceAll("[\\d]", "").toUpperCase();
 
     if (number.isEmpty()) {
-      Assert.panic("Invalid size format: " + sizeStr);
+      Assert.panic("Invalid size format: " + size);
     }
-    if (!MULTIPLIERS.containsKey(unit)) {
+    try {
+      return of(Long.parseLong(number), Unit.valueOf(unit));
+    } catch (NumberFormatException e) {
+      Assert.panic("Invalid number format in size string: " + size);
+      return 0; // Unreachable, but needed to satisfy the compiler
+    } catch (IllegalAccessError e) {
       Assert.panic("Unsupported unit: " + unit);
+      return 0; // Unreachable, but needed to satisfy the compiler
     }
-
-    return Long.parseLong(number) * MULTIPLIERS.get(unit);
   }
 
   public static String toString(long bytes) {
@@ -71,10 +87,10 @@ public class GMemorySize {
   public static String toString(long bytes, int decimals) {
     if (bytes == 0) return "0B";
 
-    String[] units = MULTIPLIERS.keySet().toArray(new String[0]);
     int k = 1024, i = 0;
     double size = bytes;
 
+    String[] units = Unit.names();
     while (size >= k && i < units.length - 1) {
       size /= k;
       i++;

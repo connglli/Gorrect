@@ -26,12 +26,10 @@ package io.connglli.gorrect.smith;
 
 import static org.junit.jupiter.api.Assertions.*;
 
-import io.connglli.gorrect.gir.model.GGraph;
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.gir.model.*;
 import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.oracle.LangVM;
+import io.connglli.gorrect.utility.MemorySize;
 import io.connglli.gorrect.utility.Rand;
 import java.util.Set;
 import org.junit.jupiter.api.BeforeEach;
@@ -47,7 +45,7 @@ class GraphSmithTest {
   @BeforeEach
   void setUp() {
     Rand.getInstance().setSeed(0);
-    vm = new JavaVM(1024 * 1024 * 1024); // 1GB heap
+    vm = new JavaVM(MemorySize.parse("1GB")); // 1GB heap
     objectIdSmith = new IdSmith("obj");
     referenceIdSmith = new IdSmith("ref");
 
@@ -287,7 +285,7 @@ class GraphSmithTest {
   @Test
   void testHeapCapacityConstraints() {
     // Create a small heap
-    LangVM smallVM = new JavaVM(1024); // 1KB heap
+    LangVM smallVM = new JavaVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1KB heap
 
     GraphSmith.Config config =
         configBuilder
