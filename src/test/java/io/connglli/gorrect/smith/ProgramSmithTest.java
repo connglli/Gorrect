@@ -416,7 +416,7 @@ class ProgramSmithTest {
     String statsString = stats1.toString();
     assertNotNull(statsString, "Stats toString should not be null");
     assertTrue(
-        statsString.contains("numTotalGenerated"),
+        statsString.contains("numTotalGeneration"),
         "Stats toString should contain numTotalGenerated");
     assertTrue(
         statsString.contains("numValidGeneration"),

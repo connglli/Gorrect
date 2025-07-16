@@ -285,7 +285,7 @@ class GraphSmithTest {
   @Test
   void testHeapCapacityConstraints() {
     // Create a small heap
-    LangVM smallVM = new JavaVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1KB heap
+    LangVM smallVM = new JavaVM(MemorySize.of(1, MemorySize.Unit.KB)); // 1KB heap
 
     GraphSmith.Config config =
         configBuilder
