@@ -59,6 +59,10 @@ public abstract class LangVM {
     this.heapUnusedBytes = heapCapacity;
   }
 
+  void reset() {
+    this.heapUnusedBytes = heapCapacity;
+  }
+
   // -================================================
   // - Heap Helper Methods
   // -================================================

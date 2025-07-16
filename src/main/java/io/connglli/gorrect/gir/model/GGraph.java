@@ -446,4 +446,19 @@ public class GGraph {
 
     return sb.toString();
   }
+
+  @Override
+  public boolean equals(Object o) {
+    if (o == null || getClass() != o.getClass()) return false;
+    GGraph graph = (GGraph) o;
+    return Objects.equals(objects, graph.objects)
+        && Objects.equals(references, graph.references)
+        && Objects.equals(refTo, graph.refTo)
+        && Objects.equals(refBy, graph.refBy);
+  }
+
+  @Override
+  public int hashCode() {
+    return Objects.hash(objects, references, refTo, refBy);
+  }
 }

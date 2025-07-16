@@ -24,6 +24,82 @@
 
 package io.connglli.gorrect;
 
+import io.connglli.gorrect.gir.GProgram;
+import io.connglli.gorrect.gir.model.GGraph;
+import io.connglli.gorrect.java.JavaInterpreter;
+import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.oracle.OracleInterpreter;
+import io.connglli.gorrect.smith.GraphSmith;
+import io.connglli.gorrect.smith.IdSmith;
+import io.connglli.gorrect.smith.ProgramSmith;
+import io.connglli.gorrect.utility.Logger;
+import io.connglli.gorrect.utility.MemorySize;
+import io.connglli.gorrect.utility.Rand;
+import java.util.logging.Level;
+
 public class Gorrect {
-  public static void main(String[] args) {}
+  public static void main(String[] args) {
+    Logger.setLevel(Level.INFO);
+    Rand.getInstance().setSeed(0);
+
+    JavaVM jvm = new JavaVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
+
+    IdSmith objectIdSmith = new IdSmith("obj");
+    IdSmith referenceIdSmith = new IdSmith("ref");
+
+    GraphSmith.Config graphConfig =
+        GraphSmith.Config.builder()
+            .vm(jvm)
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith)
+            .minRoots(1)
+            .maxRoots(3)
+            .minNonRoots(2)
+            .maxNonRoots(5)
+            .minRefs(2)
+            .maxRefs(8)
+            .build();
+    GraphSmith graphSmith = new GraphSmith(graphConfig);
+
+    GGraph initState = graphSmith.craft();
+
+    ProgramSmith.Config programConfig =
+        ProgramSmith.Config.builder()
+            .vm(jvm)
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith)
+            .initState(initState)
+            .minInstructions(1)
+            .maxInstructions(32)
+            .minObjSizeBytes(1)
+            .maxObjSizeBytes(MemorySize.of(128, MemorySize.Unit.KB))
+            .build();
+    ProgramSmith programSmith = new ProgramSmith(programConfig);
+
+    GProgram program = programSmith.craft();
+    System.out.println(program);
+    ProgramSmith.Stats progamGenStats = programSmith.getStats();
+    System.out.println("Program generation stats: ");
+    System.out.println(progamGenStats.formatToText());
+
+    OracleInterpreter oracle = new OracleInterpreter(jvm, program);
+    oracle.interpret();
+    GGraph oracleState = oracle.getState();
+
+    JavaInterpreter java = new JavaInterpreter(program);
+    java.interpret();
+    GGraph javaInterpState = java.getState();
+
+    if (oracleState.equals(javaInterpState)) {
+      System.out.println("Equals");
+    } else {
+      System.out.println("Not equals");
+    }
+    ;
+
+    java.toJavaCode("/tmp");
+    // GGraph javaExecState = java.execute("/tmp");
+
+    // Oracle.refinement(oracleState, javaExecState) == true;
+  }
 }

@@ -306,7 +306,7 @@ class GeneratedHeap {
               GObject.Type.ORDINARY,
               "((%s) %s.get(\"%s\"))"
                   .formatted(objectClazz.clazzName, OBJECT_POOL_NAME, objectClazz.getId()),
-              null,
+              GReference.Type.STRONG, // It is not strongly reachable as it is in the pool
               null);
       appendStatement(
           OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName); //
@@ -342,7 +342,13 @@ class GeneratedHeap {
     GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
     GeneratedObject object = // The reachability will be updated after the pool is closed
         putObject(
-            new GeneratedObject(this, objectClazz, GObject.Type.ORDINARY, "", null, referenceType));
+            new GeneratedObject(
+                this,
+                objectClazz,
+                GObject.Type.ORDINARY,
+                "",
+                null, // The reachability will be updated later
+                referenceType));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, objectClazz.getId());
     switch (referenceType) {

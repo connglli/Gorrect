@@ -72,6 +72,8 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     log.fine("--------------");
     log.fine(">> Executing: " + program.getConfiguration());
     heap.appendComment(program.getConfiguration().toString());
+    heap.appendComment("Initial State:");
+    heap.appendComment(program.getConfiguration().getInitState().formatToText());
     program.getConfiguration().accept(this);
     log.fine("   State:");
     log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());

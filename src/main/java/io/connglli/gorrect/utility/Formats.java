@@ -59,6 +59,11 @@ public final class Formats {
     return String.format("%,d", number);
   }
 
+  public static String toPrecision(double number, int precision) {
+    String format = "%." + precision + "f";
+    return String.format(format, number);
+  }
+
   public static String toCommaString(long number) {
     return String.format("%,d", number);
   }
