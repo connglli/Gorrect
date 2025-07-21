@@ -41,9 +41,9 @@ final class GeneratedObjectBaseClass extends GeneratedClass {
   static final ClassName clazzName = ClassName.get("", "GGeneratedBase");
   static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8; // 1MB
 
-  private static final FieldSpec objectId =
+  static final FieldSpec objectId =
       FieldSpec.builder(String.class, "id", Modifier.PUBLIC, Modifier.FINAL).build();
-  private static final FieldSpec objectSize =
+  static final FieldSpec objectSize =
       FieldSpec.builder(byte[][].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
   private static final MethodSpec constructor =
       MethodSpec.constructorBuilder()

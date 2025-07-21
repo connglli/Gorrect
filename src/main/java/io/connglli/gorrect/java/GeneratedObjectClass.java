@@ -27,6 +27,8 @@ package io.connglli.gorrect.java;
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.MethodSpec;
 import io.connglli.gorrect.gir.model.GID;
+import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Formats;
 import javax.lang.model.element.Modifier;
 import lombok.Getter;
@@ -39,6 +41,11 @@ import lombok.NonNull;
  * controlling its size).
  */
 final class GeneratedObjectClass extends GeneratedClass {
+
+  static final String CLAZZ_NAME_PREFIX = "GGeneratedObject";
+  static final String STRONG_REF_FIELD_NAME_PREFIX = "strong_ref_to_";
+  static final String SOFT_REF_FIELD_NAME_PREFIX = "soft_ref_to_";
+  static final String WEAK_REF_FIELD_NAME_PREFIX = "weak_ref_to_";
 
   @NonNull @Getter private final GID id;
 
@@ -61,7 +68,19 @@ final class GeneratedObjectClass extends GeneratedClass {
     this.clazzName = clazzNameFor(objectId);
   }
 
-  private static ClassName clazzNameFor(@NonNull GID objectId) {
-    return ClassName.get("", "GGeneratedObject" + Formats.toCamelCase(objectId.get(), true));
+  static ClassName clazzNameFor(@NonNull GID objectId) {
+    return ClassName.get("", CLAZZ_NAME_PREFIX + Formats.toCamelCase(objectId.get(), true));
+  }
+
+  static String computeFieldNameFor(@NonNull GReference.Type type, @NonNull GID referentId) {
+    return switch (type) {
+      case STRONG -> STRONG_REF_FIELD_NAME_PREFIX + referentId;
+      case SOFT -> SOFT_REF_FIELD_NAME_PREFIX + referentId;
+      case WEAK -> WEAK_REF_FIELD_NAME_PREFIX + referentId;
+      default -> {
+        Assert.panic("Cannot reach here");
+        yield "";
+      }
+    };
   }
 }

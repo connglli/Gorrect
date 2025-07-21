@@ -146,14 +146,6 @@ class GeneratedObject {
   }
 
   static String computeFieldName(@NonNull GReference.Type type, @NonNull GID referentId) {
-    return switch (type) {
-      case STRONG -> "strong_ref_to_" + referentId;
-      case SOFT -> "soft_ref_to_" + referentId;
-      case WEAK -> "weak_ref_to_" + referentId;
-      default -> {
-        Assert.panic("Cannot reach here");
-        yield "";
-      }
-    };
+    return GeneratedObjectClass.computeFieldNameFor(type, referentId);
   }
 }

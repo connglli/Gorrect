@@ -36,6 +36,7 @@ import lombok.NonNull;
  */
 final class GeneratedMainClass extends GeneratedClass {
   static final ClassName clazzName = ClassName.get("", "GGeneratedMain");
+  static final String ROOT_REF_FIELD_NAME_PREFIX = "root_ref_to_";
 
   // The main method of the main class. It is used to initialize the heap state and execute the
   // heap manipulation sequence and finally waits for heap dumping.
@@ -61,6 +62,6 @@ final class GeneratedMainClass extends GeneratedClass {
   }
 
   static String computeFieldName(@NonNull GID gid) {
-    return "root_ref_to_" + gid;
+    return ROOT_REF_FIELD_NAME_PREFIX + gid;
   }
 }
