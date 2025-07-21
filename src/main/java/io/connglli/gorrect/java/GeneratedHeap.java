@@ -51,6 +51,9 @@ import lombok.NonNull;
  * representing the object. The unique class contains one field for each object it has referenced,
  * is referencing, and will reference. These reference fields are either strong, soft, or weak. For
  * those root object, it generates a static field in the main class to reference them as root.
+ *
+ * <p>Note that, in this heap implementation, an object is considered alive if it is allocated and
+ * not yet manually freed, even though it is already unreachable from the root objects.
  */
 class GeneratedHeap {
   private static final Logger log = Logger.getLogger(GeneratedHeap.class);
@@ -96,7 +99,7 @@ class GeneratedHeap {
   }
 
   GeneratedHeap(boolean enableStrictMode) {
-    this.strict = enableStrictMode;
+    strict = enableStrictMode;
     mainClazz = new GeneratedMainClass(this);
     mainClazz.addField(objectPoolField);
     objects = new HashMap<>();
@@ -105,6 +108,7 @@ class GeneratedHeap {
     deadReferences = new LinkedList<>();
   }
 
+  ///  Get the state of the heap.
   GGraph getState(boolean clean) {
     GGraph graph = new GGraph();
     for (GeneratedObject obj : objects.values()) {
@@ -125,35 +129,40 @@ class GeneratedHeap {
     return graph;
   }
 
+  /// Get the cleaned state (i.e., unreachable objects are removed) of the heap.
   GGraph getState() {
     return getState(true);
   }
 
+  /// Get all the live (i.e. not moved to dead, either reachable or unreachable) objects.
   List<GeneratedObject> getLiveObjects() {
     List<GeneratedObject> sorted = new ArrayList<>(objects.values());
     sorted.sort(Comparator.comparing(GeneratedObject::getId));
     return sorted;
   }
 
+  /// Get all the dead (i.e., unreachable and moved to dead) objects.
   List<GeneratedObject> getDeadObjects() {
     List<GeneratedObject> sorted = new ArrayList<>(deadObjects.values());
     sorted.sort(Comparator.comparing(GeneratedObject::getId));
     return sorted;
   }
 
-  void insertDumpHeapHook() {
-    // Insert a dump heap instruction at the end of the main method
-    appendComment("Wait until the heap is dumped");
-    appendStatement("System.in.read()");
-  }
-
+  /// Append a comment to the generated class.
   void appendComment(String comment) {
     appendStatement("/* " + comment + " */");
   }
 
-  String toJavaCode(String directory) {
-    String filePath = directory + File.separator + mainClazz.getClazzName() + ".java";
-    try (FileOutputStream fout = new FileOutputStream(filePath)) {
+  /// Append a statement to the generated class.
+  void appendStatement(@NonNull String stmtFormat, Object... stmtArgs) {
+    mainClazz.addStatement(stmtFormat, stmtArgs);
+  }
+
+  /// Generate the Java code and return the relative file path to the workdir parameter.
+  String exportToJava(String directory) {
+    String relativePath = mainClazz.getClazzName() + ".java";
+    String fullPath = directory + File.separator + relativePath;
+    try (FileOutputStream fout = new FileOutputStream(fullPath)) {
       fout.write(mainClazz.toJavaCode().getBytes());
       fout.write(new GeneratedObjectBaseClass(this).toJavaCode().getBytes());
       List<GID> sorted = new LinkedList<>();
@@ -165,17 +174,19 @@ class GeneratedHeap {
         Assert.set(obj != null, "The object with id %s does not exist", objId);
         fout.write(obj.getClazz().toJavaCode().getBytes());
       }
-      return filePath;
+      return relativePath;
     } catch (IOException e) {
-      Assert.panic("Cannot write to file %s: %s", filePath, e.getMessage());
+      Assert.panic("Cannot write to file %s: %s", fullPath, e.getMessage());
       return null; // Unreachable, but required by the compiler
     }
   }
 
+  /// Format the cleaned state of the heap to text.
   String formatGraphStateToText() {
     return getState().formatToText();
   }
 
+  /// Format all the objects and their references to text.
   String formatObjectStateToText() {
     StringBuilder sb = new StringBuilder();
     for (List<GeneratedObject> objectList : Arrays.asList(getLiveObjects(), getDeadObjects())) {
@@ -206,10 +217,12 @@ class GeneratedHeap {
     return sb.toString();
   }
 
+  /// Query if a live object with the given id exists in the heap.
   boolean hasObject(@NonNull GID objectId) {
     return objects.containsKey(objectId);
   }
 
+  /// Get a live object with the given id from the heap.
   @NonNull
   GeneratedObject getObject(@NonNull GID objectId) {
     Assert.set(hasObject(objectId), "The object with id %s does not exist", objectId);
@@ -900,9 +913,5 @@ class GeneratedHeap {
         log.warning(message);
       }
     }
-  }
-
-  private void appendStatement(@NonNull String stmtFormat, Object... stmtArgs) {
-    mainClazz.addStatement(stmtFormat, stmtArgs);
   }
 }

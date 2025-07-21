@@ -71,7 +71,10 @@ test {
 
 dependencies {
   implementation fileTree(dir: 'lib', includes: ['*.jar'])
+  implementation "org.zeroturnaround:zt-exec:1.12"
   implementation "com.palantir.javapoet:javapoet:0.7.0"
+  // Add the following to resolve the slf4j error message
+  implementation 'org.slf4j:slf4j-simple:2.0.17'
   compileOnly "org.projectlombok:lombok:1.18.38"
   annotationProcessor "org.projectlombok:lombok:1.18.38"
 

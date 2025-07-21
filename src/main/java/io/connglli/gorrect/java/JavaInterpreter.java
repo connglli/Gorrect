@@ -30,11 +30,16 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.utility.Assert;
-import io.connglli.gorrect.utility.Logger;
+import io.connglli.gorrect.utility.*;
+import java.io.*;
 import java.util.List;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
 import lombok.NonNull;
+import org.zeroturnaround.exec.ProcessExecutor;
+import org.zeroturnaround.exec.listener.ProcessListener;
 
 public class JavaInterpreter implements GProgramVisitor<Void> {
 
@@ -62,10 +67,88 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     return heap.getState();
   }
 
-  public String toJavaCode(String directory) {
-    String file = heap.toJavaCode(directory);
+  /// Generate the Java code and return the relative file path to the workdir parameter.
+  public String exportToJava(String workdir) {
+    String file = heap.exportToJava(workdir);
     log.info("Java code generated: " + file);
     return file;
+  }
+
+  /// Generate the Java code and execute it in the given workdir. Return the relative path
+  /// to the heap dump file or null if the dump failed.
+  public String executeJavaCode(String workdir, String... execOptions)
+      throws IOException, InterruptedException, TimeoutException {
+    String javaFile = exportToJava(workdir);
+
+    // Compile the generated Java code
+    new ProcessExecutor()
+        .command("javac", "-cp", workdir, workdir + File.separator + javaFile)
+        .redirectErrorStream(true)
+        .timeout(30, TimeUnit.SECONDS) // A simple compilation should finish within 30 seconds
+        .exitValue(0)
+        .execute();
+
+    // Execute the generated Java code and dump the heap
+    String className = // Convert the file name to a full-qualified class name
+        javaFile.substring(0, javaFile.indexOf(".java")).replace(File.separator, ".");
+    String heapDumpFile = className + ".hprof";
+    long heapSize = program.getConfiguration().getHeapSize();
+    log.warning(
+        "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (GC, etc.) has not been written to the options");
+    AtomicLong pid = new AtomicLong(-1L);
+    ValueHolder<Boolean> dumpSucceeded = new ValueHolder<Boolean>(false);
+    new ProcessExecutor(
+            "java",
+            "-cp",
+            workdir,
+            // TODO: Add HEAP configuration (for example the used collector) to the VM options
+            "-Xmx" + MemorySize.toString(heapSize, 0).replace("B", ""),
+            className)
+        .timeout(1, TimeUnit.MINUTES)
+        .listener(
+            new ProcessListener() {
+              @Override
+              public void afterStart(Process process, ProcessExecutor executor) {
+                pid.set(process.pid());
+              }
+            })
+        .redirectErrorStream(true)
+        .redirectInput(
+            new InputStream() {
+              volatile boolean closed = false;
+
+              @Override
+              public int read() throws IOException {
+                if (closed) {
+                  return -1; // EOF
+                }
+                // Wait until the process is started
+                while (pid.get() == -1L) {
+                  try {
+                    Thread.sleep(5L);
+                  } catch (InterruptedException e) {
+                    log.error(
+                        "Thread interrupted while waiting for the generated java process to start: %s",
+                        e);
+                    closed = true;
+                    return -1; // EOF if interrupted
+                  }
+                }
+                log.info("DUMPING HEAP " + pid.get() + "...");
+                try {
+                  dumpHeap(pid.get(), workdir + File.separator + heapDumpFile);
+                  dumpSucceeded.setV(true);
+                  System.out.println("SUCCEEDED!");
+                } catch (Exception e) {
+                  log.warning("FAILED: %s", e.getMessage());
+                }
+                closed = true;
+                return '\n'; // Signal that we have finished dumping the heap
+              }
+            })
+        .execute();
+
+    return dumpSucceeded.getV() ? heapDumpFile : null;
   }
 
   public Void visit(GProgram program) {
@@ -87,15 +170,15 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
       log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
       log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
     }
-    heap.insertDumpHeapHook();
+    // Insert a dump heap instruction at the end of the main method
+    heap.appendComment("Wait until the heap is dumped");
+    heap.appendStatement("int x = System.in.read()");
+    heap.appendStatement("System.out.println(x)");
     return null;
   }
 
   public Void visit(GSetHeapInstruction instruction) {
     instruction.checkValidity(getState());
-    // TODO: Save HEAP configuration to use when running the generation program
-    log.warning(
-        "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (size, type, etc.) has not been written or saved");
     heap.initialize(instruction.getInitState());
     return null;
   }
@@ -300,5 +383,13 @@ public class JavaInterpreter implements GProgramVisitor<Void> {
     heap.getObject(instruction.getRefererId()).getReferences().forEach(GeneratedReference::unlink);
     heap.clean();
     return null;
+  }
+
+  private static void dumpHeap(long pid, String heapDumpFile)
+      throws IOException, InterruptedException, TimeoutException {
+    new ProcessExecutor("jcmd", String.valueOf(pid), "GC.heap_dump", "-all", heapDumpFile)
+        .timeout(5, TimeUnit.MINUTES)
+        .exitValue(0)
+        .execute();
   }
 }

@@ -95,11 +95,12 @@ public class Gorrect {
     } else {
       System.out.println("Not equals");
     }
-    ;
 
-    java.toJavaCode("/tmp");
-    // GGraph javaExecState = java.execute("/tmp");
-
-    // Oracle.refinement(oracleState, javaExecState) == true;
+    try {
+      String hprof = java.executeJavaCode("/tmp");
+      System.out.println("HPROF file generated at: " + hprof);
+    } catch (Exception e) {
+      System.out.println("FAILED to execute Java code: " + e.getMessage());
+    }
   }
 }
