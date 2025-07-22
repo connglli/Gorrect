@@ -38,7 +38,7 @@ public class Jcmd {
   static {
     try {
       // Check if jcmd is available in the system PATH
-      new ProcessExecutor("jcmd", "--version").timeout(10, TimeUnit.SECONDS).exitValue(0).execute();
+      new ProcessExecutor("jcmd", "--help").timeout(10, TimeUnit.SECONDS).exitValue(0).execute();
     } catch (IOException | InterruptedException | TimeoutException e) {
       Assert.panic("jcmd command not found or not executable");
     }
