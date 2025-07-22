@@ -169,6 +169,7 @@ public class ProgramSmith {
 
   @Getter private final Config config;
   @Getter private final Stats stats = new Stats();
+  @Getter private final int maxNumTrials = 320;
 
   public GProgram craft() {
     stats.reset();
@@ -179,6 +180,10 @@ public class ProgramSmith {
     SmithImpl smith = new SmithImpl(interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     for (int i = 0; i < numInstructions; i++) {
+      if (stats.numTotalGeneration - stats.numValidGeneration > maxNumTrials) {
+        log.debug("Too many invalid generations, possibly due to stopping.");
+        break;
+      }
       if (config.vm.getHeapUnusedBytes() <= 0) {
         log.debug("Cannot generate more instructions due to insufficient memory.");
         break; // Out of memory
@@ -188,6 +193,7 @@ public class ProgramSmith {
       log.debug("Generating instruction: " + mock.getOpCode());
       GInstruction instruction = mock.accept(smith);
       if (instruction == null) {
+        stats.numTotalGeneration++;
         log.debug("  failed: instruction is null");
         i -= 1; // Retry the same instruction index
         continue;
@@ -554,13 +560,12 @@ public class ProgramSmith {
     public GInstruction visit(GRemoveAllReferentsInstruction unused) {
       // We restrict the referer to be strongly reachable
       StateRandDecor s = currState();
-      GID referenceId =
-          s.randomReference(reference -> s.isStronglyReachable(reference.getReferer()));
-      if (referenceId == null) {
-        log.debug("Cannot remove a reference due to no suitable candidates.");
+      GID refererId = s.randomObject(object -> s.isStronglyReachable(object.getId()));
+      if (refererId == null) {
+        log.debug("Cannot remove all referents due to no suitable candidates.");
         return null;
       }
-      return new GRemoveAllReferentsInstruction(referenceId);
+      return new GRemoveAllReferentsInstruction(refererId);
     }
 
     private long randomPadding() {
