@@ -39,4 +39,70 @@ public abstract class JavaVM extends LangVM {
   public JavaVM(long heapCapacity) {
     super(heapCapacity);
   }
+
+  /*
+   * Java Types and Values
+   * ---------------------
+   *
+   * According to Java Language Specification, each Java value can have either a Reference Type or a Primitive Type,
+   * where, the size of the reference type is determined by the JVM implementation, and the size of the primitive
+   * types are fixed as follows:
+   *
+   * - Boolean: 4 bytes
+   * - Byte: 1 byte
+   * - Char: 2 bytes
+   * - Short: 2 bytes
+   * - Int: 4 bytes
+   * - Long: 8 bytes
+   * - Float: 4 bytes
+   * - Double: 8 bytes
+   *
+   * More: Types, Values, and Variables (https://docs.oracle.com/javase/specs/jls/se21/html/jls-4.html)
+   *
+   *
+   * Java Object Layout
+   * -------------------
+   *
+   * The layout of a Java object in memory is not defined by the Java Language Specification, it is determined by
+   * the JVM implementation. However, the shallow size of a Java object can be estimated based on the size of its
+   * fields and possibly some other header information.
+   */
+
+  public abstract int getReferenceSize();
+
+  public int getBoolSize() {
+    return 1;
+  }
+
+  public int getByteSize() {
+    return 1;
+  }
+
+  public int getCharSize() {
+    return 2;
+  }
+
+  public int getShortSize() {
+    return 2;
+  }
+
+  public int getIntSize() {
+    return 4;
+  }
+
+  public int getLongSize() {
+    return 8;
+  }
+
+  public int getFloatSize() {
+    return 4;
+  }
+
+  public int getDoubleSize() {
+    return 8;
+  }
+
+  public long align(int unit, long size) {
+    return size + (unit - (size % unit)) % unit;
+  }
 }

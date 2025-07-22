@@ -40,7 +40,7 @@ public class NoopVM extends LangVM {
   }
 
   @Override
-  public long estimateNewObjectHeapSize(long requestedSize) {
+  public long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize) {
     return requestedSize;
   }
 

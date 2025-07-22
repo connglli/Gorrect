@@ -258,26 +258,26 @@ public class ProgramSmith {
 
     @Override
     public GInstruction visit(GAddRootObjInstruction unused) {
-      long rootSize = randomPadding();
+      GID rootId = config.objectIdSmith.next();
+      long rootSize = randomPadding(rootId);
       if (rootSize < 0) {
         log.debug("Cannot add root object due to insufficient memory.");
         return null;
       }
-      GID rootId = config.objectIdSmith.next();
       return new GAddRootObjInstruction(rootSize, rootId);
     }
 
     @Override
     public GInstruction visit(GAddNonRootObjInstruction unused) {
       // We restrict the referer to the new non-root object to be strongly reachable
-      long objectSize = randomPadding();
-      if (objectSize < 0) {
-        log.debug("Cannot add non-root object due to insufficient memory.");
-        return null;
-      }
       GID refererId = currState().randomStronglyReachableObject();
       if (refererId == null) {
         log.debug("Cannot add non-root object due to no strongly reachable objects.");
+        return null;
+      }
+      long objectSize = randomPadding(refererId);
+      if (objectSize < 0) {
+        log.debug("Cannot add non-root object due to insufficient memory.");
         return null;
       }
       GID objectId = config.objectIdSmith.next();
@@ -568,12 +568,12 @@ public class ProgramSmith {
       return new GRemoveAllReferentsInstruction(refererId);
     }
 
-    private long randomPadding() {
+    private long randomPadding(@NonNull GID id) {
       long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
-      long objectSize = config.vm.estimateNewObjectHeapSize(paddingSize);
+      long objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
       while (paddingSize > 0 && objectSize > config.vm.getHeapUnusedBytes()) {
         paddingSize /= 2;
-        objectSize = config.vm.estimateNewObjectHeapSize(paddingSize);
+        objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
       }
       if (paddingSize < config.minObjSizeBytes) {
         log.warning(

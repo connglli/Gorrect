@@ -307,10 +307,6 @@ public class OracleHeap {
   // Heap Helper Methods
   // -========================================================================
 
-  /* package */ long estimateNewObjectHeapSize(long requestedSize, GObject.Type type) {
-    return lvm.estimateNewObjectHeapSize(requestedSize);
-  }
-
   /* package */ long estimateObjectHeapSize(OracleObject object) {
     return lvm.estimateObjectHeapSize(object);
   }

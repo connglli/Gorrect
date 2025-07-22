@@ -133,10 +133,10 @@ public class GraphSmith {
   private OracleObject nextObject(OracleHeap heap, GObject.Type type) {
     GID id = config.objectIdSmith.next();
     long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
-    long objectSize = config.vm.estimateNewObjectHeapSize(paddingSize);
+    long objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
     while (paddingSize > 0 && objectSize > config.vm.getHeapUnusedBytes()) {
       paddingSize /= 2;
-      objectSize = config.vm.estimateNewObjectHeapSize(paddingSize);
+      objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
     }
     if (paddingSize < config.minObjSizeBytes) {
       log.warning(

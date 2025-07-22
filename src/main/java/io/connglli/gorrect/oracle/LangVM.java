@@ -67,9 +67,9 @@ public abstract class LangVM {
   // - Heap Helper Methods
   // -================================================
 
-  public abstract long estimateNewObjectHeapSize(long requestedSize);
+  public abstract long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize);
 
-  public abstract long estimateObjectHeapSize(OracleObject object);
+  public abstract long estimateObjectHeapSize(@NonNull OracleObject object);
 
   public abstract void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type);
 
@@ -79,7 +79,7 @@ public abstract class LangVM {
       @NonNull GID referenceId,
       @NonNull OracleObject referer,
       @NonNull OracleObject referent,
-      GReference.Type type);
+      @NonNull GReference.Type type);
 
   public abstract void onOracleUnlink(
       @NonNull OracleObject referer, @NonNull OracleObject referent);
