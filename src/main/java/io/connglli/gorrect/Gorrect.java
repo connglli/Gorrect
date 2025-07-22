@@ -27,7 +27,7 @@ package io.connglli.gorrect;
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.JavaInterpreter;
-import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.java.oracle.HotSpotVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.smith.GraphSmith;
 import io.connglli.gorrect.smith.IdSmith;
@@ -42,7 +42,7 @@ public class Gorrect {
     Logger.setLevel(Level.INFO);
     Rand.getInstance().setSeed(0);
 
-    JavaVM jvm = new JavaVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
+    HotSpotVM jvm = new HotSpotVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
 
     IdSmith objectIdSmith = new IdSmith("obj");
     IdSmith referenceIdSmith = new IdSmith("ref");

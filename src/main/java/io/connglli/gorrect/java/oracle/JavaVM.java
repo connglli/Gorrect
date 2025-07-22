@@ -1,7 +1,7 @@
 /*
  * MIT License
  *
- * Copyright (c) 2025-2025 Cong Li (cong.li@inf.ethz.ch)
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
  *
  * Permission is hereby granted, free of charge, to any person obtaining a copy
  * of this software and associated documentation files (the "Software"), to deal
@@ -24,76 +24,19 @@
 
 package io.connglli.gorrect.java.oracle;
 
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.LangVM;
-import io.connglli.gorrect.oracle.OracleObject;
-import io.connglli.gorrect.utility.Formats;
-import io.connglli.gorrect.utility.Logger;
-import lombok.NonNull;
 
-public class JavaVM extends LangVM {
-  private static final Logger log = Logger.getLogger(JavaVM.class);
+/**
+ * Abstract class representing a Java Virtual Machine (JVM) for the OracleInterpreter. This class
+ * exists because the Java specification does not define the memory layout of objects: "For example,
+ * the memory layout of run-time data areas, the garbage-collection algorithm used, and any internal
+ * optimization of the Java Virtual Machine instructions (for example, translating them into machine
+ * code) are left to the discretion of the implementor." See <a
+ * href=https://docs.oracle.com/javase/specs/index.html">Java SE Specifications</a>.
+ */
+public abstract class JavaVM extends LangVM {
 
   public JavaVM(long heapCapacity) {
     super(heapCapacity);
-  }
-
-  @Override
-  public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {
-    if (heapUnusedBytes < estimateNewObjectHeapSize(size)) {
-      throw new OutOfMemError(
-          "Java heap out of memory: "
-              + Formats.toCommaString(heapUnusedBytes)
-              + " bytes left, "
-              + Formats.toCommaString(size)
-              + " bytes needed for object of type "
-              + type.name());
-    }
-    heapUnusedBytes -= estimateNewObjectHeapSize(size);
-  }
-
-  public void onOracleFree(@NonNull OracleObject object) {
-    heapUnusedBytes += estimateObjectHeapSize(object);
-  }
-
-  @Override
-  public void onOracleClean() {}
-
-  @Override
-  public void onOracleCompact() {}
-
-  @Override
-  public void onOracleStressCompact() {}
-
-  @Override
-  public void onOracleReference(
-      @NonNull GID referenceId,
-      @NonNull OracleObject referer,
-      @NonNull OracleObject referent,
-      GReference.Type type) {}
-
-  @Override
-  public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
-
-  @Override
-  public long estimateNewObjectHeapSize(long requestedSize) {
-    log.warning(
-        "WARNING(JavaVM.estimateNewObjectHeapSize): OracleHeap.estimateNewObjectSize() is current NOT reliable");
-    // TODO: Consider metadata, vtable, type, etc.
-    // We know that class have a base class GGeneratedClassBase.
-    return Math.max(0, requestedSize) + 16; // 16 bytes for the base class overhead
-  }
-
-  @Override
-  public long estimateObjectHeapSize(OracleObject object) {
-    log.warning(
-        "WARNING(JavaVM.estimateObjectHeapSize): OracleHeap.estimateObjectSize() is current NOT reliable");
-    // TODO: Consider referents, etc.
-    // We know that each reference <u,v,s> has a field in
-    // GGeneratedClassU.s_ref_to_v and the class has a super class called
-    // GGeneratedClassBase. No other super classes, no other subclasses, etc.
-    return Math.max(0, object.getSize()) + 16; // 16 bytes for the base class overhead
   }
 }

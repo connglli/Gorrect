@@ -31,7 +31,7 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.java.oracle.HotSpotVM;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -41,7 +41,7 @@ class OracleInterpreterTest {
   @Test
   void testSimpleGraph() {
     // Use JavaVM and initialize ObjectGraph
-    JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -55,7 +55,7 @@ class OracleInterpreterTest {
     program.addInstruction(addRootObj);
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
     interpreter.interpret();
 
     GGraph finalState = interpreter.getState();
@@ -67,7 +67,7 @@ class OracleInterpreterTest {
   @Test
   void testComplexGraph() {
     // Use JavaVM and initialize ObjectGraph
-    JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -91,7 +91,7 @@ class OracleInterpreterTest {
     program.addInstruction(new GRemoveObjInstruction(r2));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
     interpreter.interpret();
 
     GGraph finalState = interpreter.getState();
@@ -108,7 +108,7 @@ class OracleInterpreterTest {
   @Test
   void testCyclicGraph() {
     // Use JavaVM and initialize ObjectGraph
-    JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -133,7 +133,7 @@ class OracleInterpreterTest {
     program.addInstruction(new GAddStrongRefInstruction(o2, o1, e_o2_o1));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
     interpreter.interpret();
 
     GGraph finalState = interpreter.getState();
@@ -148,7 +148,7 @@ class OracleInterpreterTest {
   @Test
   void testSoftReferences() {
     // Use JavaVM and initialize ObjectGraph
-    JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -167,7 +167,7 @@ class OracleInterpreterTest {
         new GAddNonRootObjInstruction(300L * 1024 * 1024, r1, GReference.Type.SOFT, o1, e_r1_o1));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
     interpreter.interpret();
 
     GGraph finalState = interpreter.getState();
@@ -182,7 +182,7 @@ class OracleInterpreterTest {
   @Test
   void testAllInstructions() {
     // Use JavaVM and initialize ObjectGraph
-    JavaVM javaVM = new JavaVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -242,7 +242,7 @@ class OracleInterpreterTest {
     program.addInstruction(new GCloneObjInstruction(o2, o2c, "__cloned"));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(javaVM, program);
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
     interpreter.interpret();
 
     GGraph intermediateState = interpreter.getState();
@@ -272,7 +272,7 @@ class OracleInterpreterTest {
     // Remove reference
     newProgram.addInstruction(new GRemoveRefInstruction(new GID("ref-r2_o2")));
 
-    OracleInterpreter newInterpreter = new OracleInterpreter(javaVM, newProgram);
+    OracleInterpreter newInterpreter = new OracleInterpreter(hotSpotVM, newProgram);
     newInterpreter.interpret();
 
     GGraph finalState = newInterpreter.getState();
