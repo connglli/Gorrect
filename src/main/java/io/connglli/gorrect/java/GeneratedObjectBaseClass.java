@@ -44,6 +44,8 @@ final class GeneratedObjectBaseClass extends GeneratedClass {
   static final FieldSpec objectId =
       FieldSpec.builder(String.class, "id", Modifier.PUBLIC, Modifier.FINAL).build();
   static final FieldSpec objectSize =
+      FieldSpec.builder(long.class, "size", Modifier.PUBLIC, Modifier.FINAL).build();
+  static final FieldSpec objectPadding =
       FieldSpec.builder(byte[][].class, "padding", Modifier.PUBLIC, Modifier.FINAL).build();
   private static final MethodSpec constructor =
       MethodSpec.constructorBuilder()
@@ -55,6 +57,7 @@ final class GeneratedObjectBaseClass extends GeneratedClass {
                   if (size <= 0) {
                       throw new IllegalArgumentException("Object size must be a positive value, got " + size);
                   }
+                  this.size = size;
                   int numChunks = (int) ((size + $L - 1) / $L);
                   this.padding = new byte[numChunks][];
                   for (int i = 0; i < numChunks; i++) {
@@ -70,6 +73,6 @@ final class GeneratedObjectBaseClass extends GeneratedClass {
 
   GeneratedObjectBaseClass(@NonNull GeneratedHeap heap) {
     super(heap, clazzName.canonicalName(), Modifier.ABSTRACT);
-    addField(objectId).addField(objectSize).addMethod(constructor);
+    addField(objectId).addField(objectSize).addField(objectPadding).addMethod(constructor);
   }
 }

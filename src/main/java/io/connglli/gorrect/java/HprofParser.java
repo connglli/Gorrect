@@ -24,14 +24,17 @@
 
 package io.connglli.gorrect.java;
 
+import com.palantir.javapoet.ClassName;
+import com.palantir.javapoet.TypeName;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.smith.IdSmith;
 import io.connglli.gorrect.utility.Assert;
+import io.connglli.gorrect.utility.Files;
 import io.connglli.gorrect.utility.Logger;
-import io.connglli.gorrect.utility.NetBeanHeapProfilers;
+import io.connglli.gorrect.utility.NBHprofParser;
 import java.io.File;
 import java.io.IOException;
 import java.lang.ref.Reference;
@@ -48,7 +51,9 @@ import org.netbeans.lib.profiler.heap.*;
 public class HprofParser {
   public static final Logger log = Logger.getLogger(HprofParser.class);
 
-  public static GGraph parse(String hprofFile) throws IOException {
+  public static GGraph parse(@NonNull String hprofFile) throws IOException {
+    deleteCacheIfNecessary(hprofFile);
+
     Heap heap = HeapFactory.createHeap(new File(hprofFile));
 
     String className = GeneratedMainClass.clazzName.canonicalName();
@@ -59,8 +64,8 @@ public class HprofParser {
         className,
         hprofFile);
 
-    Map<Long, HprofObjectRecord> roots = new HashMap<>();
-    Map<Long, HprofObjectRecord> nonRoots = new HashMap<>();
+    Map<Long, GObjRecord> roots = new HashMap<>();
+    Map<Long, GObjRecord> nonRoots = new HashMap<>();
     IdSmith refIdSmith = new IdSmith("ref");
 
     // Walk the main class in the heap to find all root objects
@@ -78,11 +83,11 @@ public class HprofParser {
       }
       Assert.set(
           // We're a root reference, so it must a generated object
-          HprofObjectRecord.isGeneratedByUs(o),
+          GObjRecord.isGeneratedByUs(o),
           "Expected Instance for strong reference, but got " + o.getClass());
       Instance instance = (Instance) o;
       long instanceId = instance.getInstanceId();
-      HprofObjectRecord root = HprofObjectRecord.parse(instance);
+      GObjRecord root = GObjRecord.parse(instance);
       roots.put(instanceId, root);
       log.info("Found root object: %s (%d)", root.id, instanceId);
     }
@@ -92,7 +97,7 @@ public class HprofParser {
     Iterator objectIterator = heap.getAllInstancesIterator();
     while (objectIterator.hasNext()) {
       Object o = objectIterator.next();
-      if (!HprofObjectRecord.isGeneratedByUs(o)) {
+      if (!GObjRecord.isGeneratedByUs(o)) {
         continue;
       }
       Instance instance = (Instance) o;
@@ -101,27 +106,27 @@ public class HprofParser {
         // This is a root object, skip it
         continue;
       }
-      HprofObjectRecord object = HprofObjectRecord.parse(instance);
+      GObjRecord object = GObjRecord.parse(instance);
       nonRoots.put(instanceId, object);
       log.info("Found non-root object: %s (%d)", object.id, instanceId);
     }
 
     // Register all objects and references into a GGraph
     GGraph graph = new GGraph();
-    for (HprofObjectRecord root : roots.values()) {
+    for (GObjRecord root : roots.values()) {
       GID rootId = root.id;
       Assert.set(!graph.hasObject(rootId), "Root object already exists: " + rootId);
       log.info("Registering root: " + rootId);
-      graph.addObject(rootId, GObject.Type.GCROOT, 0);
+      graph.addObject(rootId, GObject.Type.GCROOT, root.size);
     }
-    for (HprofObjectRecord object : nonRoots.values()) {
+    for (GObjRecord object : nonRoots.values()) {
       GID objectId = object.id;
       Assert.set(!graph.hasObject(objectId), "Non-root object already exists: " + objectId);
       log.info("Registering non-root: " + objectId);
-      graph.addObject(objectId, GObject.Type.GCROOT, 0);
+      graph.addObject(objectId, GObject.Type.ORDINARY, object.size);
     }
-    for (Collection<HprofObjectRecord> objects : Arrays.asList(roots.values(), nonRoots.values())) {
-      for (HprofObjectRecord referer : objects) {
+    for (Collection<GObjRecord> objects : Arrays.asList(roots.values(), nonRoots.values())) {
+      for (GObjRecord referer : objects) {
         GID refererId = referer.id;
         Assert.set(graph.hasObject(refererId), "Referer object does not exist: " + refererId);
         for (Map.Entry<GID, GReference.Type> entry : referer.referents.entrySet()) {
@@ -137,7 +142,9 @@ public class HprofParser {
     return graph;
   }
 
-  record HprofObjectRecord(@NonNull GID id, @NonNull Map<GID, GReference.Type> referents) {
+  private record GObjRecord(
+      @NonNull GID id, long size, @NonNull Map<GID, GReference.Type> referents) {
+    private static final Map<Long, GID> cachedIds = new WeakHashMap<>();
 
     static boolean isGeneratedByUs(Object o) {
       return o instanceof Instance
@@ -147,27 +154,51 @@ public class HprofParser {
               .startsWith(GeneratedObjectClass.CLAZZ_NAME_PREFIX);
     }
 
+    @SuppressWarnings("rawtypes")
     static boolean isReferenceInstance(Object o, Class<? extends Reference> clazz) {
       return o instanceof Instance
           && ((Instance) o).getJavaClass().getName().equals(clazz.getCanonicalName());
     }
 
-    public static HprofObjectRecord parse(@NonNull Instance instance) {
+    public static GObjRecord parse(@NonNull Instance instance) {
       Assert.set(isGeneratedByUs(instance), "Expected a generated object, but got: " + instance);
       GID id = parseIdField(instance);
+      Long size = parseSizeField(instance);
       Map<GID, GReference.Type> referents = parseReferentFields(instance);
-      return new HprofObjectRecord(id, referents);
+      return new GObjRecord(id, size, referents);
     }
 
-    private static GID parseIdField(Instance instance) {
+    private static GID parseIdField(@NonNull Instance instance) {
+      long instanceId = instance.getInstanceId();
+      GID objectId = cachedIds.getOrDefault(instanceId, null);
+      if (objectId != null) {
+        return objectId; // Return cached ID if available
+      }
+      Assert.set(
+          GeneratedObjectBaseClass.objectId.type().equals(ClassName.get(String.class)),
+          "Expected objectId field to be of type String, but got "
+              + GeneratedObjectBaseClass.objectId.type());
       String idIntern =
-          NetBeanHeapProfilers.parseStringField(
-              instance, GeneratedObjectBaseClass.objectId.name(), false);
+          NBHprofParser.parseStringField(instance, GeneratedObjectBaseClass.objectId.name(), false);
       Assert.set(idIntern != null, "Expected a non-null id for instance " + instance);
-      return new GID(idIntern);
+      objectId = new GID(idIntern);
+      cachedIds.put(instanceId, objectId);
+      return objectId;
     }
 
-    private static Map<GID, GReference.Type> parseReferentFields(Instance instance) {
+    private static Long parseSizeField(@NonNull Instance instance) {
+      Assert.set(
+          GeneratedObjectBaseClass.objectSize.type().equals(TypeName.get(long.class)),
+          "Expected objectSize field to be of type long, but got "
+              + GeneratedObjectBaseClass.objectSize.type());
+      Long size =
+          NBHprofParser.parsePrimitiveField(
+              instance, GeneratedObjectBaseClass.objectSize.name(), Long.class, false);
+      Assert.set(size != null, "Expected a non-null size for instance " + instance);
+      return size;
+    }
+
+    private static Map<GID, GReference.Type> parseReferentFields(@NonNull Instance instance) {
       Map<GID, GReference.Type> referents = new HashMap<>();
       for (Object f : instance.getFieldValues()) {
         Assert.set(f instanceof FieldValue, "Expected FieldValue, but got " + f.getClass());
@@ -224,7 +255,7 @@ public class HprofParser {
                 isGeneratedByUs(o),
                 "Expected Instance for weak reference's referent, but got " + o.getClass());
             GID id = parseIdField((Instance) o);
-            referents.put(id, GReference.Type.SOFT);
+            referents.put(id, GReference.Type.WEAK);
           }
           default -> {
             // Ignore other fields
@@ -232,6 +263,26 @@ public class HprofParser {
         }
       }
       return referents;
+    }
+  }
+
+  private static void deleteCacheIfNecessary(@NonNull String hprof) {
+    File hprofFile = new File(hprof);
+    Assert.set(hprofFile.exists(), "Hprof file does not exist: " + hprofFile.getAbsolutePath());
+    Assert.set(
+        hprofFile.isFile(), "Hprof file is not a regular file: " + hprofFile.getAbsolutePath());
+    File cacheDir = new File(hprofFile + ".nbcache");
+    if (cacheDir.exists()) {
+      if (!cacheDir.isDirectory()) {
+        Assert.panic("A cache file exists but is not a directory: " + cacheDir.getAbsolutePath());
+      }
+      // Delete the cache if it is older than the hprof file
+      if (cacheDir.lastModified() <= hprofFile.lastModified()) {
+        log.info(
+            "Deleting existing hprof cache since it's tool old: " + cacheDir.getAbsolutePath());
+        boolean deleted = Files.deleteFileTreeIfExists(cacheDir.toPath());
+        Assert.set(deleted, "Failed to delete hprof cache: " + cacheDir.getAbsolutePath());
+      }
     }
   }
 }

@@ -24,12 +24,13 @@
 
 package io.connglli.gorrect.utility;
 
+import java.lang.reflect.Array;
 import java.util.Set;
 import org.netbeans.lib.profiler.heap.Instance;
 import org.netbeans.lib.profiler.heap.PrimitiveArrayInstance;
 
-public class NetBeanHeapProfilers {
-  public static Object getField(Instance instance, String fieldName, boolean isStatic) {
+public final class NBHprofParser {
+  public static Object getFieldValue(Instance instance, String fieldName, boolean isStatic) {
     if (!isStatic) {
       return instance.getValueOfField(fieldName);
     } else {
@@ -54,7 +55,7 @@ public class NetBeanHeapProfilers {
         BOXED_PRIMITIVE_TYPES.contains(expectedType),
         "Expected a boxed primitive type, but got " + expectedType);
     // Primitive fields are their boxed primitive type by NetBeans Profiler.
-    Object o = getField(instance, fieldName, isStatic);
+    Object o = getFieldValue(instance, fieldName, isStatic);
     if (o == null) {
       return null;
     }
@@ -72,7 +73,7 @@ public class NetBeanHeapProfilers {
     Assert.set(
         BOXED_PRIMITIVE_TYPES.contains(elementType),
         "Expected the element type to be a boxed primitive type, but got " + elementType);
-    Object o = getField(instance, fieldName, isStatic);
+    Object o = getFieldValue(instance, fieldName, isStatic);
     if (o == null) {
       return null;
     }
@@ -80,8 +81,7 @@ public class NetBeanHeapProfilers {
         o instanceof PrimitiveArrayInstance,
         "Expected PrimitiveArrayInstance for a primitive array field, but got " + o.getClass());
     PrimitiveArrayInstance arrayInstance = (PrimitiveArrayInstance) o;
-    T[] resultArray =
-        (T[]) java.lang.reflect.Array.newInstance(elementType, arrayInstance.getValues().size());
+    T[] resultArray = (T[]) Array.newInstance(elementType, arrayInstance.getValues().size());
     for (int i = 0; i < arrayInstance.getValues().size(); i++) {
       Object element = arrayInstance.getValues().get(i);
       Assert.set(
@@ -116,7 +116,7 @@ public class NetBeanHeapProfilers {
 
   public static String parseStringField(Instance instance, String fieldName, boolean isStatic) {
     // String instances are all Instances according to NetBeans' HPROF parser.
-    Object o = getField(instance, fieldName, isStatic);
+    Object o = getFieldValue(instance, fieldName, isStatic);
     if (o == null) {
       return null;
     }

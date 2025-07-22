@@ -159,6 +159,7 @@ public class JavaInterpreter {
     }
 
     public HeapDumper heapDumper(@NonNull AtomicLong pid, @NonNull String file) {
+      Assert.set(!(new File(file).exists()), "The hprof file %s already exists", file);
       return new HeapDumper(pid, file);
     }
 
