@@ -64,8 +64,7 @@ public class HprofParser {
         className,
         hprofFile);
 
-    Map<Long, GObjRecord> roots = new HashMap<>();
-    Map<Long, GObjRecord> nonRoots = new HashMap<>();
+    Map<Long, GObjRecord> objects = new HashMap<>();
     IdSmith refIdSmith = new IdSmith("ref");
 
     // Walk the main class in the heap to find all root objects
@@ -87,63 +86,74 @@ public class HprofParser {
           "Expected Instance for strong reference, but got " + o.getClass());
       Instance instance = (Instance) o;
       long instanceId = instance.getInstanceId();
-      GObjRecord root = GObjRecord.parse(instance);
-      roots.put(instanceId, root);
-      log.info("Found root object: %s (%d)", root.id, instanceId);
+      GObjRecord root = GObjRecord.parse(instance, GObject.Type.GCROOT);
+      objects.put(instanceId, root);
+      logFoundObject(instance, root, true);
     }
 
     // Walk the heap to find all non-root objects
-    @SuppressWarnings("rawtypes")
-    Iterator objectIterator = heap.getAllInstancesIterator();
-    while (objectIterator.hasNext()) {
-      Object o = objectIterator.next();
-      if (!GObjRecord.isGeneratedByUs(o)) {
-        continue;
+    JavaClass objectBaseClazz =
+        heap.getJavaClassByName(GeneratedObjectBaseClass.clazzName.canonicalName());
+    Assert.set(
+        objectBaseClazz != null,
+        "Base object class not found in the heap: clazz=%s, hprof=%s",
+        GeneratedObjectBaseClass.clazzName.canonicalName(),
+        hprofFile);
+    for (Object c : objectBaseClazz.getSubClasses()) {
+      Assert.set(c instanceof JavaClass, "Expected JavaClass, but got " + c.getClass());
+      JavaClass clazz = (JavaClass) c;
+
+      @SuppressWarnings("rawtypes")
+      Iterator objectIterator = clazz.getInstancesIterator();
+
+      while (objectIterator.hasNext()) {
+        Object o = objectIterator.next();
+        if (!GObjRecord.isGeneratedByUs(o)) {
+          continue;
+        }
+        Instance instance = (Instance) o;
+        long instanceId = instance.getInstanceId();
+        if (objects.containsKey(instanceId)) {
+          continue;
+        }
+        GObjRecord object = GObjRecord.parse(instance, GObject.Type.ORDINARY);
+        objects.put(instanceId, object);
+        logFoundObject(instance, object, false);
       }
-      Instance instance = (Instance) o;
-      long instanceId = instance.getInstanceId();
-      if (roots.containsKey(instanceId)) {
-        // This is a root object, skip it
-        continue;
-      }
-      GObjRecord object = GObjRecord.parse(instance);
-      nonRoots.put(instanceId, object);
-      log.info("Found non-root object: %s (%d)", object.id, instanceId);
     }
 
     // Register all objects and references into a GGraph
     GGraph graph = new GGraph();
-    for (GObjRecord root : roots.values()) {
-      GID rootId = root.id;
-      Assert.set(!graph.hasObject(rootId), "Root object already exists: " + rootId);
-      log.info("Registering root: " + rootId);
-      graph.addObject(rootId, GObject.Type.GCROOT, root.size);
-    }
-    for (GObjRecord object : nonRoots.values()) {
+    for (GObjRecord object : objects.values()) {
       GID objectId = object.id;
-      Assert.set(!graph.hasObject(objectId), "Non-root object already exists: " + objectId);
+      Assert.set(
+          !graph.hasObject(objectId),
+          "%s object already exists: %s",
+          object.isRoot() ? "Root" : "Non-root",
+          objectId);
       log.info("Registering non-root: " + objectId);
-      graph.addObject(objectId, GObject.Type.ORDINARY, object.size);
+      graph.addObject(objectId, object.type, object.size);
     }
-    for (Collection<GObjRecord> objects : Arrays.asList(roots.values(), nonRoots.values())) {
-      for (GObjRecord referer : objects) {
-        GID refererId = referer.id;
-        Assert.set(graph.hasObject(refererId), "Referer object does not exist: " + refererId);
-        for (Map.Entry<GID, GReference.Type> entry : referer.referents.entrySet()) {
-          GID referentId = entry.getKey();
-          GReference.Type referenceType = entry.getValue();
-          Assert.set(graph.hasObject(referentId), "Referent object does not exist: " + referentId);
-          GID referenceId = refIdSmith.next(refererId, referentId);
-          graph.addReference(referenceId, refererId, referentId, referenceType);
-          log.info("Register reference: %s -> %s (%s)", refererId, referentId, referenceType);
-        }
+    for (GObjRecord referer : objects.values()) {
+      GID refererId = referer.id;
+      Assert.set(graph.hasObject(refererId), "Referer object does not exist: " + refererId);
+      for (Map.Entry<GID, GReference.Type> entry : referer.referents.entrySet()) {
+        GID referentId = entry.getKey();
+        GReference.Type referenceType = entry.getValue();
+        Assert.set(graph.hasObject(referentId), "Referent object does not exist: " + referentId);
+        GID referenceId = refIdSmith.next(refererId, referentId);
+        graph.addReference(referenceId, refererId, referentId, referenceType);
+        log.info("Register reference: %s -> %s (%s)", refererId, referentId, referenceType);
       }
     }
     return graph;
   }
 
   private record GObjRecord(
-      @NonNull GID id, long size, @NonNull Map<GID, GReference.Type> referents) {
+      @NonNull GID id,
+      @NonNull GObject.Type type,
+      long size,
+      @NonNull Map<GID, GReference.Type> referents) {
     private static final Map<Long, GID> cachedIds = new WeakHashMap<>();
 
     static boolean isGeneratedByUs(Object o) {
@@ -160,15 +170,15 @@ public class HprofParser {
           && ((Instance) o).getJavaClass().getName().equals(clazz.getCanonicalName());
     }
 
-    public static GObjRecord parse(@NonNull Instance instance) {
+    static GObjRecord parse(@NonNull Instance instance, GObject.Type type) {
       Assert.set(isGeneratedByUs(instance), "Expected a generated object, but got: " + instance);
       GID id = parseIdField(instance);
       Long size = parseSizeField(instance);
       Map<GID, GReference.Type> referents = parseReferentFields(instance);
-      return new GObjRecord(id, size, referents);
+      return new GObjRecord(id, type, size, referents);
     }
 
-    private static GID parseIdField(@NonNull Instance instance) {
+    static GID parseIdField(@NonNull Instance instance) {
       long instanceId = instance.getInstanceId();
       GID objectId = cachedIds.getOrDefault(instanceId, null);
       if (objectId != null) {
@@ -186,7 +196,7 @@ public class HprofParser {
       return objectId;
     }
 
-    private static Long parseSizeField(@NonNull Instance instance) {
+    static Long parseSizeField(@NonNull Instance instance) {
       Assert.set(
           GeneratedObjectBaseClass.objectSize.type().equals(TypeName.get(long.class)),
           "Expected objectSize field to be of type long, but got "
@@ -198,7 +208,7 @@ public class HprofParser {
       return size;
     }
 
-    private static Map<GID, GReference.Type> parseReferentFields(@NonNull Instance instance) {
+    static Map<GID, GReference.Type> parseReferentFields(@NonNull Instance instance) {
       Map<GID, GReference.Type> referents = new HashMap<>();
       for (Object f : instance.getFieldValues()) {
         Assert.set(f instanceof FieldValue, "Expected FieldValue, but got " + f.getClass());
@@ -264,6 +274,10 @@ public class HprofParser {
       }
       return referents;
     }
+
+    boolean isRoot() {
+      return type == GObject.Type.GCROOT;
+    }
   }
 
   private static void deleteCacheIfNecessary(@NonNull String hprof) {
@@ -284,5 +298,21 @@ public class HprofParser {
         Assert.set(deleted, "Failed to delete hprof cache: " + cacheDir.getAbsolutePath());
       }
     }
+  }
+
+  private static void logFoundObject(
+      @NonNull Instance instance, GObjRecord object, boolean isRoot) {
+    log.info(
+        "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, raw_instance_size=%dB, raw_base_size=%dB, retained_size=%dB, reachable_size=%dB)",
+        isRoot ? "root" : "non-root",
+        object.id,
+        instance.getInstanceId(),
+        isRoot,
+        object.referents.size(),
+        object.size,
+        instance.getSize(),
+        instance.getJavaClass().getSuperClass().getInstanceSize(),
+        instance.getRetainedSize(),
+        instance.getReachableSize());
   }
 }
