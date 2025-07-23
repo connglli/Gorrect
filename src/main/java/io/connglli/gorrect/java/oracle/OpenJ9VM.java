@@ -29,6 +29,7 @@ import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.OracleObject;
 import io.connglli.gorrect.utility.Assert;
+import java.io.File;
 import java.util.List;
 import lombok.NonNull;
 
@@ -37,8 +38,8 @@ public class OpenJ9VM extends JavaVM {
     Assert.panic("Not yet implemented for OpenJ9 VM");
   }
 
-  public OpenJ9VM(long heapCapacity) {
-    super(heapCapacity);
+  public OpenJ9VM(File home, long heapCapacity) {
+    super(home, heapCapacity);
   }
 
   @Override

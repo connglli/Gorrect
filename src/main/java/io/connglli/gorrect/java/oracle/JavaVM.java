@@ -25,6 +25,10 @@
 package io.connglli.gorrect.java.oracle;
 
 import io.connglli.gorrect.oracle.LangVM;
+import io.connglli.gorrect.utility.Assert;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
 
 /**
  * Abstract class representing a Java Virtual Machine (JVM) for the OracleInterpreter. This class
@@ -36,8 +40,25 @@ import io.connglli.gorrect.oracle.LangVM;
  */
 public abstract class JavaVM extends LangVM {
 
-  public JavaVM(long heapCapacity) {
+  protected File homeDirectory;
+
+  public JavaVM(File home, long heapCapacity) {
     super(heapCapacity);
+    homeDirectory = home;
+    Assert.set(
+        Files.exists(Path.of(getJavaCompilerPath())),
+        "Java compiler (javac) not found at " + getJavaCompilerPath());
+    Assert.set(
+        Files.exists(Path.of(getJavaExecutablePath())),
+        "Java executable (java) not found at " + getJavaCompilerPath());
+  }
+
+  public String getJavaCompilerPath() {
+    return homeDirectory.toString() + File.separator + "bin" + File.separator + "javac";
+  }
+
+  public String getJavaExecutablePath() {
+    return homeDirectory.toString() + File.separator + "bin" + File.separator + "java";
   }
 
   /*

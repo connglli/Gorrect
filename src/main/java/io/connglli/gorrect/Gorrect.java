@@ -26,8 +26,11 @@ package io.connglli.gorrect;
 
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
+import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.HotSpotVM;
+import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.java.oracle.NoopJVM;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.NoopVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
@@ -72,7 +75,7 @@ public class Gorrect {
 
   @CommandLine.Option(
       names = {"--verbose"},
-      paramLabel = "verbose",
+      negatable = true,
       description = "Enable verbose output during generation",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected boolean optVerbose = false;
@@ -288,7 +291,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
   enum SupportedLVMs {
     HOTSPOT,
-    NOOP
+    NOOPJVM,
   }
 
   enum SupportedGCs {
@@ -296,25 +299,26 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     ZGC(SupportedLVMs.HOTSPOT, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
     SHENANDOAH(
         SupportedLVMs.HOTSPOT, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
-    DEFAULT(SupportedLVMs.NOOP, ""); // Use the default garbage collector
+    DEFAULT(SupportedLVMs.NOOPJVM, ""); // Use the default garbage collector
 
     // Which VM this GC is supported on
     SupportedLVMs vm;
     // The command line option to enable the GC
-    String enable;
+    String enableOptions;
 
     SupportedGCs(SupportedLVMs vm, String enable) {
       this.vm = vm;
-      this.enable = enable;
+      this.enableOptions = enable;
     }
   }
 
+  // TODO: Replace SupportedLVMs with a path and determine its type at runtime
   @CommandLine.Option(
       names = {"--lang-vm"},
       paramLabel = "name",
       description = "The language VM under validation (choices: ${COMPLETION-CANDIDATES})",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected SupportedLVMs optUseVM = SupportedLVMs.NOOP;
+  protected SupportedLVMs optUseVM = SupportedLVMs.NOOPJVM;
 
   @CommandLine.Option(
       names = {"--lang-vm-version"},
@@ -344,9 +348,16 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected File optOutputDir = null;
 
+  @CommandLine.Option(
+      names = {"--validate"},
+      negatable = true,
+      description = "Validate the generated program against the oracle interpreter",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected boolean optValidate = false;
+
   @Override
   public void checkOptions() throws CommandLine.ParameterException {
-    if (optUseVM != SupportedLVMs.NOOP && optUseGC != SupportedGCs.DEFAULT) {
+    if (optUseVM != SupportedLVMs.NOOPJVM && optUseGC != SupportedGCs.DEFAULT) {
       if (optUseGC.vm != optUseVM) {
         throw new CommandLine.ParameterException(
             parent.getCommandLine(),
@@ -367,25 +378,32 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
             parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
       }
     }
+
+    if (optValidate && optOutputDir == null) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "Validation requires an output directory to store the generated Java program.");
+    }
   }
 
   @Override
   public Integer runCommand() throws Exception {
-    LangVM vm =
+    JavaVM jvm =
         switch (optUseVM) {
+          // TODO: Add path to the VM executable
           case HOTSPOT -> new HotSpotVM(MemorySize.parse(optHeapCapacity), optUseVMVersion);
-          case NOOP -> new NoopVM();
+          case NOOPJVM -> new NoopJVM(MemorySize.parse(optHeapCapacity));
         };
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
 
-    GraphSmith graphSmith = buildGraphSmith(vm, objectIdSmith, referenceIdSmith);
+    GraphSmith graphSmith = buildGraphSmith(jvm, objectIdSmith, referenceIdSmith);
     GGraph initState = graphSmith.craft();
     System.out.println("Initial State");
     System.out.println("-------------");
     System.out.println(initState.formatToText());
 
-    ProgramSmith programSmith = buildProgramSmith(vm, objectIdSmith, referenceIdSmith, initState);
+    ProgramSmith programSmith = buildProgramSmith(jvm, objectIdSmith, referenceIdSmith, initState);
 
     GProgram program = programSmith.craft();
     System.out.println("Gorrect IR Program");
@@ -397,7 +415,10 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     System.out.println("-----------");
     System.out.println(progamGenStats.formatToText());
 
-    OracleInterpreter oracle = new OracleInterpreter(vm, program);
+    // Reset the JVM to ensure it starts with a clean state
+    jvm.reset();
+
+    OracleInterpreter oracle = new OracleInterpreter(jvm, program);
     oracle.interpret();
     GGraph oracleState = oracle.getState();
     System.out.println("Oracle Interpreter State");
@@ -424,22 +445,36 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       String javaFilePath = java.exportToJava(optOutputDir.toString());
       String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
       System.out.println("Java Program");
-      System.out.println("----------------------------");
-      System.out.println("Generated at: " + javaFileFullPath);
+      System.out.println("------------");
+      System.out.println("Program generated at: " + javaFileFullPath);
       System.out.println(Files.readString(Path.of(javaFileFullPath)));
-    }
 
-    // try {
-    //   // Use vm and gc to execute the Java code and generate an HPROF file
-    //   String hprof = java.executeJavaCode("/tmp", vm.home, optUseGC.enable);
-    //   System.out.println("HPROF file generated at: " + hprof);
-    // } catch (Exception e) {
-    //   System.out.println("FAILED to execute Java code: " + e.getMessage());
-    // }
-    //
-    // System.out.println("Java Execution State");
-    // System.out.println("--------------------");
-    // System.out.println(interpState.formatToText());
+      if (optValidate) {
+        System.out.println("Java Execution State");
+        System.out.println("--------------------");
+        try {
+          String hprofFilePath =
+              java.executeGeneratedJavaFile(
+                  javaFilePath, jvm, optOutputDir.toString(), optUseGC.enableOptions);
+          String hprofFileFullPath = optOutputDir + File.separator + hprofFilePath;
+          System.out.println("HPROF generated at: " + hprofFileFullPath);
+          GGraph execState = HprofParser.parse(hprofFileFullPath);
+          System.out.println(execState.formatToText());
+
+          // if (Oracle.equals(oracleState, execState)) {
+          //   System.out.println("Java execution state matches the oracle interpreter state.");
+          //   return 0;
+          // } else {
+          //   System.out.println("Java execution state does not match the oracle interpreter
+          // state!");
+          //   return 1;
+          // }
+        } catch (Exception e) {
+          System.out.println("FAILED to execute Java code: " + e.getMessage());
+          return 1;
+        }
+      }
+    }
 
     return 0;
   }

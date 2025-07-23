@@ -30,8 +30,10 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.utility.*;
 import java.io.*;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
@@ -81,13 +83,19 @@ public class JavaInterpreter {
 
   /// Generate the Java code and execute it in the given workdir. Return the relative path
   /// to the heap dump file or null if the dump failed.
-  public String executeJavaCode(String workdir, String... execOptions)
+  public String executeJava(JavaVM jvm, String workdir, String... extraExecOptions)
       throws IOException, InterruptedException, TimeoutException {
     String javaFile = exportToJava(workdir);
+    return executeGeneratedJavaFile(javaFile, jvm, workdir, extraExecOptions);
+  }
 
+  /// Execute the generated Java file in the given workdir.
+  public String executeGeneratedJavaFile(
+      String javaFile, JavaVM jvm, String workdir, String... extraExecOptions)
+      throws IOException, InterruptedException, TimeoutException {
     // Compile the generated Java code; will throw an exception if the compilation fails
     new ProcessExecutor()
-        .command("javac", "-cp", workdir, workdir + File.separator + javaFile)
+        .command(jvm.getJavaCompilerPath(), "-cp", workdir, workdir + File.separator + javaFile)
         .redirectErrorStream(true)
         .timeout(30, TimeUnit.SECONDS) // A simple compilation should finish within 30 seconds
         .exitValue(0) // Throw an exception if the exit value is not 0
@@ -96,20 +104,19 @@ public class JavaInterpreter {
     String className = // Convert the file name to a full-qualified class name
         javaFile.substring(0, javaFile.indexOf(".java")).replace(File.separator, ".");
     String heapDumpFile = className + ".hprof";
-    long heapSize = program.getConfiguration().getHeapSize();
-    log.warning(
-        "WARNING(JavaInterpreter.GSetHeapInstruction): The heap configurations (GC, etc.) has not been written to the options");
 
     // Execute the generated Java code and dump the heap
     AtomicLong pid = new AtomicLong(-1L);
     Impl.HeapDumper dumper = impl.heapDumper(pid, workdir + File.separator + heapDumpFile);
-    new ProcessExecutor(
-            "java",
-            "-cp",
-            workdir,
-            // TODO: Add HEAP configuration (for example the used collector) to the VM options
-            "-Xmx" + MemorySize.toString(heapSize, 0).replace("B", ""),
-            className)
+    List<String> command = new ArrayList<>();
+    command.add(jvm.getJavaExecutablePath());
+    command.add("-cp");
+    command.add(workdir);
+    command.add(
+        "-Xmx" + MemorySize.toString(program.getConfiguration().getHeapSize(), 0).replace("B", ""));
+    command.addAll(List.of(extraExecOptions));
+    command.add(className);
+    new ProcessExecutor(command)
         .timeout(1, TimeUnit.MINUTES)
         .listener(
             new ProcessListener() {

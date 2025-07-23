@@ -60,7 +60,7 @@ public abstract class LangVM {
     this.heapUnusedBytes = heapCapacity;
   }
 
-  void reset() {
+  public void reset() {
     this.heapUnusedBytes = heapCapacity;
   }
 

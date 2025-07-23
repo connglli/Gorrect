@@ -91,20 +91,30 @@ public class HotSpotVM extends JavaVM {
   private final Map<GID, Long> freedObjects = new LinkedHashMap<>();
 
   public HotSpotVM(long heapCapacity) {
-    this(heapCapacity, 11);
+    this(new File(System.getProperty("java.home")), heapCapacity);
   }
 
   public HotSpotVM(long heapCapacity, int version) {
-    this(heapCapacity, version, true, true, true);
+    this(new File(System.getProperty("java.home")), heapCapacity, version);
+  }
+
+  public HotSpotVM(File home, long heapCapacity) {
+    this(home, heapCapacity, 11);
+  }
+
+  public HotSpotVM(File home, long heapCapacity, int version) {
+    // TODO: Determine the HotSpot version, mode, etc. from the home directory.
+    this(home, heapCapacity, version, true, true, true);
   }
 
   public HotSpotVM(
+      File home,
       long heapCapacity,
       int version,
       boolean mode64,
       boolean enableCompressedOops,
       boolean enableCompressedClassPointers) {
-    super(heapCapacity);
+    super(home, heapCapacity);
     this.model =
         new HotSpotObjects(version, mode64, enableCompressedOops, enableCompressedClassPointers);
   }
@@ -112,6 +122,13 @@ public class HotSpotVM extends JavaVM {
   @Override
   public long getReferenceSize() {
     return this.model.getReferenceSize();
+  }
+
+  @Override
+  public void reset() {
+    super.reset();
+    this.allocatedObjects.clear();
+    this.freedObjects.clear();
   }
 
   @Override
