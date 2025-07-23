@@ -24,19 +24,30 @@
 
 package io.connglli.gorrect.java.oracle;
 
+import com.palantir.javapoet.ClassName;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.OracleObject;
 import io.connglli.gorrect.utility.Assert;
+import io.connglli.gorrect.utility.Checksums;
 import io.connglli.gorrect.utility.Formats;
+import io.connglli.gorrect.utility.Reflections;
+import java.io.File;
 import java.lang.ref.Reference;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
-import java.util.LinkedHashMap;
-import java.util.Map;
-import lombok.Getter;
+import java.lang.reflect.Constructor;
+import java.lang.reflect.Field;
+import java.lang.reflect.Method;
+import java.net.URL;
+import java.net.URLClassLoader;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.*;
+import java.util.concurrent.TimeUnit;
 import lombok.NonNull;
+import org.zeroturnaround.exec.ProcessExecutor;
 
 public class HotSpotVM extends JavaVM {
   /*
@@ -67,79 +78,67 @@ public class HotSpotVM extends JavaVM {
    * - Float: 4 bytes
    * - Double: 8 bytes
    *
+   * See: {@link HotSpotObjects} for the implementation of the object layout.
+   *
    * More:
    * - The Structure of the Java Virtual Machine (https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html)
    * - Java Object Layout for HotSpot: https://github.com/openjdk/jol
    */
-
-  @Getter private final boolean isMode64;
-  @Getter private final boolean enableCompressedOops;
-  @Getter private final boolean enableCompressedClassPointers;
+  private final HotSpotObjects model;
 
   // We trace the allocated objects so that we can estimate the heap size
   private final Map<GID, Long> allocatedObjects = new LinkedHashMap<>();
+  private final Map<GID, Long> freedObjects = new LinkedHashMap<>();
 
   public HotSpotVM(long heapCapacity) {
-    this(heapCapacity, true, true, true);
+    this(heapCapacity, 11);
+  }
+
+  public HotSpotVM(long heapCapacity, int version) {
+    this(heapCapacity, version, true, true, true);
   }
 
   public HotSpotVM(
       long heapCapacity,
-      boolean isMode64,
+      int version,
+      boolean mode64,
       boolean enableCompressedOops,
       boolean enableCompressedClassPointers) {
     super(heapCapacity);
-    this.isMode64 = isMode64;
-    this.enableCompressedOops = enableCompressedOops;
-    this.enableCompressedClassPointers = enableCompressedClassPointers;
+    this.model =
+        new HotSpotObjects(version, mode64, enableCompressedOops, enableCompressedClassPointers);
   }
 
-  public int getReferenceSize() {
-    return enableCompressedOops ? 4 : isMode64 ? 8 : 4;
-  }
-
-  public int getOopHeaderSize(boolean isArray) {
-    return (isMode64 ? 8 : 4) // mark word
-        + (enableCompressedClassPointers ? 4 : (isMode64 ? 8 : 4)) // class pointer
-        + (isArray ? 4 : 0) // array length
-    ;
+  @Override
+  public long getReferenceSize() {
+    return this.model.getReferenceSize();
   }
 
   @Override
   public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {
     long estimatedSize = estimateNewObjectHeapSize(objectId, size);
-    if (heapUnusedBytes < estimatedSize) {
-      throw new OutOfMemError(
-          "Java heap out of memory: "
-              + Formats.toCommaString(heapUnusedBytes)
-              + " bytes left, "
-              + Formats.toCommaString(size)
-              + " bytes needed for object of type "
-              + type.name());
-    }
-    heapUnusedBytes -= estimatedSize;
+    reduceMemory(estimatedSize);
     allocatedObjects.put(objectId, estimatedSize);
   }
 
   public void onOracleFree(@NonNull OracleObject object) {
-    GID objectId = object.getId();
-    Assert.set(
-        allocatedObjects.containsKey(objectId),
-        "Object with ID " + objectId + " is not allocated in the heap");
-    // Add new references may cause the memory not aligned, so we align the size
-    long size = align(allocatedObjects.get(objectId));
-    allocatedObjects.put(objectId, size);
-    heapUnusedBytes += size;
+    reclaimMemory(List.of(object));
   }
 
   @Override
-  public void onOracleClean() {}
+  public void onOracleClean(@NonNull List<OracleObject> removedObjects) {
+    reclaimMemory(removedObjects);
+  }
 
   @Override
-  public void onOracleCompact() {}
+  public void onOracleCompact(@NonNull List<OracleObject> removedObjects) {
+    reclaimMemory(removedObjects);
+  }
 
   @Override
-  public void onOracleStressCompact() {}
+  public void onOracleStressCompact(@NonNull List<OracleObject> removedObjects) {
+    reclaimMemory(removedObjects);
+  }
 
   @Override
   public void onOracleReference(
@@ -147,8 +146,9 @@ public class HotSpotVM extends JavaVM {
       @NonNull OracleObject referer,
       @NonNull OracleObject referent,
       GReference.Type type) {
+    // Each reference adds a reference field in the generated object
     long refSize =
-        getReferenceSize() // For the reference field
+        getReferenceSize() // For the reference field in the generated object
             + computeReferenceObjectSize( // For the Reference object in heap
                 type == GReference.Type.STRONG
                     ? null
@@ -157,52 +157,60 @@ public class HotSpotVM extends JavaVM {
     Assert.set(
         allocatedObjects.containsKey(refererId),
         "Referer object with ID " + refererId + " is not allocated in the heap");
-    if (heapUnusedBytes < refSize) {
-      throw new OutOfMemError(
-          "Java heap out of memory: "
-              + Formats.toCommaString(heapUnusedBytes)
-              + " bytes left, "
-              + Formats.toCommaString(refSize)
-              + " bytes needed for object of type "
-              + type.name());
-    }
-    heapUnusedBytes -= refSize;
+    reduceMemory(refSize);
     allocatedObjects.put(refererId, allocatedObjects.get(refererId) + refSize);
   }
 
   @Override
-  public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
+  public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {
+    // This does not change the heap usage, unless the referent is no longer reachable.
+    // We do not track the reachability. We rely on onOracleClean(), onOracleCompact(), and
+    // onOracleStressCompact() to reclaim the memory.
+  }
 
   @Override
   public long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize) {
-    // TODO: Load an object using URLClassLoader and estimate the size by JOL to avoid hardcoding
     // NOTE: This implementation is closely BOUND to the version of HotSpot, the String class, and
     // our generated object. We know that each our generated object has:
     // - a String id,
     // - a long size, and
     // - a byte[][] padding.
     Assert.set(requestedSize >= 0, "Requested size must be non-negative, but got " + requestedSize);
-    return align(
-        getOopHeaderSize(false) // For the oop header
-            + getReferenceSize() // For the id reference
-            + computeStringObjectSize(objectId.get()) // For the id value (a String object in heap)
-            + getLongSize() // For the size field and its value (a long object in heap)
-            + getReferenceSize() // For the padding reference
-            + requestedSize * getByteSize() // For the padding value (a byte[] array in heap)
-        );
+    int maxChunkSize = Integer.MAX_VALUE - 8;
+    int numChunks = (int) ((requestedSize + maxChunkSize - 1) / maxChunkSize);
+    int lastChunkSize = (int) (requestedSize % maxChunkSize);
+    long paddingSize = 0;
+    if (numChunks > 0) {
+      // For the padding's first (numChunks - 1) chunks: they are all byte[maxChunkSize]{...}
+      paddingSize =
+          (numChunks - 1) * (model.computeShallowSize(byte[].class) + maxChunkSize * getByteSize())
+              // For the padding's last chunk: it is byte[remainingSize]{...}
+              + (model.computeShallowSize(byte[].class) + lastChunkSize * getByteSize());
+    }
+    return model.computeShallowSize(loadGeneratedObjectBaseClass())
+        + model.computeShallowSize(String.class) // For the id's shallow size in the heap
+        + model.computeShallowSize(
+            objectId.get().getBytes()) // For the id's byte[] value field in the heap
+        + model.computeShallowSize(byte[][].class) // For the padding's shallow size in the heap
+        + paddingSize // For the padding's byte[][] value field in the heap
+    ;
   }
 
   @Override
   public long estimateObjectHeapSize(@NonNull OracleObject object) {
+    // TODO: Generate the class and estimate its size
     long initSize = estimateNewObjectHeapSize(object.getId(), object.getSize());
+    // Each strong reference only saves the reference in the generated object,
     long strongRefsSize = (long) object.getStrongReferents().size() * getReferenceSize();
+    // A soft reference saves the reference in the generated object and a SoftReference in heap,
     long softRefsSize =
         (long) object.getSoftReferents().size()
             * (getReferenceSize() + computeReferenceObjectSize(SoftReference.class));
+    // A weak reference saves the reference in the generated object and a WeakReference in heap,
     long weakRefsSize =
         (long) object.getWeakReferents().size()
             * (getReferenceSize() + computeReferenceObjectSize(WeakReference.class));
-    return align(initSize + strongRefsSize + softRefsSize + weakRefsSize);
+    return model.align(initSize + strongRefsSize + softRefsSize + weakRefsSize);
   }
 
   @SuppressWarnings("rawtypes")
@@ -210,69 +218,99 @@ public class HotSpotVM extends JavaVM {
     if (type == null) { // Strong reference, no real Reference objects in heap
       return 0;
     } else if (type == SoftReference.class) {
-      return align(
-          getOopHeaderSize(false) // For the oop header (a SoftReference object in heap)
-              + getLongSize() // The `long timestamp` field
-              + getReferenceSize() // The `T referent` field
-              + getReferenceSize() // The `ReferenceQueue<? super T> queue` field
-              + getReferenceSize() // The `Reference next` field
-              + getReferenceSize() // The `Reference<?> discovered` field
-          );
+      return model.computeShallowSize(SoftReference.class);
     } else if (type == WeakReference.class) {
-      return align(
-          getOopHeaderSize(false) // For the oop header (a WeakReference object in heap)
-              + getReferenceSize() // The `T referent` field
-              + getReferenceSize() // The `ReferenceQueue<? super T> queue` field
-              + getReferenceSize() // The `Reference next` field
-              + getReferenceSize() // The `Reference<?> discovered` field); // Each WeakReference
-          // has a `int hash` field
-          );
+      return model.computeShallowSize(WeakReference.class);
     } else {
       Assert.panic("Unsupported reference type: " + type.getName());
       return -1L; // Unreachable, but needed to satisfy the compiler
     }
   }
 
-  private long computeStringObjectSize(String str) {
-    return align(
-        getOopHeaderSize(false) // For the oop header of the String object
-            + getReferenceSize() // Each String has a `byte[] value` reference
-            + computePrimitiveArrayObjectSize(byte.class, str.getBytes().length)
-            + getByteSize() // Each String has a `byte coder` field
-            + getIntSize() // Each String has a `int hash` field
-            + getBoolSize() // Each String has a `boolean hashIsZero` field
-        );
+  private void reduceMemory(long requestedSize) {
+    if (heapUnusedBytes < requestedSize) {
+      throw new OutOfMemError(
+          "Java heap out of memory: "
+              + Formats.toCommaString(heapUnusedBytes)
+              + " bytes left, "
+              + Formats.toCommaString(requestedSize)
+              + " bytes needed.");
+    }
+    heapUnusedBytes -= requestedSize;
   }
 
-  @SuppressWarnings("SameParameterValue")
-  private long computePrimitiveArrayObjectSize(Class<?> elementType, int size) {
-    Assert.set(
-        elementType.isPrimitive(),
-        "Element type must be a primitive type, but got " + elementType.getName());
-    Assert.set(size >= 0, "Size must be non-negative, but got " + size);
-    if (elementType == boolean.class) {
-      return align(getOopHeaderSize(true) + (long) size * getBoolSize());
-    } else if (elementType == byte.class) {
-      return align(getOopHeaderSize(true) + (long) size * getByteSize());
-    } else if (elementType == char.class) {
-      return align(getOopHeaderSize(true) + (long) size * getCharSize());
-    } else if (elementType == short.class) {
-      return align(getOopHeaderSize(true) + (long) size * getShortSize());
-    } else if (elementType == int.class) {
-      return align(getOopHeaderSize(true) + (long) size * getIntSize());
-    } else if (elementType == long.class) {
-      return align(getOopHeaderSize(true) + (long) size * getLongSize());
-    } else if (elementType == float.class) {
-      return align(getOopHeaderSize(true) + (long) size * getFloatSize());
-    } else if (elementType == double.class) {
-      return align(getOopHeaderSize(true) + (long) size * getDoubleSize());
-    } else {
-      Assert.panic("Unsupported primitive type: " + elementType.getName());
-      return -1L; // Unreachable, but needed to satisfy the compiler
+  private void reclaimMemory(@NonNull List<OracleObject> removedObjects) {
+    for (OracleObject object : removedObjects) {
+      GID objectId = object.getId();
+      Assert.set(
+          allocatedObjects.containsKey(objectId),
+          "Object with ID " + objectId + " is not allocated in the heap");
+      long size = model.align(allocatedObjects.get(objectId));
+      // When an object is freed, the memory usage is clear. We update the size.
+      // Add new references may cause the memory not aligned, so we align the size
+      allocatedObjects.remove(objectId);
+      freedObjects.put(objectId, size);
+      heapUnusedBytes += size;
     }
   }
 
-  private long align(long size) {
-    return isMode64 ? (size + 7) & ~7 : (size + 3) & ~3;
+  private static final String generatedObjectBaseClassChecksum = "0125df9f6f9dd1df015e39ef78fae78b";
+  private static Class<?> generatedObjectBaseClass = null;
+
+  private static Class<?> loadGeneratedObjectBaseClass() {
+    if (generatedObjectBaseClass == null) {
+      // Since we do not have access to the package-level class (I don't want to make it public),
+      // we load the class using reflection. This is subject to change if the class is changed.
+      try {
+        ClassLoader thisClassLoader = HotSpotVM.class.getClassLoader();
+
+        Class<?> heapClass = thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedHeap");
+        Constructor<?> heapConstructor = heapClass.getDeclaredConstructor();
+        heapConstructor.setAccessible(true);
+        Object heap = heapConstructor.newInstance();
+
+        Class<?> objectBaseClass =
+            thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedObjectBaseClass");
+        Constructor<?> objectBaseConstructor = objectBaseClass.getDeclaredConstructor(heapClass);
+        objectBaseConstructor.setAccessible(true);
+        Object objectBase = objectBaseConstructor.newInstance(heap);
+        Method toJavaCodeMethod = Reflections.getMethod(objectBaseClass, "toJavaCode");
+        toJavaCodeMethod.setAccessible(true);
+        Field classNameField = Reflections.getField(objectBaseClass, "clazzName");
+        classNameField.setAccessible(true);
+
+        String className = ((ClassName) classNameField.get(null)).canonicalName();
+        String javaCode = (String) toJavaCodeMethod.invoke(objectBase);
+        // Compute the checksum of the generated code to ensure no changes have been made
+        String checksum = Checksums.md5(javaCode.strip());
+        Assert.set(
+            generatedObjectBaseClassChecksum.equals(checksum),
+            "The checksum of the generated code does not match the expected one, "
+                + "indicating that the implementation of the generated object has changed. "
+                + "Expected: %s. Actual: %s",
+            generatedObjectBaseClassChecksum,
+            checksum);
+
+        Path tempDir = Files.createTempDirectory(UUID.randomUUID().toString());
+        File javaFile = new File(tempDir.toFile(), className + ".java");
+        Files.writeString(javaFile.toPath(), javaCode);
+        new ProcessExecutor()
+            .command("javac", "-cp", tempDir.toString(), javaFile.toString())
+            .redirectErrorStream(true)
+            .timeout(30, TimeUnit.SECONDS)
+            .exitValue(0)
+            .execute();
+
+        try (URLClassLoader classLoader =
+            new URLClassLoader(new URL[] {tempDir.toUri().toURL()}, thisClassLoader)) {
+          generatedObjectBaseClass = classLoader.loadClass(className);
+        }
+      } catch (Exception e) {
+        Assert.panic(
+            "Failed to load the GeneratedObjectBaseClass, perhaps the implementation of it has changed: "
+                + e.getMessage());
+      }
+    }
+    return generatedObjectBaseClass;
   }
 }

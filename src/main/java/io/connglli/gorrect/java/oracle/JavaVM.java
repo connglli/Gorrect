@@ -68,37 +68,37 @@ public abstract class JavaVM extends LangVM {
    * fields and possibly some other header information.
    */
 
-  public abstract int getReferenceSize();
+  public abstract long getReferenceSize();
 
-  public int getBoolSize() {
+  public long getBoolSize() {
     return 1;
   }
 
-  public int getByteSize() {
+  public long getByteSize() {
     return 1;
   }
 
-  public int getCharSize() {
+  public long getCharSize() {
     return 2;
   }
 
-  public int getShortSize() {
+  public long getShortSize() {
     return 2;
   }
 
-  public int getIntSize() {
+  public long getIntSize() {
     return 4;
   }
 
-  public int getLongSize() {
+  public long getLongSize() {
     return 8;
   }
 
-  public int getFloatSize() {
+  public long getFloatSize() {
     return 4;
   }
 
-  public int getDoubleSize() {
+  public long getDoubleSize() {
     return 8;
   }
 

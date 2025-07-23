@@ -26,10 +26,37 @@ package io.connglli.gorrect.utility;
 
 import java.lang.annotation.Annotation;
 import java.lang.reflect.Field;
+import java.lang.reflect.Method;
 import java.util.ArrayList;
 import java.util.List;
 
 public class Reflections {
+
+  /// Get a method by name and parameter types from the given class or its superclasses.
+  public static Method getMethod(Class<?> clazz, String name, Class<?>... parameterTypes) {
+    while (clazz != null) {
+      try {
+        return clazz.getDeclaredMethod(name, parameterTypes);
+      } catch (NoSuchMethodException e) {
+        // Method not found in this class, continue to superclass
+      }
+      clazz = clazz.getSuperclass();
+    }
+    return null;
+  }
+
+  /// Get a field by name from the given class or its superclasses.
+  public static Field getField(Class<?> clazz, String name) {
+    while (clazz != null) {
+      try {
+        return clazz.getDeclaredField(name);
+      } catch (NoSuchFieldException e) {
+        // Method not found in this class, continue to superclass
+      }
+      clazz = clazz.getSuperclass();
+    }
+    return null;
+  }
 
   /// Returns a list of fields in the given class and its superclasses that are annotated with the
   /// specified annotation. The fields are made accessible if they are private.

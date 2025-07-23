@@ -303,7 +303,7 @@ public class HprofParser {
   private static void logFoundObject(
       @NonNull Instance instance, GObjRecord object, boolean isRoot) {
     log.info(
-        "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, raw_instance_size=%dB, raw_base_size=%dB, retained_size=%dB, reachable_size=%dB)",
+        "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, shallow_size=%dB, retained_size=%dB, reachable_size=%dB)",
         isRoot ? "root" : "non-root",
         object.id,
         instance.getInstanceId(),
@@ -311,7 +311,6 @@ public class HprofParser {
         object.referents.size(),
         object.size,
         instance.getSize(),
-        instance.getJavaClass().getSuperClass().getInstanceSize(),
         instance.getRetainedSize(),
         instance.getReachableSize());
   }

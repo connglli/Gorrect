@@ -282,7 +282,7 @@ public class GGraph {
 
   /// Remove unreachable objects from the graph. An unreachable object is an object that is not
   /// reachable from any root object.
-  public void removeUnreachableObjects() {
+  public Set<GID> removeUnreachableObjects() {
     Set<GID> reachableObjs = getReachableObjects();
     Set<GID> unreachableObjs =
         objects.keySet().stream()
@@ -294,37 +294,40 @@ public class GGraph {
             this.removeObject(id);
           }
         });
+    return unreachableObjs;
   }
 
   /// Remove weakly reachable objects from the graph. A weakly reachable object is an object that
   /// is reachable from a root object through weak references, but not strongly or softly
   /// reachable.
-  public void removeWeaklyReachableObjects() {
-    Set<GID> weaklyReachableObjs = getWeaklyReachableObjects();
-    weaklyReachableObjs.forEach(
+  public Set<GID> removeWeaklyReachableObjects() {
+    Set<GID> unreachableObjs = getWeaklyReachableObjects();
+    unreachableObjs.forEach(
         id -> {
           if (hasObject(id)) {
             this.removeObject(id);
           }
         });
-    removeUnreachableObjects();
+    unreachableObjs.addAll(removeUnreachableObjects());
+    return unreachableObjs;
   }
 
   /// Remove softly reachable objects from the graph. A softly reachable object is an object that
   /// is reachable from a root object through soft references, but not strongly reachable.
-  public void removeSoftlyReachableObjects() {
+  public Set<GID> removeSoftlyReachableObjects() {
     Set<GID> stronglyRechableObjects = getStronglyReachableObjects();
-    Set<GID> otherObjects =
+    Set<GID> unreachableObjs =
         objects.keySet().stream()
             .filter(id -> !stronglyRechableObjects.contains(id))
             .collect(Collectors.toSet());
-    otherObjects.forEach(
+    unreachableObjs.forEach(
         id -> {
           if (hasObject(id)) {
             this.removeObject(id);
           }
         });
-    removeUnreachableObjects();
+    unreachableObjs.addAll(removeUnreachableObjects());
+    return unreachableObjs;
   }
 
   /// Get all strongly reachable objects in the graph. A strongly reachable object is an object

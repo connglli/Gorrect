@@ -76,6 +76,7 @@ dependencies {
   // Add the following to resolve the slf4j error message
   implementation 'org.slf4j:slf4j-simple:2.0.17'
   implementation 'org.netbeans.modules:org-netbeans-lib-profiler:RELEASE260'
+  implementation 'org.openjdk.jol:jol-core:0.17'
   compileOnly "org.projectlombok:lombok:1.18.38"
   annotationProcessor "org.projectlombok:lombok:1.18.38"
 

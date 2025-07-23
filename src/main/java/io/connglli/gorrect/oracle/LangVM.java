@@ -28,6 +28,7 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
 
@@ -84,9 +85,9 @@ public abstract class LangVM {
   public abstract void onOracleUnlink(
       @NonNull OracleObject referer, @NonNull OracleObject referent);
 
-  public abstract void onOracleClean();
+  public abstract void onOracleClean(@NonNull List<OracleObject> removedObjects);
 
-  public abstract void onOracleCompact();
+  public abstract void onOracleCompact(@NonNull List<OracleObject> removedObjects);
 
-  public abstract void onOracleStressCompact();
+  public abstract void onOracleStressCompact(@NonNull List<OracleObject> removedObjects);
 }

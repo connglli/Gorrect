@@ -27,6 +27,7 @@ package io.connglli.gorrect.oracle;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.List;
 import lombok.NonNull;
 
 /**
@@ -66,11 +67,11 @@ public class NoopVM extends LangVM {
   public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
 
   @Override
-  public void onOracleClean() {}
+  public void onOracleClean(@NonNull List<OracleObject> removedObjects) {}
 
   @Override
-  public void onOracleCompact() {}
+  public void onOracleCompact(@NonNull List<OracleObject> removedObjects) {}
 
   @Override
-  public void onOracleStressCompact() {}
+  public void onOracleStressCompact(@NonNull List<OracleObject> removedObjects) {}
 }

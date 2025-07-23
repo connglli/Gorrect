@@ -117,17 +117,24 @@ public class OracleHeap {
   }
 
   public void clean() {
-    lvm.onOracleClean();
+    GGraph copy = new GGraph(graph);
+    Set<GID> removedObjects = copy.removeUnreachableObjects();
+    lvm.onOracleClean(removedObjects.stream().map(this::getObject).collect(Collectors.toList()));
     graph.removeUnreachableObjects();
   }
 
   public void compact() {
-    lvm.onOracleCompact();
+    GGraph copy = new GGraph(graph);
+    Set<GID> removedObjects = copy.removeWeaklyReachableObjects();
+    lvm.onOracleCompact(removedObjects.stream().map(this::getObject).collect(Collectors.toList()));
     graph.removeWeaklyReachableObjects();
   }
 
   public void stressCompact() {
-    lvm.onOracleStressCompact();
+    GGraph copy = new GGraph(graph);
+    Set<GID> removedObjects = copy.removeSoftlyReachableObjects();
+    lvm.onOracleStressCompact(
+        removedObjects.stream().map(this::getObject).collect(Collectors.toList()));
     graph.removeSoftlyReachableObjects();
   }
 
