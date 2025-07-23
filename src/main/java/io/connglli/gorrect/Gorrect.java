@@ -71,16 +71,18 @@ public class Gorrect {
             .initState(initState)
             .minInstructions(1)
             .maxInstructions(32)
-            .minObjSizeBytes(1)
-            .maxObjSizeBytes(MemorySize.of(128, MemorySize.Unit.KB))
+            .minObjSizeBytes(MemorySize.of(128, MemorySize.Unit.KB))
+            .maxObjSizeBytes(MemorySize.of(128, MemorySize.Unit.MB))
             .build();
     ProgramSmith programSmith = new ProgramSmith(programConfig);
 
     GProgram program = programSmith.craft();
-    System.out.println(program);
+    System.out.println("Generated program:");
+    System.out.println(program.toString().indent(2));
+
     ProgramSmith.Stats progamGenStats = programSmith.getStats();
     System.out.println("Program generation stats: ");
-    System.out.println(progamGenStats.formatToText());
+    System.out.println(progamGenStats.formatToText().indent(2));
 
     OracleInterpreter oracle = new OracleInterpreter(jvm, program);
     oracle.interpret();
@@ -95,6 +97,10 @@ public class Gorrect {
     } else {
       System.out.println("Not equals");
     }
+
+    System.out.printf(
+        "Heap usage: %s/%s%n",
+        MemorySize.toString(jvm.getHeapUnusedBytes()), MemorySize.toString(jvm.getHeapCapacity()));
 
     try {
       String hprof = java.executeJavaCode("/tmp");

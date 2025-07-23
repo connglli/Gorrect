@@ -108,20 +108,22 @@ public class ProgramSmith {
       sb.append("Valid ratio: ").append(Formats.toPrecision(validRatio() * 100, 2)).append("%\n");
       sb.append("Generation time (ms): ").append(generationTimeMillis).append("\n");
       sb.append("Contributions:\n");
-      contributions.forEach(
-          (inst, count) ->
-              sb.append("  ")
-                  .append(inst.getSimpleName())
-                  .append(": ")
-                  .append(count)
-                  .append(" (")
-                  .append(
-                      Formats.toPrecision(
-                          numValidGeneration == 0
-                              ? 0d
-                              : ((double) count) / numValidGeneration * 100,
-                          2))
-                  .append("%)\n"));
+      contributions.entrySet().stream()
+          .sorted((a, b) -> b.getValue().compareTo(a.getValue()))
+          .forEach(
+              entry ->
+                  sb.append("  ")
+                      .append(entry.getKey().getSimpleName())
+                      .append(": ")
+                      .append(entry.getValue())
+                      .append(" (")
+                      .append(
+                          Formats.toPrecision(
+                              numValidGeneration == 0
+                                  ? 0d
+                                  : ((double) entry.getValue()) / numValidGeneration * 100,
+                              2))
+                      .append("%)\n"));
       return sb.toString();
     }
 
