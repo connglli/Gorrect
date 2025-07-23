@@ -242,29 +242,6 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
 
 abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
 
-  enum SupportedLVMs {
-    HOTSPOT,
-    NOOP
-  }
-
-  enum SupportedGCs {
-    G1(SupportedLVMs.HOTSPOT, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
-    ZGC(SupportedLVMs.HOTSPOT, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
-    SHENANDOAH(
-        SupportedLVMs.HOTSPOT, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
-    DEFAULT(SupportedLVMs.NOOP, ""); // Use the default garbage collector
-
-    // Which VM this GC is supported on
-    SupportedLVMs vm;
-    // The command line option to enable the GC
-    String enable;
-
-    SupportedGCs(SupportedLVMs vm, String enable) {
-      this.vm = vm;
-      this.enable = enable;
-    }
-  }
-
   @CommandLine.Option(
       names = {"--min-instructions"},
       paramLabel = "number",
@@ -278,41 +255,6 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
       description = "Maximum number of instructions to smith",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
-
-  @CommandLine.Option(
-      names = {"--lang-vm"},
-      paramLabel = "name",
-      description = "The language VM under validation",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected SupportedLVMs optUseVM = SupportedLVMs.NOOP;
-
-  @CommandLine.Option(
-      names = {"--lang-vm-version"},
-      paramLabel = "number",
-      description = "The version of the language VM under validation",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected int optUseVMVersion = -1;
-
-  @CommandLine.Option(
-      names = {"--garbage-collector"},
-      paramLabel = "name",
-      description = "The garbage collector under validation.",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected SupportedGCs optUseGC = SupportedGCs.DEFAULT;
-
-  @CommandLine.Option(
-      names = {"--heap-capacity"},
-      paramLabel = "size",
-      description = "The heap capacity of the VM under validation",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected String optHeapCapacity = "1GB";
-
-  @CommandLine.Option(
-      names = {"--output-dir"},
-      paramLabel = "dir",
-      description = "The output directory for the generated files (if any).",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected File optOutputDir = null;
 
   protected ProgramSmith buildProgramSmith(
       LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
@@ -343,6 +285,64 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
 class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand {
 
   @CommandLine.ParentCommand protected Gorrect parent;
+
+  enum SupportedLVMs {
+    HOTSPOT,
+    NOOP
+  }
+
+  enum SupportedGCs {
+    G1(SupportedLVMs.HOTSPOT, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
+    ZGC(SupportedLVMs.HOTSPOT, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
+    SHENANDOAH(
+        SupportedLVMs.HOTSPOT, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
+    DEFAULT(SupportedLVMs.NOOP, ""); // Use the default garbage collector
+
+    // Which VM this GC is supported on
+    SupportedLVMs vm;
+    // The command line option to enable the GC
+    String enable;
+
+    SupportedGCs(SupportedLVMs vm, String enable) {
+      this.vm = vm;
+      this.enable = enable;
+    }
+  }
+
+  @CommandLine.Option(
+      names = {"--lang-vm"},
+      paramLabel = "name",
+      description = "The language VM under validation (choices: ${COMPLETION-CANDIDATES})",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected SupportedLVMs optUseVM = SupportedLVMs.NOOP;
+
+  @CommandLine.Option(
+      names = {"--lang-vm-version"},
+      paramLabel = "number",
+      description = "The version of the language VM under validation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optUseVMVersion = -1;
+
+  @CommandLine.Option(
+      names = {"--garbage-collector"},
+      paramLabel = "name",
+      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected SupportedGCs optUseGC = SupportedGCs.DEFAULT;
+
+  @CommandLine.Option(
+      names = {"--heap-capacity"},
+      paramLabel = "size",
+      description = "The heap capacity of the VM under validation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String optHeapCapacity = "1GB";
+
+  @CommandLine.Option(
+      names = {"--output-dir"},
+      paramLabel = "dir",
+      description = "The output directory for the generated files (if any)",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected File optOutputDir = null;
 
   @Override
   public void checkOptions() throws CommandLine.ParameterException {
