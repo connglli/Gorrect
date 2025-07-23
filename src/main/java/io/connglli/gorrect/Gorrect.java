@@ -28,85 +28,419 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.HotSpotVM;
+import io.connglli.gorrect.oracle.LangVM;
+import io.connglli.gorrect.oracle.NoopVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.smith.GraphSmith;
 import io.connglli.gorrect.smith.IdSmith;
 import io.connglli.gorrect.smith.ProgramSmith;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import io.connglli.gorrect.utility.MemorySize;
 import io.connglli.gorrect.utility.Rand;
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.concurrent.Callable;
 import java.util.logging.Level;
+import lombok.NonNull;
+import picocli.CommandLine;
 
+@CommandLine.Command(
+    name = "gorrect",
+    usageHelpAutoWidth = true,
+    mixinStandardHelpOptions = true,
+    subcommands = {
+      CommandLine.HelpCommand.class,
+      GraphSmithCommand.class,
+      ProgramSmithCommand.class
+    },
+    description =
+        "Validate the correctness of a garbage collector based on object graph semantics.",
+    version = "Gorrect 0.1.0",
+    descriptionHeading = "%n",
+    optionListHeading = "%nOptions:%n",
+    parameterListHeading = "%nArguments:%n")
 public class Gorrect {
+
+  @CommandLine.Option(
+      names = {"--seed"},
+      paramLabel = "seed",
+      description = "Random seed for the generator (if not specified, the current time is used)",
+      showDefaultValue = CommandLine.Help.Visibility.NEVER)
+  protected int optSeed = (int) System.currentTimeMillis();
+
+  @CommandLine.Option(
+      names = {"--verbose"},
+      paramLabel = "verbose",
+      description = "Enable verbose output during generation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected boolean optVerbose = false;
+
+  private CommandLine commandLine = null;
+
+  protected @NonNull CommandLine getCommandLine() {
+    Assert.set(
+        commandLine != null, "Command line must be initialized after Gorrect has been created.");
+    return commandLine;
+  }
+
+  private int strategy(CommandLine.ParseResult args) {
+    globallyInitialize();
+    return new CommandLine.RunLast().execute(args);
+  }
+
+  private void globallyInitialize() {
+    Logger.setLevel(optVerbose ? Level.FINE : Level.INFO);
+    Rand.getInstance().setSeed(optSeed);
+  }
+
   public static void main(String[] args) {
-    Logger.setLevel(Level.INFO);
-    Rand.getInstance().setSeed(0);
+    Gorrect gorrect = new Gorrect();
+    CommandLine commandLine = new CommandLine(gorrect);
+    gorrect.commandLine = commandLine;
+    System.exit(commandLine.setExecutionStrategy(gorrect::strategy).execute(args));
+  }
+}
 
-    HotSpotVM jvm = new HotSpotVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
+interface GorrectSubCommand extends Callable<Integer> {
 
-    IdSmith objectIdSmith = new IdSmith("obj");
-    IdSmith referenceIdSmith = new IdSmith("ref");
+  default void checkOptions() throws CommandLine.ParameterException {}
 
-    GraphSmith.Config graphConfig =
+  Integer runCommand() throws Exception;
+
+  @Override
+  public default Integer call() throws Exception {
+    checkOptions();
+    return runCommand();
+  }
+}
+
+abstract class GorrectSubCommandOptionsMixin {}
+
+abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
+
+  @CommandLine.Option(
+      names = {"--min-roots"},
+      paramLabel = "number",
+      description = "Minimum number of root objects",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMinRoots = 1;
+
+  @CommandLine.Option(
+      names = {"--max-roots"},
+      paramLabel = "number",
+      description = "Maximum number of root objects",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxRoots = 3;
+
+  @CommandLine.Option(
+      names = {"--min-non-roots"},
+      paramLabel = "number",
+      description = "Minimum number of non-root objects",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMinNonRoots = 2;
+
+  @CommandLine.Option(
+      names = {"--max-non-roots"},
+      paramLabel = "number",
+      description = "Maximum number of non-root objects",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxNonRoots = 5;
+
+  @CommandLine.Option(
+      names = {"--min-object-size"},
+      paramLabel = "size",
+      description = "Minimum size of an object",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String optMinObjectSize = "1B";
+
+  @CommandLine.Option(
+      names = {"--max-object-size"},
+      paramLabel = "size",
+      description = "Maximum size of an object",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String optMaxObjectSize = "128KB";
+
+  @CommandLine.Option(
+      names = {"--min-references"},
+      paramLabel = "number",
+      description = "Minimum number of references",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMinReferences = 15;
+
+  @CommandLine.Option(
+      names = {"--max-references"},
+      paramLabel = "number",
+      description = "Maximum number of references",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxReferences = 25;
+
+  @CommandLine.Option(
+      names = {"--strong-reference-weight"},
+      paramLabel = "weight",
+      description = "Weight for generating a strong reference",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optStrongRefWeight = 50;
+
+  @CommandLine.Option(
+      names = {"--soft-reference-weight"},
+      paramLabel = "weight",
+      description = "Weight for generating a soft reference",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optSoftRefWeight = 20;
+
+  @CommandLine.Option(
+      names = {"--weak-reference-weight"},
+      paramLabel = "weight",
+      description = "Weight for generating a weak reference",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optWeakRefWeight = 30;
+
+  protected GraphSmith buildGraphSmith(LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+    return new GraphSmith(
         GraphSmith.Config.builder()
-            .vm(jvm)
+            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith)
-            .minRoots(1)
-            .maxRoots(3)
-            .minNonRoots(2)
-            .maxNonRoots(5)
-            .minRefs(2)
-            .maxRefs(8)
-            .build();
-    GraphSmith graphSmith = new GraphSmith(graphConfig);
+            .minRoots(optMinRoots)
+            .maxRoots(optMaxRoots)
+            .minNonRoots(optMinNonRoots)
+            .maxNonRoots(optMaxNonRoots)
+            .minRefs(optMinReferences)
+            .maxRefs(optMaxReferences)
+            .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
+            .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
+            .strongRefWeight(optStrongRefWeight)
+            .softRefWeight(optSoftRefWeight)
+            .weakRefWeight(optWeakRefWeight)
+            .build());
+  }
+}
 
-    GGraph initState = graphSmith.craft();
+@CommandLine.Command(
+    name = "gsmith",
+    usageHelpAutoWidth = true,
+    mixinStandardHelpOptions = true,
+    description = "Generates a random object graph.",
+    descriptionHeading = "%n",
+    optionListHeading = "%nOptions:%n",
+    parameterListHeading = "%nArguments:%n")
+class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubCommand {
 
+  @Override
+  public Integer runCommand() throws Exception {
+    IdSmith objectIdSmith = new IdSmith("o");
+    IdSmith referenceIdSmith = new IdSmith("l");
+    NoopVM vm = new NoopVM(); // Do nothing
+    GraphSmith smith = buildGraphSmith(vm, objectIdSmith, referenceIdSmith);
+    GGraph graph = smith.craft();
+    System.out.println(graph.formatToText());
+    return 0;
+  }
+}
+
+abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
+
+  enum SupportedLVMs {
+    HOTSPOT,
+    NOOP
+  }
+
+  enum SupportedGCs {
+    G1(SupportedLVMs.HOTSPOT, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
+    ZGC(SupportedLVMs.HOTSPOT, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
+    SHENANDOAH(
+        SupportedLVMs.HOTSPOT, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
+    DEFAULT(SupportedLVMs.NOOP, ""); // Use the default garbage collector
+
+    // Which VM this GC is supported on
+    SupportedLVMs vm;
+    // The command line option to enable the GC
+    String enable;
+
+    SupportedGCs(SupportedLVMs vm, String enable) {
+      this.vm = vm;
+      this.enable = enable;
+    }
+  }
+
+  @CommandLine.Option(
+      names = {"--min-instructions"},
+      paramLabel = "number",
+      description = "Minimum number of instructions to smith",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMinInstructions = 1;
+
+  @CommandLine.Option(
+      names = {"--max-instructions"},
+      paramLabel = "number",
+      description = "Maximum number of instructions to smith",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxInstructions = 32;
+
+  @CommandLine.Option(
+      names = {"--lang-vm"},
+      paramLabel = "name",
+      description = "The language VM under validation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected SupportedLVMs optUseVM = SupportedLVMs.NOOP;
+
+  @CommandLine.Option(
+      names = {"--lang-vm-version"},
+      paramLabel = "number",
+      description = "The version of the language VM under validation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optUseVMVersion = -1;
+
+  @CommandLine.Option(
+      names = {"--garbage-collector"},
+      paramLabel = "name",
+      description = "The garbage collector under validation.",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected SupportedGCs optUseGC = SupportedGCs.DEFAULT;
+
+  @CommandLine.Option(
+      names = {"--heap-capacity"},
+      paramLabel = "size",
+      description = "The heap capacity of the VM under validation",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String optHeapCapacity = "1GB";
+
+  @CommandLine.Option(
+      names = {"--output-dir"},
+      paramLabel = "dir",
+      description = "The output directory for the generated files (if any).",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected File optOutputDir = null;
+
+  protected ProgramSmith buildProgramSmith(
+      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
     ProgramSmith.Config programConfig =
         ProgramSmith.Config.builder()
-            .vm(jvm)
+            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith)
             .initState(initState)
-            .minInstructions(1)
-            .maxInstructions(32)
-            .minObjSizeBytes(MemorySize.of(128, MemorySize.Unit.KB))
-            .maxObjSizeBytes(MemorySize.of(128, MemorySize.Unit.MB))
+            .minInstructions(optMinInstructions)
+            .maxInstructions(optMaxInstructions)
+            .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
+            .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
             .build();
-    ProgramSmith programSmith = new ProgramSmith(programConfig);
+    return new ProgramSmith(programConfig);
+  }
+}
+
+@CommandLine.Command(
+    name = "psmith",
+    usageHelpAutoWidth = true,
+    mixinStandardHelpOptions = true,
+    description =
+        "Generates a random Gorrect IR program (and the corresponding Java program if requested).",
+    descriptionHeading = "%n",
+    optionListHeading = "%nOptions:%n",
+    parameterListHeading = "%nArguments:%n")
+class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand {
+
+  @CommandLine.ParentCommand protected Gorrect parent;
+
+  @Override
+  public void checkOptions() throws CommandLine.ParameterException {
+    if (optUseVM != SupportedLVMs.NOOP && optUseGC != SupportedGCs.DEFAULT) {
+      if (optUseGC.vm != optUseVM) {
+        throw new CommandLine.ParameterException(
+            parent.getCommandLine(),
+            "The garbage collector must be compatible with the language VM: "
+                + optUseGC
+                + " is not compatible with "
+                + optUseVM);
+      }
+    }
+
+    if (optOutputDir != null) {
+      if (optOutputDir.exists()) {
+        throw new CommandLine.ParameterException(
+            parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
+      }
+      if (!optOutputDir.mkdir()) {
+        throw new CommandLine.ParameterException(
+            parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
+      }
+    }
+  }
+
+  @Override
+  public Integer runCommand() throws Exception {
+    LangVM vm =
+        switch (optUseVM) {
+          case HOTSPOT -> new HotSpotVM(MemorySize.parse(optHeapCapacity), optUseVMVersion);
+          case NOOP -> new NoopVM();
+        };
+    IdSmith objectIdSmith = new IdSmith("o");
+    IdSmith referenceIdSmith = new IdSmith("l");
+
+    GraphSmith graphSmith = buildGraphSmith(vm, objectIdSmith, referenceIdSmith);
+    GGraph initState = graphSmith.craft();
+    System.out.println("Initial State");
+    System.out.println("-------------");
+    System.out.println(initState.formatToText());
+
+    ProgramSmith programSmith = buildProgramSmith(vm, objectIdSmith, referenceIdSmith, initState);
 
     GProgram program = programSmith.craft();
-    System.out.println("Generated program:");
-    System.out.println(program.toString().indent(2));
+    System.out.println("Gorrect IR Program");
+    System.out.println("------------------");
+    System.out.println(program.toString());
 
     ProgramSmith.Stats progamGenStats = programSmith.getStats();
-    System.out.println("Program generation stats: ");
-    System.out.println(progamGenStats.formatToText().indent(2));
+    System.out.println("Smith Stats");
+    System.out.println("-----------");
+    System.out.println(progamGenStats.formatToText());
 
-    OracleInterpreter oracle = new OracleInterpreter(jvm, program);
+    OracleInterpreter oracle = new OracleInterpreter(vm, program);
     oracle.interpret();
     GGraph oracleState = oracle.getState();
+    System.out.println("Oracle Interpreter State");
+    System.out.println("------------------------");
+    System.out.println(oracleState.formatToText());
 
     JavaInterpreter java = new JavaInterpreter(program);
     java.interpret();
-    GGraph javaInterpState = java.getState();
+    GGraph interpState = java.getState();
+    System.out.println("Java Interpreter State");
+    System.out.println("----------------------");
+    System.out.println(interpState.formatToText());
 
-    if (oracleState.equals(javaInterpState)) {
-      System.out.println("Equals");
+    System.out.println("Interpreter State Comparison");
+    System.out.println("----------------------------");
+    if (oracleState.equals(interpState)) {
+      System.out.println("Equals\n");
     } else {
-      System.out.println("Not equals");
+      System.out.println("Not equals; there must be a bug in the Java interpreter!\n");
+      return 1;
     }
 
-    System.out.printf(
-        "Heap usage: %s/%s%n",
-        MemorySize.toString(jvm.getHeapUnusedBytes()), MemorySize.toString(jvm.getHeapCapacity()));
-
-    try {
-      String hprof = java.executeJavaCode("/tmp");
-      System.out.println("HPROF file generated at: " + hprof);
-    } catch (Exception e) {
-      System.out.println("FAILED to execute Java code: " + e.getMessage());
+    if (optOutputDir != null) {
+      String javaFilePath = java.exportToJava(optOutputDir.toString());
+      String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
+      System.out.println("Java Program");
+      System.out.println("----------------------------");
+      System.out.println("Generated at: " + javaFileFullPath);
+      System.out.println(Files.readString(Path.of(javaFileFullPath)));
     }
+
+    // try {
+    //   // Use vm and gc to execute the Java code and generate an HPROF file
+    //   String hprof = java.executeJavaCode("/tmp", vm.home, optUseGC.enable);
+    //   System.out.println("HPROF file generated at: " + hprof);
+    // } catch (Exception e) {
+    //   System.out.println("FAILED to execute Java code: " + e.getMessage());
+    // }
+    //
+    // System.out.println("Java Execution State");
+    // System.out.println("--------------------");
+    // System.out.println(interpState.formatToText());
+
+    return 0;
   }
 }

@@ -37,6 +37,9 @@ repositories {
 compileJava {
   sourceCompatibility = JavaVersion.VERSION_21
   targetCompatibility = JavaVersion.VERSION_21
+
+  // Enable annotation processing for Lombok and Picocli
+  options.compilerArgs += ["-Aproject=${project.group}/${project.name}"]
 }
 
 jar {
@@ -77,6 +80,8 @@ dependencies {
   implementation 'org.slf4j:slf4j-simple:2.0.17'
   implementation 'org.netbeans.modules:org-netbeans-lib-profiler:RELEASE260'
   implementation 'org.openjdk.jol:jol-core:0.17'
+  implementation 'info.picocli:picocli:4.7.7'
+  annotationProcessor 'info.picocli:picocli-codegen:4.7.7'
   compileOnly "org.projectlombok:lombok:1.18.38"
   annotationProcessor "org.projectlombok:lombok:1.18.38"
 
