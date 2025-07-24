@@ -84,6 +84,10 @@ public class GGraph {
     }
   }
 
+  public GGraph deepCopy() {
+    return new GGraph(this);
+  }
+
   public List<GObject> getRoots() {
     return objects.values().stream().filter(GObject::isRoot).collect(Collectors.toList());
   }
@@ -206,14 +210,14 @@ public class GGraph {
       }
     }
     for (GID refId : refsToRemove) {
-      references.remove(refId);
+      removeReference(refId);
     }
 
     // Update adjacent tables
+    Assert.set(refTo.get(objId).isEmpty(), "Object still %s has outgoing references", objId);
     refTo.remove(objId);
-    refTo.values().forEach(referents -> referents.remove(objId));
+    Assert.set(refBy.get(objId).isEmpty(), "Object still %s has incoming references", objId);
     refBy.remove(objId);
-    refBy.values().forEach(referers -> referers.remove(objId));
 
     objects.remove(objId);
   }
