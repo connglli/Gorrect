@@ -319,7 +319,7 @@ class GeneratedHeap {
               GObject.Type.ORDINARY,
               "((%s) %s.get(\"%s\"))"
                   .formatted(objectClazz.clazzName, OBJECT_POOL_NAME, objectClazz.getId()),
-              GReference.Type.STRONG, // It is not strongly reachable as it is in the pool
+              GReference.Type.STRONG, // It is strongly reachable as it is in the pool
               null);
       appendStatement(
           OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName); //

@@ -31,12 +31,12 @@ import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.gir.utility.UnmodifiableGraph;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.utility.*;
 import java.util.*;
 import java.util.function.Predicate;
-import java.util.stream.Collectors;
 import lombok.*;
 
 /** ProgramSmith generates a random GIR program. */
@@ -697,146 +697,15 @@ public class ProgramSmith {
   }
 }
 
-class StateRandDecor {
+class StateRandDecor extends UnmodifiableGraph {
   private static final Rand random = Rand.getInstance();
 
-  @NonNull private final GGraph graph;
-  private Map<GID, GReference.Type> reachability = null;
-
   StateRandDecor(@NonNull OracleInterpreter interpreter) {
-    graph = interpreter.getState();
+    super(interpreter.getState());
   }
 
   static StateRandDecor of(@NonNull OracleInterpreter interpreter) {
     return new StateRandDecor(interpreter);
-  }
-
-  // -=======================================================
-  // - Basic methods (delegation to GGraph)
-  // -=======================================================
-
-  List<GObject> getRoots() {
-    return graph.getRoots();
-  }
-
-  List<GObject> getObjects() {
-    return graph.getObjects();
-  }
-
-  boolean hasObject(@NonNull GID objId) {
-    return graph.hasObject(objId);
-  }
-
-  @NonNull
-  GObject getObject(@NonNull GID objId) {
-    return graph.getObject(objId);
-  }
-
-  boolean hasRoot(@NonNull GID objId) {
-    return graph.hasRoot(objId);
-  }
-
-  @NonNull
-  GObject getRoot(@NonNull GID rootId) {
-    return graph.getRoot(rootId);
-  }
-
-  boolean hasNonRoot(@NonNull GID objId) {
-    return graph.hasNonRoot(objId);
-  }
-
-  @NonNull
-  GObject getNonRoot(@NonNull GID objId) {
-    return graph.getNonRoot(objId);
-  }
-
-  List<GReference> getReferences() {
-    return graph.getReferences();
-  }
-
-  boolean hasReference(@NonNull GID refId) {
-    return graph.hasReference(refId);
-  }
-
-  @NonNull
-  GReference getReference(@NonNull GID refId) {
-    return graph.getReference(refId);
-  }
-
-  boolean hasReference(@NonNull GID refererId, @NonNull GID referentId) {
-    return graph.hasReference(refererId, referentId);
-  }
-
-  @NonNull
-  GReference getReference(@NonNull GID refererId, @NonNull GID referentId) {
-    return graph.getReference(refererId, referentId);
-  }
-
-  List<GObject> getReferents(@NonNull GID refererId) {
-    return graph.getReferents(refererId);
-  }
-
-  List<GObject> getReferers(@NonNull GID referentId) {
-    return graph.getReferers(referentId);
-  }
-
-  // -=======================================================
-  // - Reachability methods (maintaining one copy)
-  // -=======================================================
-
-  Map<GID, GReference.Type> getReachability() {
-    if (reachability == null) {
-      reachability = graph.markReachability();
-    }
-    return Collections.unmodifiableMap(reachability);
-  }
-
-  boolean isReachable(GID objectId) {
-    return getReachability().containsKey(objectId);
-  }
-
-  boolean isUnreachable(GID objectId) {
-    return !getReachability().containsKey(objectId);
-  }
-
-  boolean isStronglyReachable(GID objectId) {
-    return getReachability().get(objectId) == GReference.Type.STRONG;
-  }
-
-  boolean isSoftlyReachable(GID objectId) {
-    return getReachability().get(objectId) == GReference.Type.SOFT;
-  }
-
-  boolean isWeaklyReachable(GID objectId) {
-    return getReachability().get(objectId) == GReference.Type.WEAK;
-  }
-
-  List<GID> getReachableObjects() {
-    return new ArrayList<>(getReachability().keySet());
-  }
-
-  List<GID> getStronglyReachableObjects() {
-    Map<GID, GReference.Type> reachability = getReachability();
-    return reachability.entrySet().stream()
-        .filter(entry -> entry.getValue() == GReference.Type.STRONG)
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toList());
-  }
-
-  List<GID> getSoftlyReachableObjects() {
-    Map<GID, GReference.Type> reachability = getReachability();
-    return reachability.entrySet().stream()
-        .filter(entry -> entry.getValue() == GReference.Type.SOFT)
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toList());
-  }
-
-  List<GID> getWeaklyReachableObjects() {
-    Map<GID, GReference.Type> reachability = getReachability();
-    return reachability.entrySet().stream()
-        .filter(entry -> entry.getValue() == GReference.Type.WEAK)
-        .map(Map.Entry::getKey)
-        .collect(Collectors.toList());
   }
 
   // -=======================================================

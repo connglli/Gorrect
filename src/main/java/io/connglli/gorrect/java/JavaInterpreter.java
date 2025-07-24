@@ -201,9 +201,9 @@ public class JavaInterpreter {
         }
         log.info("DUMPING HEAP " + pid.get() + "...");
         try {
-          Jcmd.dumpHeap(pid.get(), file, /* dead= */ true);
+          Jcmd.dumpHeap(pid.get(), file, /* dead= */ false);
           succeeded = true;
-          System.out.println("SUCCEEDED!");
+          System.out.println("SUCCEEDED! Heap dumped to " + file);
         } catch (Exception e) {
           log.warning("FAILED: %s", e.getMessage());
           succeeded = false;

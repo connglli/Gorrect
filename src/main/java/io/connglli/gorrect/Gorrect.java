@@ -29,6 +29,7 @@ import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.HotSpotVM;
+import io.connglli.gorrect.java.oracle.JavaOracle;
 import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.java.oracle.NoopJVM;
 import io.connglli.gorrect.oracle.LangVM;
@@ -46,6 +47,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
+import java.util.stream.Collectors;
 import lombok.NonNull;
 import picocli.CommandLine;
 
@@ -388,6 +390,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
   @Override
   public Integer runCommand() throws Exception {
+    // The JVM exists here to ensure our generated programs are not ouf of memory.
     JavaVM jvm =
         switch (optUseVM) {
           // TODO: Add path to the VM executable
@@ -415,16 +418,16 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     System.out.println("-----------");
     System.out.println(progamGenStats.formatToText());
 
-    // Reset the JVM to ensure it starts with a clean state
-    jvm.reset();
-
-    OracleInterpreter oracle = new OracleInterpreter(jvm, program);
+    // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
+    JavaVM unlimitedJvm = new NoopJVM(Long.MAX_VALUE);
+    OracleInterpreter oracle = new OracleInterpreter(unlimitedJvm, program);
     oracle.interpret();
     GGraph oracleState = oracle.getState();
     System.out.println("Oracle Interpreter State");
     System.out.println("------------------------");
     System.out.println(oracleState.formatToText());
 
+    // Translate the Gorrect IR program to Java code and obtain the interpreter state.
     JavaInterpreter java = new JavaInterpreter(program);
     java.interpret();
     GGraph interpState = java.getState();
@@ -442,14 +445,15 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     }
 
     if (optOutputDir != null) {
-      String javaFilePath = java.exportToJava(optOutputDir.toString());
-      String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
+      // Export the Java program to a file and execute it
       System.out.println("Java Program");
       System.out.println("------------");
-      System.out.println("Program generated at: " + javaFileFullPath);
+      String javaFilePath = java.exportToJava(optOutputDir.toString());
+      String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
       System.out.println(Files.readString(Path.of(javaFileFullPath)));
 
       if (optValidate) {
+        // Validate if the Java program after execution matches the oracle state.
         System.out.println("Java Execution State");
         System.out.println("--------------------");
         try {
@@ -457,18 +461,34 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
               java.executeGeneratedJavaFile(
                   javaFilePath, jvm, optOutputDir.toString(), optUseGC.enableOptions);
           String hprofFileFullPath = optOutputDir + File.separator + hprofFilePath;
-          System.out.println("HPROF generated at: " + hprofFileFullPath);
           GGraph execState = HprofParser.parse(hprofFileFullPath);
           System.out.println(execState.formatToText());
 
-          // if (Oracle.equals(oracleState, execState)) {
-          //   System.out.println("Java execution state matches the oracle interpreter state.");
-          //   return 0;
-          // } else {
-          //   System.out.println("Java execution state does not match the oracle interpreter
-          // state!");
-          //   return 1;
-          // }
+          System.out.println("Oracle Check");
+          System.out.println("------------");
+          // Validate the Java execution state against the oracle interpreter state.
+          JavaOracle validator = new JavaOracle(oracleState);
+          JavaOracle.ValidationResult result = validator.validate(execState);
+          if (result.isValid()) {
+            System.out.println(
+                "SUCCESS: The Java execution state matches the oracle interpreter state.");
+          } else {
+            System.out.println("FAILURE: " + result.getFailureMessage());
+            System.out.println(
+                "Object Violations: "
+                    + result.getObjectViolations().entrySet().stream()
+                        .map(s -> " - %s: %s".formatted(s.getKey(), s.getValue()))
+                        .collect(Collectors.joining("\n")));
+            System.out.println(
+                "Reference Violations: "
+                    + result.getReferenceViolations().entrySet().stream()
+                        .map(
+                            s ->
+                                " - (%s -> %s): %s"
+                                    .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
+                        .collect(Collectors.joining("\n")));
+            return 1;
+          }
         } catch (Exception e) {
           System.out.println("FAILED to execute Java code: " + e.getMessage());
           return 1;

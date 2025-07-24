@@ -243,6 +243,9 @@ public class HprofParser {
                 "Expected Instance for soft reference, but got " + o.getClass());
             Instance refInstance = (Instance) o;
             o = refInstance.getValueOfField("referent");
+            if (o == null) {
+              continue; // The referent no longer reachable.
+            }
             Assert.set(
                 isGeneratedByUs(o),
                 "Expected Instance for soft reference's referent, but got " + o.getClass());
@@ -261,6 +264,9 @@ public class HprofParser {
                 "Expected Instance for weak reference, but got " + o.getClass());
             Instance refInstance = (Instance) o;
             o = refInstance.getValueOfField("referent");
+            if (o == null) {
+              continue; // The referent no longer reachable.
+            }
             Assert.set(
                 isGeneratedByUs(o),
                 "Expected Instance for weak reference's referent, but got " + o.getClass());

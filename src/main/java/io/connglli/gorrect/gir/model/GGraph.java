@@ -154,6 +154,21 @@ public class GGraph {
     return references.get(new GID("null"));
   }
 
+  public List<GReference> getOutgoingReferences(@NonNull GID refererId) {
+    Assert.set(hasObject(refererId), String.format("Object with id %s does not exist", refererId));
+    return refTo.get(refererId).stream()
+        .map(referentId -> getReference(refererId, referentId))
+        .collect(Collectors.toList());
+  }
+
+  public List<GReference> getIncomingReferences(@NonNull GID referentId) {
+    Assert.set(
+        hasObject(referentId), String.format("Object with id %s does not exist", referentId));
+    return refBy.get(referentId).stream()
+        .map(refererId -> getReference(refererId, referentId))
+        .collect(Collectors.toList());
+  }
+
   public List<GObject> getReferents(@NonNull GID refererId) {
     Assert.set(hasObject(refererId), String.format("Object with id %s does not exist", refererId));
     return refTo.get(refererId).stream().map(this::getObject).collect(Collectors.toList());
