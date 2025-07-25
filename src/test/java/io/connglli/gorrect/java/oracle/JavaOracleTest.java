@@ -31,6 +31,7 @@ import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.Oracle.ValidationResult;
+import io.connglli.gorrect.utility.Pair;
 import java.util.Map;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
@@ -420,5 +421,101 @@ public class JavaOracleTest {
           oracle.validate(null);
         },
         "Should throw NullPointerException for null graph");
+  }
+
+  @Test
+  void testValidateComplexGraphWithCyclesAndChains() {
+    GGraph complexOracleGraph = new GGraph();
+    GID root = new GID("root");
+    GID chain1 = new GID("chain1");
+    GID chain2 = new GID("chain2");
+    GID cycle1 = new GID("cycle1");
+    GID cycle2 = new GID("cycle2");
+    GID softChain = new GID("softChain");
+    GID multiRef = new GID("multiRef");
+
+    complexOracleGraph.addObject(root, GObject.Type.GCROOT, 100);
+    complexOracleGraph.addObject(chain1, GObject.Type.ORDINARY, 50);
+    complexOracleGraph.addObject(chain2, GObject.Type.ORDINARY, 50);
+    complexOracleGraph.addObject(cycle1, GObject.Type.ORDINARY, 50);
+    complexOracleGraph.addObject(cycle2, GObject.Type.ORDINARY, 50);
+    complexOracleGraph.addObject(softChain, GObject.Type.ORDINARY, 50);
+    complexOracleGraph.addObject(multiRef, GObject.Type.ORDINARY, 50);
+
+    // Chain of strong references
+    complexOracleGraph.addReference(
+        new GID("ref_root_chain1"), root, chain1, GReference.Type.STRONG);
+    complexOracleGraph.addReference(
+        new GID("ref_chain1_chain2"), chain1, chain2, GReference.Type.STRONG);
+
+    // Cycle of strong references
+    complexOracleGraph.addReference(
+        new GID("ref_root_cycle1"), root, cycle1, GReference.Type.STRONG);
+    complexOracleGraph.addReference(
+        new GID("ref_cycle1_cycle2"), cycle1, cycle2, GReference.Type.STRONG);
+    complexOracleGraph.addReference(
+        new GID("ref_cycle2_cycle1"), cycle2, cycle1, GReference.Type.STRONG);
+
+    // Soft reference chain
+    complexOracleGraph.addReference(
+        new GID("ref_chain2_softChain"), chain2, softChain, GReference.Type.SOFT);
+
+    // Multiple references
+    complexOracleGraph.addReference(
+        new GID("ref_root_multiRef"), root, multiRef, GReference.Type.SOFT);
+    complexOracleGraph.addReference(
+        new GID("ref_cycle2_multiRef"), cycle2, multiRef, GReference.Type.STRONG);
+
+    JavaOracle complexOracle = new JavaOracle(complexOracleGraph);
+
+    // --- Test Case 1: Valid graph ---
+    GGraph validObtainedGraph = complexOracleGraph.deepCopy();
+    ValidationResult validResult = complexOracle.validate(validObtainedGraph);
+    assertTrue(validResult.isValid(), "Validation should succeed for a valid complex graph");
+
+    // --- Test Case 2: Missing object in a chain ---
+    GGraph missingChainObjectGraph = complexOracleGraph.deepCopy();
+    missingChainObjectGraph.removeObject(chain2);
+    ValidationResult missingChainResult = complexOracle.validate(missingChainObjectGraph);
+    assertFalse(
+        missingChainResult.isValid(),
+        "Validation should fail if a strongly reachable object in a chain is missing");
+    assertTrue(missingChainResult.getObjectViolations().containsKey(chain2));
+    assertEquals(
+        "Strongly reachable object not found",
+        missingChainResult.getObjectViolations().get(chain2));
+
+    // --- Test Case 3: Broken reference in a cycle ---
+    GGraph brokenCycleGraph = complexOracleGraph.deepCopy();
+    brokenCycleGraph.removeReference(new GID("ref_cycle2_cycle1"));
+    ValidationResult brokenCycleResult = complexOracle.validate(brokenCycleGraph);
+    assertFalse(
+        brokenCycleResult.isValid(),
+        "Validation should fail if a reference in a strong cycle is missing");
+    assertTrue(brokenCycleResult.getReferenceViolations().containsKey(Pair.of(cycle2, cycle1)));
+
+    // --- Test Case 4: Softly reachable object is present but should have been strong ---
+    GGraph incorrectReachabilityGraph = complexOracleGraph.deepCopy();
+    // Make multiRef only softly reachable
+    incorrectReachabilityGraph.removeReference(cycle2, multiRef);
+    ValidationResult incorrectReachabilityResult =
+        complexOracle.validate(incorrectReachabilityGraph);
+    assertFalse(
+        incorrectReachabilityResult.isValid(),
+        "Validation should fail if an object's reachability is weaker than expected");
+    assertTrue(incorrectReachabilityResult.getObjectViolations().containsKey(multiRef));
+    assertTrue(
+        incorrectReachabilityResult
+            .getObjectViolations()
+            .get(multiRef)
+            .contains("Unexpected reachability"));
+
+    // --- Test Case 5: Softly reachable object cleared (valid) ---
+    GGraph clearedSoftChainGraph = complexOracleGraph.deepCopy();
+    clearedSoftChainGraph.removeObject(softChain);
+    ValidationResult clearedSoftResult = complexOracle.validate(clearedSoftChainGraph);
+    assertTrue(
+        clearedSoftResult.isValid(),
+        "Validation should succeed if a softly reachable object is cleared");
   }
 }
