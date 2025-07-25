@@ -27,20 +27,28 @@ package io.connglli.gorrect.gir.model.visitor;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.gir.model.GReference;
 import java.util.HashSet;
 import java.util.LinkedList;
+import java.util.List;
 import java.util.Queue;
 import java.util.Set;
 import lombok.NonNull;
 
 /**
  * A visitor that traverses an object graph in breadth-first order. It visits each object and its
- * referents, starting from the roots of the graph.
+ * referents (if the reference is allowed), starting from the roots of the graph.
  */
 public abstract class GObjectBreadthFirstVisitor implements GObjectVisitor {
 
+  @NonNull
+  public GReference.Type[] allowReferenceTypes() {
+    return GReference.Type.values();
+  }
+
   @Override
   public void visit(@NonNull GGraph graph) {
+    List<GReference.Type> allowedReferenceTypes = List.of(allowReferenceTypes());
     Set<GID> visited = new HashSet<>();
     Queue<GID> queue = new LinkedList<>();
     for (GObject root : graph.getRoots()) {
@@ -48,14 +56,17 @@ public abstract class GObjectBreadthFirstVisitor implements GObjectVisitor {
     }
     while (!queue.isEmpty()) {
       GID refererId = queue.poll();
-      GObject obj = graph.getObject(refererId);
+      GObject referer = graph.getObject(refererId);
       if (visited.contains(refererId)) {
         continue;
       }
       visited.add(refererId);
-      obj.accept(graph, this);
+      referer.accept(graph, this);
       for (GObject referent : graph.getReferents(refererId)) {
-        queue.offer(referent.getId());
+        GID referentId = referent.getId();
+        if (allowedReferenceTypes.contains(graph.getReference(refererId, referentId).getType())) {
+          queue.offer(referentId); // Only enqueue referents with allowed reference types
+        }
       }
     }
   }

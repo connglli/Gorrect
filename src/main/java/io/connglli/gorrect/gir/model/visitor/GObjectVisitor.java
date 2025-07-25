@@ -26,13 +26,17 @@ package io.connglli.gorrect.gir.model.visitor;
 
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.gir.model.GReference;
 import lombok.NonNull;
 
 /**
  * A visitor interface for traversing objects in an object graph. It allows visiting individual
- * objects or the entire graph.
+ * objects (according to allowed reference types) or the entire graph.
  */
 public interface GObjectVisitor {
+  @NonNull
+  GReference.Type[] allowReferenceTypes();
+
   void visit(@NonNull GGraph graph, @NonNull GObject obj);
 
   void visit(@NonNull GGraph graph);

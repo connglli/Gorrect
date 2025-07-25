@@ -27,19 +27,27 @@ package io.connglli.gorrect.gir.model.visitor;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
+import io.connglli.gorrect.gir.model.GReference;
 import java.util.HashSet;
+import java.util.List;
 import java.util.Set;
 import java.util.Stack;
 import lombok.NonNull;
 
 /**
  * A visitor that traverses an object graph in depth-first order. It visits each object and its
- * referents, starting from the roots of the graph.
+ * referents (if the reference is allowed), starting from the roots of the graph.
  */
 public abstract class GObjectDepthFirstVisitor implements GObjectVisitor {
 
+  @NonNull
+  public GReference.Type[] allowReferenceTypes() {
+    return GReference.Type.values();
+  }
+
   @Override
   public void visit(@NonNull GGraph graph) {
+    List<GReference.Type> allowedReferenceTypes = List.of(allowReferenceTypes());
     Set<GID> visited = new HashSet<>();
     Stack<GID> stack = new Stack<>();
     for (GObject root : graph.getRoots()) {
@@ -47,14 +55,17 @@ public abstract class GObjectDepthFirstVisitor implements GObjectVisitor {
     }
     while (!stack.isEmpty()) {
       GID refererId = stack.pop();
-      GObject obj = graph.getObject(refererId);
+      GObject referer = graph.getObject(refererId);
       if (visited.contains(refererId)) {
         continue;
       }
       visited.add(refererId);
-      obj.accept(graph, this);
+      referer.accept(graph, this);
       for (GObject referent : graph.getReferents(refererId)) {
-        stack.push(referent.getId());
+        GID referentId = referent.getId();
+        if (allowedReferenceTypes.contains(graph.getReference(refererId, referentId).getType())) {
+          stack.push(referentId); // Only push referents with allowed reference types
+        }
       }
     }
   }

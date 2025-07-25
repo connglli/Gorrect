@@ -132,7 +132,7 @@ class GGraphTest {
   }
 
   @Test
-  void testComplexGraphStructure() {
+  void testComplexGraphStructure1() {
     GGraph graph = new GGraph();
 
     GID rootId = new GID("root");
@@ -170,6 +170,77 @@ class GGraphTest {
     Set<GID> weaklyReachable = graph.getWeaklyReachableObjects();
     assertTrue(weaklyReachable.contains(obj3), "Object3 should be weakly reachable.");
     assertTrue(weaklyReachable.contains(obj4), "Object4 should be weakly reachable.");
+  }
+
+  @Test
+  void testComplexGraphStructure2() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID chain1 = new GID("chain1");
+    GID chain2 = new GID("chain2");
+    GID cycle1 = new GID("cycle1");
+    GID cycle2 = new GID("cycle2");
+    GID softChain = new GID("softChain");
+    GID multiRef = new GID("multiRef");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(chain1, GObject.Type.ORDINARY, 50);
+    graph.addObject(chain2, GObject.Type.ORDINARY, 50);
+    graph.addObject(cycle1, GObject.Type.ORDINARY, 50);
+    graph.addObject(cycle2, GObject.Type.ORDINARY, 50);
+    graph.addObject(softChain, GObject.Type.ORDINARY, 50);
+    graph.addObject(multiRef, GObject.Type.ORDINARY, 50);
+
+    // Chain of strong references
+    graph.addReference(new GID("ref_root_chain1"), root, chain1, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_chain1_chain2"), chain1, chain2, GReference.Type.STRONG);
+
+    // Cycle of strong references
+    graph.addReference(new GID("ref_root_cycle1"), root, cycle1, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_cycle1_cycle2"), cycle1, cycle2, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_cycle2_cycle1"), cycle2, cycle1, GReference.Type.STRONG);
+
+    // Soft reference chain
+    graph.addReference(new GID("ref_chain2_softChain"), chain2, softChain, GReference.Type.SOFT);
+
+    // Multiple references
+    graph.addReference(new GID("ref_root_multiRef"), root, multiRef, GReference.Type.SOFT);
+    graph.addReference(new GID("ref_cycle2_multiRef"), cycle2, multiRef, GReference.Type.STRONG);
+
+    Set<GID> stronglyReachable = graph.getStronglyReachableObjects();
+    assertTrue(stronglyReachable.contains(root), "Root should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(chain1), "Object chain1 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(chain2), "Object chain2 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(cycle1), "Object cycle1 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(cycle2), "Object cycle2 should be strongly reachable.");
+    assertTrue(
+        stronglyReachable.contains(multiRef), "Object multiRef should be strongly reachable.");
+    assertEquals(6, stronglyReachable.size(), "There should be 6 strongly reachable objects.");
+
+    Set<GID> softlyReachable = graph.getSoftlyReachableObjects();
+    assertTrue(softlyReachable.contains(softChain), "Object softChain should be softly reachable.");
+    assertEquals(1, softlyReachable.size(), "There should be 1 softly reachable objects.");
+
+    Set<GID> weaklyReachable = graph.getWeaklyReachableObjects();
+    assertEquals(0, weaklyReachable.size(), "There should be 0 weakly reachable objects.");
+
+    graph.removeReference(new GID("ref_cycle2_multiRef"));
+
+    stronglyReachable = graph.getStronglyReachableObjects();
+    assertTrue(stronglyReachable.contains(root), "Root should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(chain1), "Object chain1 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(chain2), "Object chain2 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(cycle1), "Object cycle1 should be strongly reachable.");
+    assertTrue(stronglyReachable.contains(cycle2), "Object cycle2 should be strongly reachable.");
+    assertEquals(5, stronglyReachable.size(), "There should be 5 strongly reachable objects.");
+
+    softlyReachable = graph.getSoftlyReachableObjects();
+    assertTrue(softlyReachable.contains(softChain), "Object softChain should be softly reachable.");
+    assertTrue(softlyReachable.contains(multiRef), "Object multiRef should be softly reachable.");
+    assertEquals(2, softlyReachable.size(), "There should be 2 softly reachable objects.");
+
+    weaklyReachable = graph.getWeaklyReachableObjects();
+    assertEquals(0, weaklyReachable.size(), "There should be 0 weakly reachable objects.");
   }
 
   @Test
@@ -265,5 +336,311 @@ class GGraphTest {
             objects.get(i) + " should still be reachable.");
       }
     }
+  }
+
+  @Test
+  void testComplexGraphWithMultiplePaths() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID objA = new GID("objA");
+    GID objB = new GID("objB");
+    GID objC = new GID("objC");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(objA, GObject.Type.ORDINARY, 50);
+    graph.addObject(objB, GObject.Type.ORDINARY, 50);
+    graph.addObject(objC, GObject.Type.ORDINARY, 50);
+
+    // objA is reachable from root via a strong reference
+    graph.addReference(new GID("ref_root_A"), root, objA, GReference.Type.STRONG);
+
+    // objB is reachable from root via a soft reference
+    graph.addReference(new GID("ref_root_B"), root, objB, GReference.Type.SOFT);
+    // objB is also reachable from objA via a strong reference
+    graph.addReference(new GID("ref_A_B"), objA, objB, GReference.Type.STRONG);
+
+    // objC is reachable from root via a weak reference
+    graph.addReference(new GID("ref_root_C"), root, objC, GReference.Type.WEAK);
+    // objC is also reachable from objA via a soft reference
+    graph.addReference(new GID("ref_A_C"), objA, objC, GReference.Type.SOFT);
+
+    // objA should be strongly reachable
+    assertTrue(graph.getStronglyReachableObjects().contains(objA));
+    assertFalse(graph.getSoftlyReachableObjects().contains(objA));
+    assertFalse(graph.getWeaklyReachableObjects().contains(objA));
+
+    // objB should be strongly reachable because of the path root -> objA -> objB
+    assertTrue(graph.getStronglyReachableObjects().contains(objB));
+    assertFalse(graph.getSoftlyReachableObjects().contains(objB));
+    assertFalse(graph.getWeaklyReachableObjects().contains(objB));
+
+    // objC should be softly reachable because of the path root -> objA -> objC
+    assertFalse(graph.getStronglyReachableObjects().contains(objC));
+    assertTrue(graph.getSoftlyReachableObjects().contains(objC));
+    assertFalse(graph.getWeaklyReachableObjects().contains(objC));
+  }
+
+  @Test
+  void testGraphWithMultipleRoots() {
+    GGraph graph = new GGraph();
+    GID root1 = new GID("root1");
+    GID root2 = new GID("root2");
+    GID objA = new GID("objA");
+    GID objB = new GID("objB");
+
+    graph.addObject(root1, GObject.Type.GCROOT, 100);
+    graph.addObject(root2, GObject.Type.GCROOT, 100);
+    graph.addObject(objA, GObject.Type.ORDINARY, 50);
+    graph.addObject(objB, GObject.Type.ORDINARY, 50);
+
+    // objA is reachable from root1
+    graph.addReference(new GID("ref_root1_A"), root1, objA, GReference.Type.STRONG);
+    // objB is reachable from root2
+    graph.addReference(new GID("ref_root2_B"), root2, objB, GReference.Type.STRONG);
+
+    Set<GID> stronglyReachable = graph.getStronglyReachableObjects();
+    assertTrue(stronglyReachable.contains(root1));
+    assertTrue(stronglyReachable.contains(root2));
+    assertTrue(stronglyReachable.contains(objA));
+    assertTrue(stronglyReachable.contains(objB));
+  }
+
+  @Test
+  void testGraphWithIslands() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID reachableObj = new GID("reachable");
+    GID islandObj1 = new GID("island1");
+    GID islandObj2 = new GID("island2");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(reachableObj, GObject.Type.ORDINARY, 50);
+    graph.addObject(islandObj1, GObject.Type.ORDINARY, 50);
+    graph.addObject(islandObj2, GObject.Type.ORDINARY, 50);
+
+    graph.addReference(new GID("ref_root_reachable"), root, reachableObj, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_island"), islandObj1, islandObj2, GReference.Type.STRONG);
+
+    Set<GID> reachable = graph.getReachableObjects();
+    assertTrue(reachable.contains(root));
+    assertTrue(reachable.contains(reachableObj));
+    assertFalse(reachable.contains(islandObj1));
+    assertFalse(reachable.contains(islandObj2));
+
+    graph.removeUnreachableObjects();
+    assertTrue(graph.hasObject(root));
+    assertTrue(graph.hasObject(reachableObj));
+    assertFalse(graph.hasObject(islandObj1));
+    assertFalse(graph.hasObject(islandObj2));
+  }
+
+  @Test
+  void testGraphWithBackEdges() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID obj1 = new GID("obj1");
+    GID obj2 = new GID("obj2");
+    GID obj3 = new GID("obj3");
+    GID obj4 = new GID("obj4");
+    GID sideObj1 = new GID("sideObj1");
+    GID sideObj2 = new GID("sideObj2");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(obj1, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj2, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj3, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj4, GObject.Type.ORDINARY, 50);
+    graph.addObject(sideObj1, GObject.Type.ORDINARY, 50);
+    graph.addObject(sideObj2, GObject.Type.ORDINARY, 50);
+
+    // Forward chain of strong references
+    graph.addReference(new GID("ref_root_1"), root, obj1, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_1_2"), obj1, obj2, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_2_3"), obj2, obj3, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_3_4"), obj3, obj4, GReference.Type.STRONG);
+
+    // Back edges with various reference types
+    graph.addReference(new GID("back_ref_3_1"), obj3, obj1, GReference.Type.SOFT);
+    graph.addReference(new GID("back_ref_4_root"), obj4, root, GReference.Type.WEAK);
+
+    // Side branch with mixed references
+    graph.addReference(new GID("ref_root_side1"), root, sideObj1, GReference.Type.SOFT);
+    graph.addReference(new GID("ref_2_side1"), obj2, sideObj1, GReference.Type.STRONG);
+    graph.addReference(new GID("ref_side1_side2"), sideObj1, sideObj2, GReference.Type.WEAK);
+
+    Set<GID> stronglyReachable = graph.getStronglyReachableObjects();
+    Set<GID> softlyReachable = graph.getSoftlyReachableObjects();
+    Set<GID> weaklyReachable = graph.getWeaklyReachableObjects();
+
+    // All objects on the main chain should be strongly reachable
+    assertTrue(stronglyReachable.contains(root));
+    assertTrue(stronglyReachable.contains(obj1));
+    assertTrue(stronglyReachable.contains(obj2));
+    assertTrue(stronglyReachable.contains(obj3));
+    assertTrue(stronglyReachable.contains(obj4));
+
+    // sideObj1 is strongly reachable via obj2
+    assertTrue(stronglyReachable.contains(sideObj1));
+
+    // sideObj2 is weakly reachable from the now strongly-reachable sideObj1
+    assertTrue(weaklyReachable.contains(sideObj2));
+
+    // Verify no unexpected reachability
+    assertEquals(6, stronglyReachable.size());
+    assertEquals(0, softlyReachable.size());
+    assertEquals(1, weaklyReachable.size());
+  }
+
+  @Test
+  void testMixedReferenceTypeComplexPaths() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID objA = new GID("objA");
+    GID objB = new GID("objB");
+    GID objC = new GID("objC");
+    GID objD = new GID("objD");
+    GID objE = new GID("objE");
+    GID objF = new GID("objF");
+    GID objG = new GID("objG");
+    GID objH = new GID("objH");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(objA, GObject.Type.ORDINARY, 10);
+    graph.addObject(objB, GObject.Type.ORDINARY, 10);
+    graph.addObject(objC, GObject.Type.ORDINARY, 10);
+    graph.addObject(objD, GObject.Type.ORDINARY, 10);
+    graph.addObject(objE, GObject.Type.ORDINARY, 10);
+    graph.addObject(objF, GObject.Type.ORDINARY, 10);
+    graph.addObject(objG, GObject.Type.ORDINARY, 10);
+    graph.addObject(objH, GObject.Type.ORDINARY, 10);
+
+    // Path to A is STRONG
+    graph.addReference(new GID("ref_root_A"), root, objA, GReference.Type.STRONG);
+
+    // Paths to B are SOFT (from root) and WEAK (from A). Should be SOFT.
+    graph.addReference(new GID("ref_root_B"), root, objB, GReference.Type.SOFT);
+    graph.addReference(new GID("ref_A_B"), objA, objB, GReference.Type.WEAK);
+
+    // Paths to C are WEAK (from root) and SOFT (from B). Should be SOFT.
+    graph.addReference(new GID("ref_root_C"), root, objC, GReference.Type.WEAK);
+    graph.addReference(new GID("ref_B_C"), objB, objC, GReference.Type.SOFT);
+
+    // Path to D is SOFT (from A). Should be SOFT.
+    graph.addReference(new GID("ref_A_D"), objA, objD, GReference.Type.SOFT);
+    // Path D -> E is STRONG, but D is soft reachable, so E should be SOFT.
+    graph.addReference(new GID("ref_D_E"), objD, objE, GReference.Type.STRONG);
+
+    // Path C -> F is STRONG, but C is soft reachable, so F should be SOFT.
+    graph.addReference(new GID("ref_C_F"), objC, objF, GReference.Type.STRONG);
+
+    // Path C -> G is WEAK, C is soft reachable, so G should be WEAK.
+    graph.addReference(new GID("ref_C_G"), objC, objG, GReference.Type.WEAK);
+    // Path G -> H is STRONG, but G is weak reachable, so H should be WEAK.
+    graph.addReference(new GID("ref_G_H"), objG, objH, GReference.Type.STRONG);
+
+    Set<GID> stronglyReachable = graph.getStronglyReachableObjects();
+    Set<GID> softlyReachable = graph.getSoftlyReachableObjects();
+    Set<GID> weaklyReachable = graph.getWeaklyReachableObjects();
+
+    // Verify strongly reachable objects
+    assertEquals(2, stronglyReachable.size());
+    assertTrue(stronglyReachable.contains(root));
+    assertTrue(stronglyReachable.contains(objA));
+
+    // Verify softly reachable objects
+    assertEquals(5, softlyReachable.size());
+    assertTrue(softlyReachable.contains(objB));
+    assertTrue(softlyReachable.contains(objC));
+    assertTrue(softlyReachable.contains(objD));
+    assertTrue(softlyReachable.contains(objE));
+    assertTrue(softlyReachable.contains(objF));
+
+    // Verify weakly reachable objects
+    assertEquals(2, weaklyReachable.size());
+    assertTrue(weaklyReachable.contains(objG));
+    assertTrue(weaklyReachable.contains(objH));
+  }
+
+  @Test
+  void testVeryComplexGraphWithMixedReferencesAndBackEdges() {
+    GGraph graph = new GGraph();
+    final int NODE_COUNT = 16;
+    List<GID> nodes = new ArrayList<>();
+    for (int i = 0; i < NODE_COUNT; i++) {
+      nodes.add(new GID("o" + i));
+    }
+
+    // Add root and objects
+    graph.addObject(nodes.getFirst(), GObject.Type.GCROOT, 100);
+    for (int i = 1; i < NODE_COUNT; i++) {
+      graph.addObject(nodes.get(i), GObject.Type.ORDINARY, 10);
+    }
+    GID root = nodes.get(0);
+
+    // Main chain (strong)
+    graph.addReference(new GID("ref_0_1"), root, nodes.get(1), GReference.Type.STRONG);
+    graph.addReference(new GID("ref_1_2"), nodes.get(1), nodes.get(2), GReference.Type.STRONG);
+    graph.addReference(new GID("ref_2_3"), nodes.get(2), nodes.get(3), GReference.Type.STRONG);
+    graph.addReference(new GID("ref_3_4"), nodes.get(3), nodes.get(4), GReference.Type.STRONG);
+    graph.addReference(new GID("ref_4_5"), nodes.get(4), nodes.get(5), GReference.Type.STRONG);
+
+    // Branch 1 (soft)
+    graph.addReference(new GID("ref_2_6"), nodes.get(2), nodes.get(6), GReference.Type.SOFT);
+    graph.addReference(new GID("ref_6_7"), nodes.get(6), nodes.get(7), GReference.Type.STRONG);
+
+    // Branch 2 (weak)
+    graph.addReference(new GID("ref_3_8"), nodes.get(3), nodes.get(8), GReference.Type.WEAK);
+    graph.addReference(new GID("ref_8_9"), nodes.get(8), nodes.get(9), GReference.Type.STRONG);
+
+    // Branch 3 (mixed)
+    graph.addReference(new GID("ref_5_10"), nodes.get(5), nodes.get(10), GReference.Type.SOFT);
+    graph.addReference(new GID("ref_10_11"), nodes.get(10), nodes.get(11), GReference.Type.WEAK);
+
+    // Branch 4 (becomes strong)
+    graph.addReference(new GID("ref_0_12"), root, nodes.get(12), GReference.Type.SOFT);
+    graph.addReference(new GID("ref_4_12"), nodes.get(4), nodes.get(12), GReference.Type.STRONG);
+
+    // Branch 5 (becomes soft)
+    graph.addReference(new GID("ref_0_13"), root, nodes.get(13), GReference.Type.WEAK);
+    graph.addReference(new GID("ref_6_13"), nodes.get(6), nodes.get(13), GReference.Type.STRONG);
+
+    // More nodes
+    graph.addReference(new GID("ref_11_14"), nodes.get(11), nodes.get(14), GReference.Type.STRONG);
+    graph.addReference(new GID("ref_13_15"), nodes.get(13), nodes.get(15), GReference.Type.WEAK);
+
+    // Back-edges (5)
+    graph.addReference(new GID("back_5_1"), nodes.get(5), nodes.get(1), GReference.Type.SOFT);
+    graph.addReference(new GID("back_7_2"), nodes.get(7), nodes.get(2), GReference.Type.WEAK);
+    graph.addReference(new GID("back_9_6"), nodes.get(9), nodes.get(6), GReference.Type.STRONG);
+    graph.addReference(new GID("back_12_0"), nodes.get(12), root, GReference.Type.WEAK);
+    graph.addReference(new GID("back_15_1"), nodes.get(15), nodes.get(1), GReference.Type.STRONG);
+
+    Set<GID> stronglyReachable = graph.getStronglyReachableObjects();
+    Set<GID> softlyReachable = graph.getSoftlyReachableObjects();
+    Set<GID> weaklyReachable = graph.getWeaklyReachableObjects();
+
+    // Expected: 7 strong, 4 soft, 5 weak
+    assertEquals(7, stronglyReachable.size(), "Should have 7 strongly reachable objects");
+    assertEquals(4, softlyReachable.size(), "Should have 4 softly reachable objects");
+    assertEquals(5, weaklyReachable.size(), "Should have 5 weakly reachable objects");
+
+    // Verify strong
+    for (int i = 0; i <= 5; i++) {
+      assertTrue(stronglyReachable.contains(nodes.get(i)), "Node " + i + " should be strong");
+    }
+    assertTrue(stronglyReachable.contains(nodes.get(12)), "Node 12 should be strong");
+
+    // Verify soft
+    assertTrue(softlyReachable.contains(nodes.get(6)), "Node 6 should be soft");
+    assertTrue(softlyReachable.contains(nodes.get(7)), "Node 7 should be soft");
+    assertTrue(softlyReachable.contains(nodes.get(10)), "Node 10 should be soft");
+    assertTrue(softlyReachable.contains(nodes.get(13)), "Node 13 should be soft");
+
+    // Verify weak
+    assertTrue(weaklyReachable.contains(nodes.get(8)), "Node 8 should be weak");
+    assertTrue(weaklyReachable.contains(nodes.get(9)), "Node 9 should be weak");
+    assertTrue(weaklyReachable.contains(nodes.get(11)), "Node 11 should be weak");
+    assertTrue(weaklyReachable.contains(nodes.get(14)), "Node 14 should be weak");
+    assertTrue(weaklyReachable.contains(nodes.get(15)), "Node 15 should be weak");
   }
 }

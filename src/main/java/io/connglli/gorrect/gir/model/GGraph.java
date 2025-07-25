@@ -386,43 +386,50 @@ public class GGraph {
   /// Mark the reachability of each object in the graph. The reachability is determined by the
   /// references between objects. The result is a map from object ID to its reachability type.
   public Map<GID, GReference.Type> markReachability() {
+    // Mark reachability involves three passes over the object graph:
+    // 1. Visit all objects via strong references and mark them as strongly reachable.
+    // 2. Visit all non-visited objects via strong and soft references and mark them as
+    //    softly reachable.
+    // 3. Visit all non-visited objects via strong, soft, and weak references and mark them as
+    // weakly reachable.
+    // All objects that are not visited in the above three steps are unreachable.
     Map<GID, GReference.Type> result = new HashMap<>();
     accept(
         new GObjectBreadthFirstVisitor() {
           @Override
-          public void visit(@NonNull GGraph graph, @NonNull GObject referent) {
-            GID referentId = referent.getId();
-            if (referent.isRoot()) {
-              result.put(referentId, GReference.Type.STRONG);
-              return;
-            }
-            GReference.Type referStrongestType = null;
-            for (GObject referer : graph.getReferers(referentId)) {
-              GID refererId = referer.getId();
-              GReference.Type referType = result.getOrDefault(refererId, null);
-              if (referType == null) {
-                continue; // Back-edges doesn't matter as the referer relies on us
-              }
-              GReference.Type referenceType = graph.getReference(refererId, referentId).getType();
-              GReference.Type currentReachabilityType = null;
-              if (referType == GReference.Type.STRONG) {
-                currentReachabilityType = referenceType;
-              } else if (referType == GReference.Type.SOFT) {
-                currentReachabilityType =
-                    referenceType == GReference.Type.WEAK
-                        ? GReference.Type.WEAK
-                        : GReference.Type.SOFT;
-              } else if (referType == GReference.Type.WEAK) {
-                currentReachabilityType = GReference.Type.WEAK;
-              } else {
-                Assert.panic("Unknown reference type: %s", referType);
-              }
-              if (referStrongestType == null
-                  || currentReachabilityType.strongerThan(referStrongestType)) {
-                referStrongestType = currentReachabilityType;
-              }
-            }
-            result.put(referentId, referStrongestType);
+          public GReference.Type[] allowReferenceTypes() {
+            return new GReference.Type[] {GReference.Type.STRONG};
+          }
+
+          @Override
+          public void visit(@NonNull GGraph graph, @NonNull GObject object) {
+            result.putIfAbsent(object.getId(), GReference.Type.STRONG);
+          }
+        });
+    accept(
+        new GObjectBreadthFirstVisitor() {
+          @Override
+          public GReference.Type[] allowReferenceTypes() {
+            return new GReference.Type[] {GReference.Type.STRONG, GReference.Type.SOFT};
+          }
+
+          @Override
+          public void visit(@NonNull GGraph graph, @NonNull GObject obj) {
+            result.putIfAbsent(obj.getId(), GReference.Type.SOFT);
+          }
+        });
+    accept(
+        new GObjectBreadthFirstVisitor() {
+          @Override
+          public GReference.Type[] allowReferenceTypes() {
+            return new GReference.Type[] {
+              GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK
+            };
+          }
+
+          @Override
+          public void visit(@NonNull GGraph graph, @NonNull GObject obj) {
+            result.putIfAbsent(obj.getId(), GReference.Type.WEAK);
           }
         });
     return result;
