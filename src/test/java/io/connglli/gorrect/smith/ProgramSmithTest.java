@@ -29,7 +29,7 @@ import static org.junit.jupiter.api.Assertions.*;
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
-import io.connglli.gorrect.java.oracle.HotSpotVM;
+import io.connglli.gorrect.java.oracle.HostJVM;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.utility.MemorySize;
@@ -52,7 +52,7 @@ class ProgramSmithTest {
   @BeforeEach
   void setUp() {
     Rand.getInstance().setSeed(42);
-    vm = new HotSpotVM(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
+    vm = HostJVM.getInstance(MemorySize.of(1, MemorySize.Unit.GB)); // 1GB heap
     objectIdSmith = new IdSmith("obj");
     referenceIdSmith = new IdSmith("ref");
 
@@ -278,7 +278,7 @@ class ProgramSmithTest {
   @Test
   void testCraftWithLimitedMemory() {
     // Create VM with very limited memory
-    LangVM limitedVM = new HotSpotVM(1024); // 1KB heap
+    LangVM limitedVM = HostJVM.getInstance(1024); // 1KB heap
     IdSmith limitedObjectIdSmith = new IdSmith("limited_obj");
     IdSmith limitedReferenceIdSmith = new IdSmith("limited_ref");
 

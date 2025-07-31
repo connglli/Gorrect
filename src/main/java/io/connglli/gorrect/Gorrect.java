@@ -28,10 +28,7 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaInterpreter;
-import io.connglli.gorrect.java.oracle.HotSpotVM;
-import io.connglli.gorrect.java.oracle.JavaOracle;
-import io.connglli.gorrect.java.oracle.JavaVM;
-import io.connglli.gorrect.java.oracle.NoopJVM;
+import io.connglli.gorrect.java.oracle.*;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.NoopVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
@@ -109,6 +106,24 @@ public class Gorrect {
 }
 
 interface GorrectSubCommand extends Callable<Integer> {
+
+  enum SupportedGCs {
+    G1(HotSpotVM.BRAND_NAME, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
+    ZGC(HotSpotVM.BRAND_NAME, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
+    SHENANDOAH(
+        HotSpotVM.BRAND_NAME, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
+    DEFAULT("", ""); // Use the default garbage collector
+
+    // Which VM this GC is supported on
+    String vmBrand;
+    // The command line option to enable the GC
+    String enableOptions;
+
+    SupportedGCs(String vmBrand, String enable) {
+      this.vmBrand = vmBrand;
+      this.enableOptions = enable;
+    }
+  }
 
   default void checkOptions() throws CommandLine.ParameterException {}
 
@@ -283,51 +298,13 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
     usageHelpAutoWidth = true,
     mixinStandardHelpOptions = true,
     description =
-        "Generates a random Gorrect IR program (and the corresponding Java program if requested).",
+        "Generates (and validates if requested) a random Gorrect IR program (and the corresponding Java program if requested).",
     descriptionHeading = "%n",
     optionListHeading = "%nOptions:%n",
     parameterListHeading = "%nArguments:%n")
 class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand {
 
   @CommandLine.ParentCommand protected Gorrect parent;
-
-  enum SupportedLVMs {
-    HOTSPOT,
-    NOOPJVM,
-  }
-
-  enum SupportedGCs {
-    G1(SupportedLVMs.HOTSPOT, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
-    ZGC(SupportedLVMs.HOTSPOT, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
-    SHENANDOAH(
-        SupportedLVMs.HOTSPOT, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
-    DEFAULT(SupportedLVMs.NOOPJVM, ""); // Use the default garbage collector
-
-    // Which VM this GC is supported on
-    SupportedLVMs vm;
-    // The command line option to enable the GC
-    String enableOptions;
-
-    SupportedGCs(SupportedLVMs vm, String enable) {
-      this.vm = vm;
-      this.enableOptions = enable;
-    }
-  }
-
-  // TODO: Replace SupportedLVMs with a path and determine its type at runtime
-  @CommandLine.Option(
-      names = {"--lang-vm"},
-      paramLabel = "name",
-      description = "The language VM under validation (choices: ${COMPLETION-CANDIDATES})",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected SupportedLVMs optUseVM = SupportedLVMs.NOOPJVM;
-
-  @CommandLine.Option(
-      names = {"--lang-vm-version"},
-      paramLabel = "number",
-      description = "The version of the language VM under validation",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected int optUseVMVersion = -1;
 
   @CommandLine.Option(
       names = {"--garbage-collector"},
@@ -353,20 +330,21 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.Option(
       names = {"--validate"},
       negatable = true,
-      description = "Validate the generated program against the oracle interpreter",
+      description =
+          "Validate the generated Java program against the host JVM and the oracle interpreter",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected boolean optValidate = false;
 
   @Override
   public void checkOptions() throws CommandLine.ParameterException {
-    if (optUseVM != SupportedLVMs.NOOPJVM && optUseGC != SupportedGCs.DEFAULT) {
-      if (optUseGC.vm != optUseVM) {
+    if (optUseGC != SupportedGCs.DEFAULT) {
+      if (!optUseGC.vmBrand.equals(HostJVM.getBrandName())) {
         throw new CommandLine.ParameterException(
             parent.getCommandLine(),
             "The garbage collector must be compatible with the language VM: "
                 + optUseGC
                 + " is not compatible with "
-                + optUseVM);
+                + HostJVM.getBrandName());
       }
     }
 
@@ -391,12 +369,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @Override
   public Integer runCommand() throws Exception {
     // The JVM exists here to ensure our generated programs are not ouf of memory.
-    JavaVM jvm =
-        switch (optUseVM) {
-          // TODO: Add path to the VM executable
-          case HOTSPOT -> new HotSpotVM(MemorySize.parse(optHeapCapacity), optUseVMVersion);
-          case NOOPJVM -> new NoopJVM(MemorySize.parse(optHeapCapacity));
-        };
+    JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
 

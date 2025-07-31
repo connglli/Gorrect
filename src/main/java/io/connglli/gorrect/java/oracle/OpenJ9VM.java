@@ -34,6 +34,8 @@ import java.util.List;
 import lombok.NonNull;
 
 public class OpenJ9VM extends JavaVM {
+  public static final String BRAND_NAME = "OpenJ9/Eclipse";
+
   static {
     Assert.panic("Not yet implemented for OpenJ9 VM");
   }

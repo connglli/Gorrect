@@ -31,7 +31,8 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.java.oracle.HotSpotVM;
+import io.connglli.gorrect.java.oracle.HostJVM;
+import io.connglli.gorrect.java.oracle.JavaVM;
 import java.util.List;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
@@ -42,7 +43,7 @@ class OracleInterpreterTest {
   @Test
   void testSimpleGraph() {
     // Use JavaVM and initialize ObjectGraph
-    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    JavaVM hotSpotVM = HostJVM.getInstance(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -68,7 +69,7 @@ class OracleInterpreterTest {
   @Test
   void testComplexGraph() {
     // Use JavaVM and initialize ObjectGraph
-    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    JavaVM hotSpotVM = HostJVM.getInstance(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -109,7 +110,7 @@ class OracleInterpreterTest {
   @Test
   void testCyclicGraph() {
     // Use JavaVM and initialize ObjectGraph
-    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    JavaVM hotSpotVM = HostJVM.getInstance(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -149,7 +150,7 @@ class OracleInterpreterTest {
   @Test
   void testSoftReferences() {
     // Use JavaVM and initialize ObjectGraph
-    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    JavaVM hotSpotVM = HostJVM.getInstance(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram
@@ -183,7 +184,7 @@ class OracleInterpreterTest {
   @Test
   void testAllInstructions() {
     // Use JavaVM and initialize ObjectGraph
-    HotSpotVM hotSpotVM = new HotSpotVM(4L * 1024 * 1024 * 1024); // 4GB heap
+    JavaVM hotSpotVM = HostJVM.getInstance(4L * 1024 * 1024 * 1024); // 4GB heap
     GGraph initState = new GGraph();
 
     // Initialize GProgram

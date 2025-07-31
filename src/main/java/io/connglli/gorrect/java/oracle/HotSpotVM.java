@@ -47,9 +47,12 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import lombok.NonNull;
+import org.openjdk.jol.datamodel.DataModel;
 import org.zeroturnaround.exec.ProcessExecutor;
 
 public class HotSpotVM extends JavaVM {
+  public static final String BRAND_NAME = "HotSpot/OpenJDK";
+
   /*
    * HotSpot Object Layout
    * ---------------------
@@ -90,33 +93,23 @@ public class HotSpotVM extends JavaVM {
   private final Map<GID, Long> allocatedObjects = new LinkedHashMap<>();
   private final Map<GID, Long> freedObjects = new LinkedHashMap<>();
 
-  public HotSpotVM(long heapCapacity) {
-    this(new File(System.getProperty("java.home")), heapCapacity);
-  }
-
-  public HotSpotVM(long heapCapacity, int version) {
-    this(new File(System.getProperty("java.home")), heapCapacity, version);
-  }
-
-  public HotSpotVM(File home, long heapCapacity) {
-    this(home, heapCapacity, 11);
-  }
-
-  public HotSpotVM(File home, long heapCapacity, int version) {
-    // TODO: Determine the HotSpot version, mode, etc. from the home directory.
-    this(home, heapCapacity, version, true, true, true);
-  }
-
   public HotSpotVM(
       File home,
       long heapCapacity,
       int version,
       boolean mode64,
       boolean enableCompressedOops,
-      boolean enableCompressedClassPointers) {
+      boolean enableCompressedClassPointers,
+      int alignment) {
     super(home, heapCapacity);
     this.model =
-        new HotSpotObjects(version, mode64, enableCompressedOops, enableCompressedClassPointers);
+        new HotSpotObjects(
+            version, mode64, enableCompressedOops, enableCompressedClassPointers, alignment);
+  }
+
+  /*package*/ HotSpotVM(File home, long heapCapacity, int version, DataModel model) {
+    super(home, heapCapacity);
+    this.model = new HotSpotObjects(version, model);
   }
 
   @Override

@@ -51,9 +51,17 @@ public class HotSpotObjects {
       int version,
       boolean mode64,
       boolean enableCompressedOops,
-      boolean enableCompressedClassPointers) {
-    this.model =
-        mode64 ? new Model64(enableCompressedOops, enableCompressedClassPointers) : new Model32();
+      boolean enableCompressedClassPointers,
+      int alignment) {
+    this(
+        version,
+        mode64
+            ? new Model64(enableCompressedOops, enableCompressedClassPointers, alignment)
+            : new Model32(alignment));
+  }
+
+  /*package*/ HotSpotObjects(int version, DataModel model) {
+    this.model = model;
     this.layout = new HotSpotLayouter(this.model, version);
   }
 
