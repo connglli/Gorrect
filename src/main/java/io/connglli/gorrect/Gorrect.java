@@ -30,7 +30,7 @@ import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.*;
 import io.connglli.gorrect.oracle.LangVM;
-import io.connglli.gorrect.oracle.NoopVM;
+import io.connglli.gorrect.oracle.NoOpVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.smith.GraphSmith;
 import io.connglli.gorrect.smith.IdSmith;
@@ -252,7 +252,7 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
   public Integer runCommand() throws Exception {
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
-    NoopVM vm = new NoopVM(); // Do nothing
+    NoOpVM vm = new NoOpVM(); // Do nothing
     GraphSmith smith = buildGraphSmith(vm, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft();
     System.out.println(graph.formatToText());
@@ -392,7 +392,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     System.out.println(progamGenStats.formatToText());
 
     // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
-    JavaVM unlimitedJvm = new NoopJVM(Long.MAX_VALUE);
+    JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
     OracleInterpreter oracle = new OracleInterpreter(unlimitedJvm, program);
     oracle.interpret();
     GGraph oracleState = oracle.getState();

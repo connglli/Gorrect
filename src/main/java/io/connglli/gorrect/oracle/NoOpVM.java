@@ -31,12 +31,12 @@ import java.util.List;
 import lombok.NonNull;
 
 /**
- * A NoopVM is a virtual machine that does not perform any actual memory management assuming
+ * A NoOpVM is a virtual machine that does not perform any actual memory management assuming
  * unlimited memory. It is used for testing purposes or when no memory management is required.
  */
-public class NoopVM extends LangVM {
+public class NoOpVM extends LangVM {
 
-  public NoopVM() {
+  public NoOpVM() {
     super(Long.MAX_VALUE);
   }
 

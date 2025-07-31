@@ -33,12 +33,13 @@ import java.util.List;
 import lombok.NonNull;
 
 /**
- * NoopJVM is a virtual machine that does not perform any actual memory management. It is used for
- * testing purposes or when no memory management is required.
+ * EpsilonVM (or no-op jvm) is a virtual machine that does not perform any actual memory management.
+ * It is used for testing purposes or when no memory management is required. The name "Epsilon" is
+ * derived from the epsilon GC in HotSpot.
  */
-public class NoopJVM extends JavaVM {
+public class EpsilonVM extends JavaVM {
 
-  public NoopJVM(long heapCapacity) {
+  public EpsilonVM(long heapCapacity) {
     // We use  the native Java home directory as the home directory.
     super(new File(System.getProperty("java.home")), heapCapacity);
   }
