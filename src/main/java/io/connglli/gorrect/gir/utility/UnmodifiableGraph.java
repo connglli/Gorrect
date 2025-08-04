@@ -128,6 +128,10 @@ public class UnmodifiableGraph {
     return graph.getReferers(referentId);
   }
 
+  public String formatToText() {
+    return graph.formatToText();
+  }
+
   // -=======================================================
   // - Reachability methods (maintaining one copy)
   // -=======================================================

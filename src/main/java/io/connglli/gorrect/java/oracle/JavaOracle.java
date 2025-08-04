@@ -202,12 +202,13 @@ public class JavaOracle extends Oracle {
 
     if (!objViol.isEmpty() || !refViol.isEmpty()) {
       return failure(
+          obtained,
           "Validation failed, found %d object violations and %d reference violations."
               .formatted(objViol.size(), refViol.size()),
           refViol,
           objViol);
     }
 
-    return success();
+    return success(obtained);
   }
 }

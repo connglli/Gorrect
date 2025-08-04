@@ -203,7 +203,7 @@ public class JavaInterpreter {
         try {
           Jcmd.dumpHeap(pid.get(), file, /* dead= */ false);
           succeeded = true;
-          System.out.println("SUCCEEDED! Heap dumped to " + file);
+          log.info("SUCCEEDED! Heap dumped to " + file);
         } catch (Exception e) {
           log.warning("FAILED: %s", e.getMessage());
           succeeded = false;

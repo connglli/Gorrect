@@ -46,6 +46,7 @@ public abstract class Oracle {
   @Value
   public class ValidationResult {
     boolean isValid;
+    UnmodifiableGraph obtained;
     String failureMessage;
     Map<GID, String> objectViolations; // Maps object IDs to violation messages
     Map<Pair<GID, GID>, String> referenceViolations; // Maps reference IDs to violation messages
@@ -70,15 +71,17 @@ public abstract class Oracle {
   protected abstract ValidationResult doValidate(@NonNull UnmodifiableGraph obtained);
 
   /** Returns a successful validation result. */
-  protected ValidationResult success() {
-    return new ValidationResult(true, null, null, null);
+  protected ValidationResult success(@NonNull UnmodifiableGraph obtained) {
+    return new ValidationResult(true, obtained, null, null, null);
   }
 
   /** Returns a failed validation result with the given failure message and violations. */
   protected ValidationResult failure(
+      @NonNull UnmodifiableGraph obtained,
       String failureMessage,
       Map<Pair<GID, GID>, String> referenceViolations,
       Map<GID, String> objectViolations) {
-    return new ValidationResult(false, failureMessage, objectViolations, referenceViolations);
+    return new ValidationResult(
+        false, obtained, failureMessage, objectViolations, referenceViolations);
   }
 }

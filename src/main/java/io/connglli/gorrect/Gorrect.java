@@ -55,10 +55,10 @@ import picocli.CommandLine;
     subcommands = {
       CommandLine.HelpCommand.class,
       GraphSmithCommand.class,
-      ProgramSmithCommand.class
+      ProgramSmithCommand.class,
+      FuzzCommand.class
     },
-    description =
-        "Validate the correctness of a garbage collector based on object graph semantics.",
+    description = "Validate the correctness of garbage collectors based on object graph semantics.",
     version = "Gorrect 0.1.0",
     descriptionHeading = "%n",
     optionListHeading = "%nOptions:%n",
@@ -217,24 +217,27 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optWeakRefWeight = 30;
 
+  protected GraphSmith.Config.ConfigBuilder getGraphSmithConfigBuilder(
+      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+    return GraphSmith.Config.builder()
+        .vm(vm)
+        .objectIdSmith(objectIdSmith)
+        .referenceIdSmith(referenceIdSmith)
+        .minRoots(optMinRoots)
+        .maxRoots(optMaxRoots)
+        .minNonRoots(optMinNonRoots)
+        .maxNonRoots(optMaxNonRoots)
+        .minRefs(optMinReferences)
+        .maxRefs(optMaxReferences)
+        .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
+        .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
+        .strongRefWeight(optStrongRefWeight)
+        .softRefWeight(optSoftRefWeight)
+        .weakRefWeight(optWeakRefWeight);
+  }
+
   protected GraphSmith buildGraphSmith(LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new GraphSmith(
-        GraphSmith.Config.builder()
-            .vm(vm)
-            .objectIdSmith(objectIdSmith)
-            .referenceIdSmith(referenceIdSmith)
-            .minRoots(optMinRoots)
-            .maxRoots(optMaxRoots)
-            .minNonRoots(optMinNonRoots)
-            .maxNonRoots(optMaxNonRoots)
-            .minRefs(optMinReferences)
-            .maxRefs(optMaxReferences)
-            .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
-            .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
-            .strongRefWeight(optStrongRefWeight)
-            .softRefWeight(optSoftRefWeight)
-            .weakRefWeight(optWeakRefWeight)
-            .build());
+    return new GraphSmith(getGraphSmithConfigBuilder(vm, objectIdSmith, referenceIdSmith).build());
   }
 }
 
@@ -276,20 +279,22 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
 
+  protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfig(
+      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+    return ProgramSmith.Config.builder()
+        .vm(vm)
+        .objectIdSmith(objectIdSmith)
+        .referenceIdSmith(referenceIdSmith)
+        .minInstructions(optMinInstructions)
+        .maxInstructions(optMaxInstructions)
+        .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
+        .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize));
+  }
+
   protected ProgramSmith buildProgramSmith(
       LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
-    ProgramSmith.Config programConfig =
-        ProgramSmith.Config.builder()
-            .vm(vm)
-            .objectIdSmith(objectIdSmith)
-            .referenceIdSmith(referenceIdSmith)
-            .initState(initState)
-            .minInstructions(optMinInstructions)
-            .maxInstructions(optMaxInstructions)
-            .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
-            .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
-            .build();
-    return new ProgramSmith(programConfig);
+    return new ProgramSmith(
+        getProgramSmithConfig(vm, objectIdSmith, referenceIdSmith).initState(initState).build());
   }
 }
 
@@ -307,7 +312,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.ParentCommand protected Gorrect parent;
 
   @CommandLine.Option(
-      names = {"--garbage-collector"},
+      names = {"--collector"},
       paramLabel = "name",
       description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
@@ -316,7 +321,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.Option(
       names = {"--heap-capacity"},
       paramLabel = "size",
-      description = "The heap capacity of the VM under validation",
+      description = "The heap capacity of the Java virtual machine under validation",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected String optHeapCapacity = "1GB";
 
@@ -346,6 +351,15 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
                 + " is not compatible with "
                 + HostJVM.getBrandName());
       }
+    }
+
+    try {
+      MemorySize.parse(optHeapCapacity);
+    } catch (Exception e) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The heap capacity must be a valid memory size (e.g., 1GB, 512MB): " + optHeapCapacity,
+          e);
     }
 
     if (optOutputDir != null) {
@@ -469,6 +483,107 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       }
     }
 
+    return 0;
+  }
+}
+
+@CommandLine.Command(
+    name = "fuzz",
+    usageHelpAutoWidth = true,
+    mixinStandardHelpOptions = true,
+    description = "Fuzz and validate a target garbage collector of the host Java virtual machine.",
+    descriptionHeading = "%n",
+    optionListHeading = "%nOptions:%n",
+    parameterListHeading = "%nArguments:%n")
+class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand {
+  @CommandLine.ParentCommand protected Gorrect parent;
+
+  @CommandLine.Option(
+      names = {"-j", "--max-workers"},
+      paramLabel = "number",
+      description = "The maximum number of workers to use for fuzzing",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxWorkers =
+      Math.max((int) ((double) Runtime.getRuntime().availableProcessors() * .8), 1);
+
+  @CommandLine.Option(
+      names = {"-H", "--heap-capacity"},
+      paramLabel = "size",
+      required = true,
+      description = "The heap capacity of the Java virtual machine under validation e.g., 1GB")
+  protected String optHeapCapacity;
+
+  @CommandLine.Option(
+      names = {"-o", "--output-dir"},
+      paramLabel = "dir",
+      required = true,
+      description = "The output directory for the generated files (if any)")
+  protected File optOutputDir;
+
+  @CommandLine.Parameters(
+      paramLabel = "collector",
+      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
+  protected SupportedGCs argUseGc;
+
+  @Override
+  public void checkOptions() throws CommandLine.ParameterException {
+    if (optMaxWorkers <= 0) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "The maximum number of workers must be greater than 0.");
+    }
+
+    try {
+      MemorySize.parse(optHeapCapacity);
+    } catch (Exception e) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The heap capacity must be a valid memory size (e.g., 1GB, 512MB): " + optHeapCapacity,
+          e);
+    }
+
+    if (argUseGc != SupportedGCs.DEFAULT) {
+      if (!argUseGc.vmBrand.equals(HostJVM.getBrandName())) {
+        throw new CommandLine.ParameterException(
+            parent.getCommandLine(),
+            "The garbage collector must be compatible with the language VM: "
+                + argUseGc
+                + " is not compatible with "
+                + HostJVM.getBrandName());
+      }
+    }
+
+    if (optOutputDir.exists()) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
+    }
+    if (!optOutputDir.mkdir()) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
+    }
+  }
+
+  @Override
+  public Integer runCommand() throws Exception {
+    JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
+    IdSmith objectIdSmith = new IdSmith("o");
+    IdSmith referenceIdSmith = new IdSmith("l");
+    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder =
+        getGraphSmithConfigBuilder(jvm, objectIdSmith, referenceIdSmith);
+    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder =
+        getProgramSmithConfig(jvm, objectIdSmith, referenceIdSmith);
+    new JavaFuzzer(
+            JavaFuzzer.Config.builder()
+                .maxWorkers(optMaxWorkers)
+                .outputDir(optOutputDir.toString())
+                .maxIterations(0) // Run indefinitely until manually stopped
+                .objectIdSmith(objectIdSmith)
+                .referenceIdSmith(referenceIdSmith)
+                .graphSmithConfigBuilder(graphSmithConfigBuilder)
+                .programSmithConfigBuilder(programSmithConfigBuilder)
+                .javaVM(jvm)
+                .useGcOptions(argUseGc.enableOptions)
+                .build())
+        .start();
     return 0;
   }
 }

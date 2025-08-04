@@ -24,6 +24,7 @@
 
 package io.connglli.gorrect.utility;
 
+import java.io.OutputStream;
 import java.io.PrintStream;
 import java.util.logging.*;
 import lombok.AccessLevel;
@@ -35,7 +36,8 @@ public class Logger {
 
   private static Level settingLevel = Level.INFO;
   private static boolean settingHeadless = true;
-  private static PrintStream settingOutput = System.out;
+  private static final ThreadLocal<PrintStream> settingOutput =
+      ThreadLocal.withInitial(() -> System.out);
 
   @Getter private final String name;
 
@@ -59,8 +61,8 @@ public class Logger {
     settingHeadless = false;
   }
 
-  public static void setOutput(java.io.OutputStream out) {
-    settingOutput = new PrintStream(out);
+  public static void setOutput(OutputStream out) {
+    settingOutput.set(new PrintStream(out));
   }
 
   public void log(Level level, String message) {
@@ -68,15 +70,17 @@ public class Logger {
       return;
     }
     if (settingHeadless) {
-      settingOutput.println(message);
+      settingOutput.get().println(message);
     } else {
-      settingOutput.printf(
-          "[%s] [%s] [%s:%s]: %s%n",
-          java.time.LocalDateTime.now(),
-          Thread.currentThread().getName(),
-          name,
-          level.getName(),
-          message);
+      settingOutput
+          .get()
+          .printf(
+              "[%s] [%s] [%s:%s]: %s%n",
+              java.time.LocalDateTime.now(),
+              Thread.currentThread().getName(),
+              name,
+              level.getName(),
+              message);
     }
   }
 
