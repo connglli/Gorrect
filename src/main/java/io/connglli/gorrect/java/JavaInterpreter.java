@@ -159,6 +159,8 @@ public class JavaInterpreter {
         log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
         log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
       }
+      heap.appendComment("Final State:");
+      heap.appendComment(heap.getState().formatToText());
       // Insert a dump heap instruction at the end of the main method
       heap.appendComment("Wait until the heap is dumped");
       heap.appendStatement("System.in.read()"); // See HeapDumper
