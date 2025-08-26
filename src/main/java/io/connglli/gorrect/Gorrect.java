@@ -507,6 +507,13 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       Math.max((int) ((double) Runtime.getRuntime().availableProcessors() * .8), 1);
 
   @CommandLine.Option(
+      names = {"-L", "--max-iterations"},
+      paramLabel = "number",
+      description = "The maximum number of iterations to run the fuzzer (0 for infinite)",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected int optMaxIterations = 0;
+
+  @CommandLine.Option(
       names = {"-H", "--heap-capacity"},
       paramLabel = "size",
       required = true,
@@ -530,6 +537,11 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     if (optMaxWorkers <= 0) {
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "The maximum number of workers must be greater than 0.");
+    }
+
+    if (optMaxIterations < 0) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "The maximum number of iterations must be non-negative.");
     }
 
     try {
@@ -575,7 +587,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
             JavaFuzzer.Config.builder()
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
-                .maxIterations(0) // Run indefinitely until manually stopped
+                .maxIterations(optMaxIterations)
                 .objectIdSmith(objectIdSmith)
                 .referenceIdSmith(referenceIdSmith)
                 .graphSmithConfigBuilder(graphSmithConfigBuilder)
