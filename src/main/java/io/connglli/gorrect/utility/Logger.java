@@ -65,12 +65,12 @@ public class Logger {
     settingOutput.set(new PrintStream(out));
   }
 
-  public void log(Level level, String message) {
+  public void log(Level level, String message, Object... args) {
     if (level.intValue() < settingLevel.intValue()) {
       return;
     }
     if (settingHeadless) {
-      settingOutput.get().println(message);
+      settingOutput.get().println(safeFormat(message, args));
     } else {
       settingOutput
           .get()
@@ -80,7 +80,7 @@ public class Logger {
               Thread.currentThread().getName(),
               name,
               level.getName(),
-              message);
+              safeFormat(message, args));
     }
   }
 
@@ -90,31 +90,39 @@ public class Logger {
 
   public void error(String message, Object... args) {
     log(Level.SEVERE, "--------------------------");
-    log(Level.SEVERE, "[**ERROR**] " + message.formatted(args));
+    log(Level.SEVERE, "[**ERROR**] " + safeFormat(message, args));
     log(Level.SEVERE, "--------------------------");
-    Assert.panic(message.formatted(args));
+    Assert.panic(safeFormat(message, args));
   }
 
   public void severe(String message, Object... args) {
-    log(Level.SEVERE, message.formatted(args));
-    Assert.panic(message.formatted(args));
+    log(Level.SEVERE, safeFormat(message, args));
+    Assert.panic(safeFormat(message, args));
   }
 
   public void warning(String message, Object... args) {
     log(Level.WARNING, "--------------------------");
-    log(Level.WARNING, "[!!WARNING!!] " + message.formatted(args));
+    log(Level.WARNING, "[!!WARNING!!] " + safeFormat(message, args));
     log(Level.WARNING, "--------------------------");
   }
 
   public void debug(String message, Object... args) {
-    log(Level.FINE, message.formatted(args));
+    log(Level.FINE, message, args);
   }
 
   public void fine(String message, Object... args) {
-    log(Level.FINE, message.formatted(args));
+    log(Level.FINE, message, args);
   }
 
   public void info(String message, Object... args) {
-    log(Level.INFO, message.formatted(args));
+    log(Level.INFO, message, args);
+  }
+
+  private static String safeFormat(String fmt, Object... args) {
+    if (args.length == 0) {
+      return fmt;
+    } else {
+      return fmt.formatted(args);
+    }
   }
 }
