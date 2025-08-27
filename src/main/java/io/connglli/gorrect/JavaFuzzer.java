@@ -36,19 +36,18 @@ import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.smith.GraphSmith;
 import io.connglli.gorrect.smith.IdSmith;
 import io.connglli.gorrect.smith.ProgramSmith;
+import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.Logger;
+import io.connglli.gorrect.utility.Rand;
 import java.io.*;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatterBuilder;
-import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
+import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
 import java.util.stream.Collectors;
-import lombok.Builder;
-import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
+import lombok.*;
 
 public class JavaFuzzer {
   private static final Logger log = Logger.getLogger(JavaFuzzer.class);
@@ -84,7 +83,11 @@ public class JavaFuzzer {
     public String useGcOptions;
   }
 
+  // Statistics for tracking the fuzzer's performance and results.
   public static class Stats {
+    /// The start time of the fuzzing process in milliseconds.
+    @Getter @Setter private long startTimeMills = System.currentTimeMillis();
+
     // The total number of bugs found during fuzzing.
     private final AtomicInteger totalBugs = new AtomicInteger(0);
 
@@ -128,203 +131,296 @@ public class JavaFuzzer {
     public void incTotalGenerations() {
       incAndGetTotalGenerations();
     }
+
+    public String formatAsText() {
+      int totalBugs = getTotalBugs();
+      int totalIter = getTotalGenerations();
+      int validIter = totalIter - getFailedIterations();
+      double validRate = totalIter == 0 ? 0.0 : (double) validIter * 100.0 / totalIter;
+      long elapsedSeconds = (System.currentTimeMillis() - startTimeMills) / 1000;
+      double throughput = elapsedSeconds == 0 ? 0.0 : (double) totalIter / elapsedSeconds;
+
+      return """
+          Total Bugs Found   : %d
+          Generated Programs : %d
+          Valid     Programs : %d (%.2f%%)
+          Fuzzing Time       : %s
+          Fuzzing Throughput : %.2f it/s, %.2f it/m, %.2f it/h
+          """
+          .formatted(
+              totalBugs,
+              totalIter,
+              validIter,
+              validRate,
+              Formats.toHoursMinutesSecondsStr(elapsedSeconds),
+              throughput,
+              throughput * 60,
+              throughput * 3600);
+    }
   }
 
   @NonNull private final Config config; // Configuration for the fuzzer
-  @NonNull private final ExecutorService dispatcher; // Dispatcher for managing validation results
   @NonNull private final Stats stats; // Statistics for tracking fuzzer performance
 
   public JavaFuzzer(@NonNull Config config) {
     this.config = config;
-    this.dispatcher = Executors.newSingleThreadExecutor();
     this.stats = new Stats();
   }
 
   public void start() {
-    String workDirNameFormat = createWorkdirNameFormat();
-
-    try (ExecutorService executor = Executors.newWorkStealingPool(config.maxWorkers)) {
-      for (int i = 0; config.maxIterations == 0 || i < config.maxIterations; i++) {
-        executor.submit(new FuzzWorker(workDirNameFormat.formatted(i)));
+    log.info(
+        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, gcOptions='%s'",
+        config.maxWorkers,
+        config.outputDir,
+        config.maxIterations == 0 ? "infinite" : Integer.toString(config.maxIterations),
+        config.useGcOptions);
+    recoverLogging();
+    ExecutorService workers = Executors.newFixedThreadPool(config.maxWorkers);
+    try {
+      stats.setStartTimeMills(System.currentTimeMillis());
+      for (int i = 0; config.maxWorkers == 0 || i < config.maxWorkers; i++) {
+        log.info("Requesting the %d-th worker ...", i);
+        workers.submit(
+            new FuzzWorker(i, config.outputDir + File.separator + "fuzz_proc_%05d".formatted(i)));
       }
+      log.info("Waiting for all workers to finish ...");
+      workers.close();
+      log.info("Shutting down the fuzzer ...");
     } catch (Exception e) {
-      e.printStackTrace();
+      log.info(Logger.AnsiColor.RED, "The fuzzer has encountered an unexpected error; see below");
+      try {
+        log.error(e);
+      } catch (AssertionError ex) {
+        // pass
+      }
+      log.info("Shutting down the fuzzer ...");
+      workers.close();
     }
 
-    dispatcher.shutdown();
+    log.info("Fuzzer has been shut down successfully");
   }
 
-  private String createWorkdirNameFormat() {
-    String date =
-        LocalDateTime.now()
-            .format(new DateTimeFormatterBuilder().appendPattern("yyMMddHHmm").toFormatter());
-    int maxIterationLength =
-        config.maxIterations == 0 ? 8 : String.valueOf(config.maxIterations).length();
-    // Format for work directory names, e.g., "G-202501011234-00000001"
-    return "G-" + date + "-%0" + maxIterationLength + "d";
+  private void recoverLogging() {
+    Logger.disableHeadless();
+    Logger.setOutput(System.out);
   }
 
   @RequiredArgsConstructor
   private class FuzzWorker implements Runnable {
 
-    @NonNull private final String workdirName;
+    private final int workerId;
+    @NonNull private final String workdir;
+    private String bugsdir = "gc_bugs";
 
     @Override
     public void run() {
+      recoverLogging();
+
+      log.info("Worker %d started, working on directory %s", workerId, workdir);
+
+      // Create the working directory and the bugs subdirectory if they do not exist.
+      bugsdir = workdir + File.separator + bugsdir;
       try {
-        // Redirect our logs into the working directory.
-        Logger.setOutput(
-            new PrintStream(
-                new FileOutputStream(config.outputDir + File.separator + workdirName + ".log")));
-        fuzzOnce();
-      } catch (Exception e) {
-        stats.incFailedGenerations();
-        System.err.println("Error during fuzzing: " + e.getMessage());
+        Files.createDirectories(Path.of(bugsdir));
+      } catch (IOException e) {
+        log.error("Failed to create the working and bugs directory; see below");
+        log.error(e);
+        return;
       }
-      stats.incTotalGenerations();
+
+      // Start the fuzzing loop
+      try {
+        runFuzzLoop();
+        log.info("Worker %d has finished its work", workerId);
+      } catch (Throwable e) {
+        recoverLogging();
+        log.warning("Worker %d has encountered an error: %s", workerId, e.getMessage());
+        try {
+          log.error(e);
+        } catch (AssertionError ex) {
+          // pass
+        }
+        log.warning("Worker %d is shutting down due to the error", workerId);
+      }
+
+      log.info("Worker %d has been shut down", workerId);
     }
 
-    public void fuzzOnce() throws Exception {
-      String workdir = config.outputDir + File.separator + workdirName;
+    public void runFuzzLoop() {
+      // We create a separate directory for each generated test.
+      String testNameFormat = createTestNameFormat();
+      for (int i = 0; config.maxIterations == 0 || i < config.maxIterations; i++) {
+        recoverLogging();
+        log.info("Worker %d starting iteration %d ...", workerId, i);
+        stats.incTotalGenerations();
+        // Maintain a separate directory for each tests
+        String testdir = workdir + File.separator + testNameFormat.formatted(i);
+        Oracle.ValidationResult result;
+        try {
+          Files.createDirectories(Path.of(testdir));
+          // Each test also has its own logging
+          Logger.enableHeadless();
+          Logger.setOutput(
+              new PrintStream(new FileOutputStream(testdir + File.separator + "work.log")));
+          result = fuzzOnce(workdir + File.separator + testNameFormat.formatted(i));
+        } catch (Throwable e) {
+          stats.incFailedGenerations();
+          log.warning("Error occurred during fuzzing: " + e.getMessage());
+          try {
+            log.error(e);
+          } catch (AssertionError ex) {
+            // pass
+          }
+          continue;
+        }
+        recoverLogging();
+        handleResult(result, testdir);
+      }
+    }
 
+    private Oracle.ValidationResult fuzzOnce(String testdir) throws Throwable {
+      log.info("Generating the initial state ...");
       GraphSmith graphSmith = new GraphSmith(config.graphSmithConfigBuilder.build());
       GGraph initState = graphSmith.craft();
-      System.out.println("Initial State");
-      System.out.println("-------------");
-      System.out.println(initState.formatToText());
+      log.info("Succeeded, the initial state is:");
+      log.info(initState.formatToText());
 
+      log.info("Generating the GIR program ...");
       ProgramSmith programSmith =
           new ProgramSmith(config.programSmithConfigBuilder.initState(initState).build());
-
       GProgram program = programSmith.craft();
-      System.out.println("Gorrect IR Program");
-      System.out.println("------------------");
-      System.out.println(program.toString());
+      String progFullPath = testdir + File.separator + "program.gir";
+      try (PrintStream ps = new PrintStream(new FileOutputStream(progFullPath))) {
+        String progStr = program.toString();
+        log.info("Succeeded, exported to %s:", progFullPath);
+        log.info(progStr);
+        ps.println(progStr);
+      }
 
-      ProgramSmith.Stats progamGenStats = programSmith.getStats();
-      System.out.println("Smith Stats");
-      System.out.println("-----------");
-      System.out.println(progamGenStats.formatToText());
+      log.info("Generation statistics for the GIR program:");
+      log.info(programSmith.getStats().formatToText());
 
       // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
+      log.info("Interpret the GIR using the Oracle Interpreter ...");
       JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
       OracleInterpreter oracle = new OracleInterpreter(unlimitedJvm, program);
       oracle.interpret();
+
       GGraph oracleState = oracle.getState();
-      System.out.println("Oracle Interpreter State");
-      System.out.println("------------------------");
-      System.out.println(oracleState.formatToText());
+      log.info("Succeeded. The interpreter stopped with the following final state:");
+      log.info(oracleState.formatToText());
 
       // Translate the Gorrect IR program to Java code and obtain the interpreter state.
+      log.info("Generating the Java program by interpreting the GIR program ...");
       JavaInterpreter java = new JavaInterpreter(program);
       java.interpret();
-      GGraph interpState = java.getState();
-      System.out.println("Java Interpreter State");
-      System.out.println("----------------------");
-      System.out.println(interpState.formatToText());
 
-      System.out.println("Interpreter State Comparison");
-      System.out.println("----------------------------");
+      GGraph interpState = java.getState();
+      log.info("Succeeded. The interpreter stopped with the following final state:");
+      log.info(interpState.formatToText());
+
       if (oracleState.equals(interpState)) {
-        System.out.println("Equals\n");
+        log.info("Good: The state of the Java interpreter matches the Oracle interpreter state.");
       } else {
-        System.out.println("Not equals; there must be a bug in the Java interpreter!\n");
-        throw new IllegalStateException(
-            "The Java interpreter state does not match the oracle state.");
+        log.error("BAD: There must be a bug in the Java interpreter due to state mismatch!");
       }
 
       // Export the Java program to a file and execute it
-      System.out.println("Java Program");
-      System.out.println("------------");
-      String javaFilePath = java.exportToJava(workdir);
-      String javaFileFullPath = workdir + File.separator + javaFilePath;
-      System.out.println(Files.readString(Path.of(javaFileFullPath)));
+      String javaFilePath = java.exportToJava(testdir);
+      String javaFileFullPath = testdir + File.separator + javaFilePath;
+      log.info("The Java program has been exported to %s", javaFileFullPath);
 
       // Validate if the Java program after execution matches the oracle state.
-      System.out.println("Java Execution State");
-      System.out.println("--------------------");
-
+      log.info("Extracting the final state of the Java program after execution");
       String hprofFilePath =
-          java.executeGeneratedJavaFile(javaFilePath, config.javaVM, workdir, config.useGcOptions);
-      String hprofFileFullPath = workdir + File.separator + hprofFilePath;
+          java.executeGeneratedJavaFile(javaFilePath, config.javaVM, testdir, config.useGcOptions);
+      String hprofFileFullPath = testdir + File.separator + hprofFilePath;
       GGraph execState = HprofParser.parse(hprofFileFullPath);
-      System.out.println(execState.formatToText());
 
-      System.out.println("Oracle Check");
-      System.out.println("------------");
+      log.info("The extracted state:");
+      log.info(execState.formatToText());
+
+      log.info("Validating the final state ...");
       // Validate the Java execution state against the oracle interpreter state.
       JavaOracle validator = new JavaOracle(oracleState);
       JavaOracle.ValidationResult result = validator.validate(execState);
-      if (result.isValid()) {
-        System.out.println(
-            "SUCCESS: The Java execution state matches the oracle interpreter state.");
-        dispatcher.submit(new GoodResult(result, workdirName));
+      if (result.isValid() && Rand.getInstance().nextFloat() < 0.5) {
+        log.info("Passed: The Java execution state matches the oracle interpreter state.");
       } else {
-        dispatcher.submit(new BugReport(result, workdirName));
+        log.info(
+            Logger.AnsiColor.GREEN,
+            "GC BUG FOUND: The Java execution state does NOT match the oracle!");
       }
+      return result;
     }
-  }
 
-  @RequiredArgsConstructor
-  private class BugReport implements Runnable {
+    private void handleResult(Oracle.ValidationResult result, String testdir) {
+      Path testPath = Path.of(testdir);
 
-    @NonNull Oracle.ValidationResult bug;
-    @NonNull String bugDirName;
-
-    @Override
-    public void run() {
-      stats.incTotalBugs();
-      String oldDirPath = config.outputDir + File.separator + bugDirName;
-      String newDirPath = config.outputDir + File.separator + "bug-" + bugDirName;
-      try {
-        // Mark the directory by prepending a "bug-" prefix to its name.
-        Files.move(Path.of(oldDirPath), Path.of(newDirPath));
-      } catch (IOException e) {
-        System.out.println("Failed to rename the bug's directory: " + e.getMessage());
+      // Good result, remove the work directory to save space.
+      if (result.isValid()) {
+        try {
+          io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
+        } catch (Exception e) {
+          log.warning("Worker %d failed to remove work directory: %s", workerId, e.getMessage());
+        }
         return;
       }
+
+      // We found a bug, save the test directory
+      log.info(Logger.AnsiColor.GREEN, "GC BUG FOUND at: %s", testdir);
+      stats.incTotalBugs();
+
+      String newTestDir = bugsdir + File.separator + testPath.getFileName();
+      try {
+        Files.move(testPath, Path.of(newTestDir));
+      } catch (IOException e) {
+        log.warning(
+            "Worker %d failed to move the bug's directory from %s to %s", testdir, newTestDir);
+        return;
+      }
+
       // Generate a bug report file in the new directory.
       try (PrintStream ps =
-          new PrintStream(new FileOutputStream(newDirPath + File.separator + "bug-report.txt"))) {
-        ps.println("FAILURE: " + bug.getFailureMessage());
+          new PrintStream(new FileOutputStream(newTestDir + File.separator + "bug-report.txt"))) {
+        ps.println("FAILURE: " + result.getFailureMessage());
         ps.println(
             "Object Violations: "
-                + bug.getObjectViolations().entrySet().stream()
+                + result.getObjectViolations().entrySet().stream()
                     .map(s -> " - %s: %s".formatted(s.getKey(), s.getValue()))
                     .collect(Collectors.joining("\n")));
         ps.println(
             "Reference Violations: "
-                + bug.getReferenceViolations().entrySet().stream()
+                + result.getReferenceViolations().entrySet().stream()
                     .map(
                         s ->
                             " - (%s -> %s): %s"
                                 .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
                     .collect(Collectors.joining("\n")));
+        ps.println();
+        ps.println();
         ps.println("--- Oracle " + "-".repeat(50));
-        ps.println(bug.getOracle().formatToText());
+        ps.println(result.getOracle().formatToText());
+        ps.println();
+        ps.println();
         ps.println("--- Actual " + "-".repeat(50));
-        ps.println(bug.getObtained().formatToText());
+        ps.println(result.getObtained().formatToText());
       } catch (FileNotFoundException e) {
-        System.out.println("Failed to create bug report file: " + e.getMessage());
+        log.warning("Worker %d failed to create bug report file: %s", workerId, e.getMessage());
       }
+      log.info("Fuzzing Statistics");
+      log.info("------------------");
+      log.info(stats.formatAsText());
     }
-  }
 
-  @RequiredArgsConstructor
-  private class GoodResult implements Runnable {
-
-    @NonNull Oracle.ValidationResult result;
-    @NonNull String resultDirName;
-
-    @Override
-    public void run() {
-      // Remove the work directory since it is a good result.
-      try {
-        io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(
-            Path.of(config.outputDir, resultDirName));
-      } catch (Exception e) {
-        System.err.println("Failed to remove work directory: " + e.getMessage());
-      }
+    private String createTestNameFormat() {
+      String date =
+          LocalDateTime.now()
+              .format(new DateTimeFormatterBuilder().appendPattern("yyMMddHHmm").toFormatter());
+      int maxIterationLength =
+          config.maxIterations == 0 ? 8 : String.valueOf(config.maxIterations).length();
+      // Format for work directory names, e.g., "G-202501011234-00000001"
+      return "gctest_" + date + "_%0" + maxIterationLength + "d";
     }
   }
 }

@@ -26,6 +26,7 @@ package io.connglli.gorrect.utility;
 
 import java.io.OutputStream;
 import java.io.PrintStream;
+import java.time.format.DateTimeFormatter;
 import java.util.logging.*;
 import lombok.AccessLevel;
 import lombok.Getter;
@@ -33,9 +34,34 @@ import lombok.RequiredArgsConstructor;
 
 @RequiredArgsConstructor(access = AccessLevel.PRIVATE)
 public class Logger {
+  public enum AnsiColor {
+    RESET("\u001B[0m"),
+    BLACK("\u001B[30m"),
+    RED("\u001B[31m"),
+    GREEN("\u001B[32m"),
+    YELLOW("\u001B[33m"),
+    BLUE("\u001B[34m"),
+    MAGENTA("\u001B[35m"),
+    CYAN("\u001B[36m"),
+    WHITE("\u001B[37m"),
+    BRIGHT_BLACK("\u001B[90m"),
+    BRIGHT_RED("\u001B[91m"),
+    BRIGHT_GREEN("\u001B[92m"),
+    BRIGHT_YELLOW("\u001B[93m"),
+    BRIGHT_BLUE("\u001B[94m"),
+    BRIGHT_MAGENTA("\u001B[95m"),
+    BRIGHT_CYAN("\u001B[96m"),
+    BRIGHT_WHITE("\u001B[97m");
+
+    final String code;
+
+    AnsiColor(String code) {
+      this.code = code;
+    }
+  }
 
   private static Level settingLevel = Level.INFO;
-  private static boolean settingHeadless = true;
+  private static final ThreadLocal<Boolean> settingHeadless = ThreadLocal.withInitial(() -> true);
   private static final ThreadLocal<PrintStream> settingOutput =
       ThreadLocal.withInitial(() -> System.out);
 
@@ -54,11 +80,11 @@ public class Logger {
   }
 
   public static void enableHeadless() {
-    settingHeadless = true;
+    settingHeadless.set(true);
   }
 
   public static void disableHeadless() {
-    settingHeadless = false;
+    settingHeadless.set(false);
   }
 
   public static void setOutput(OutputStream out) {
@@ -66,52 +92,75 @@ public class Logger {
   }
 
   public void log(Level level, String message, Object... args) {
+    log(level, null, message, args);
+  }
+
+  public void log(Level level, AnsiColor color, String message, Object... args) {
     if (level.intValue() < settingLevel.intValue()) {
       return;
     }
-    if (settingHeadless) {
-      settingOutput.get().println(safeFormat(message, args));
-    } else {
-      settingOutput
-          .get()
-          .printf(
-              "[%s] [%s] [%s:%s]: %s%n",
-              java.time.LocalDateTime.now(),
-              Thread.currentThread().getName(),
-              name,
-              level.getName(),
-              safeFormat(message, args));
+    String fullMessage = safeFormat(message, args);
+    if (!settingHeadless.get()) {
+      fullMessage =
+          "[%s::%s::%s] [%s] %s"
+              .formatted(
+                  java.time.LocalDateTime.now()
+                      .format(DateTimeFormatter.ofPattern("yy-MM-dd-HH:mm:ss")),
+                  Thread.currentThread().getName(),
+                  name,
+                  level.getName(),
+                  fullMessage);
     }
+    if (color == null) {
+      if (level.equals(Level.SEVERE)) {
+        color = AnsiColor.RED;
+      } else if (level.equals(Level.WARNING)) {
+        color = AnsiColor.YELLOW;
+      }
+    }
+    if (color != null && color != AnsiColor.RESET) {
+      fullMessage = color.code + fullMessage + AnsiColor.RESET.code;
+    }
+    settingOutput.get().println(fullMessage);
   }
 
   // - ===========================================
   // - Logging Methods
   // - ===========================================
 
-  public void error(String message, Object... args) {
-    log(Level.SEVERE, "--------------------------");
-    log(Level.SEVERE, "[**ERROR**] " + safeFormat(message, args));
-    log(Level.SEVERE, "--------------------------");
-    Assert.panic(safeFormat(message, args));
+  public void error(Throwable t) {
+    log(Level.SEVERE, "[**ERROR**] %s: %s", t.getClass().getCanonicalName(), t.getMessage());
+    for (StackTraceElement e : t.getStackTrace()) {
+      log(Level.SEVERE, "    at " + e.toString());
+    }
+    for (Throwable c = t.getCause(); c != null; c = c.getCause()) {
+      log(Level.SEVERE, "  Caused by %s: %s", c.getClass().getCanonicalName(), c.getMessage());
+      for (StackTraceElement e : c.getStackTrace()) {
+        log(Level.SEVERE, "    at " + e.toString());
+      }
+    }
+    Assert.panic("");
   }
 
-  public void severe(String message, Object... args) {
-    log(Level.SEVERE, safeFormat(message, args));
+  public void error(String message, Object... args) {
+    log(Level.SEVERE, "[**ERROR**] " + safeFormat(message, args));
     Assert.panic(safeFormat(message, args));
   }
 
   public void warning(String message, Object... args) {
-    log(Level.WARNING, "--------------------------");
-    log(Level.WARNING, "[!!WARNING!!] " + safeFormat(message, args));
-    log(Level.WARNING, "--------------------------");
+    log(Level.WARNING, "[WARNING] " + safeFormat(message, args));
+  }
+
+  public void debug(AnsiColor color, String message, Object... args) {
+    log(Level.FINE, color, message, args);
   }
 
   public void debug(String message, Object... args) {
     log(Level.FINE, message, args);
   }
 
-  public void fine(String message, Object... args) {
-    log(Level.FINE, message, args);
+  public void info(AnsiColor color, String message, Object... args) {
+    log(Level.INFO, color, message, args);
   }
 
   public void info(String message, Object... args) {

@@ -141,23 +141,23 @@ public class JavaInterpreter {
 
   private class Impl implements GProgramVisitor<Void> {
     public Void visit(GProgram program) {
-      log.fine("--------------");
-      log.fine(">> Executing: " + program.getConfiguration());
+      log.debug("--------------");
+      log.debug(">> Executing: " + program.getConfiguration());
       heap.appendComment(program.getConfiguration().toString());
       heap.appendComment("Initial State:");
       heap.appendComment(program.getConfiguration().getInitState().formatToText());
       program.getConfiguration().accept(this);
-      log.fine("   State:");
-      log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
-      log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
+      log.debug("   State:");
+      log.debug(heap.formatGraphStateToText().indent(5).stripTrailing());
+      log.debug(heap.formatObjectStateToText().indent(5).stripTrailing());
       for (var instruction : program.getInstructions()) {
-        log.fine("--------------");
-        log.fine(">> Executing: " + instruction);
+        log.debug("--------------");
+        log.debug(">> Executing: " + instruction);
         heap.appendComment(instruction.toString());
         instruction.accept(this);
-        log.fine("   State:");
-        log.fine(heap.formatGraphStateToText().indent(5).stripTrailing());
-        log.fine(heap.formatObjectStateToText().indent(5).stripTrailing());
+        log.debug("   State:");
+        log.debug(heap.formatGraphStateToText().indent(5).stripTrailing());
+        log.debug(heap.formatObjectStateToText().indent(5).stripTrailing());
       }
       heap.appendComment("Final State:");
       heap.appendComment(heap.getState().formatToText());
