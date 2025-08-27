@@ -436,11 +436,11 @@ public class ProgramSmith {
       List<GID> referentIds = new ArrayList<>(maxNumReferents);
       for (int i = 0; i < maxNumReferents && !strongly.isEmpty(); i++) {
         GID referentId = random.nextItem(strongly);
-        strongly.remove(refererId);
+        strongly.remove(referentId);
         if (currState.hasReference(refererId, referentId)) {
           continue;
         }
-        referentIds.add(refererId);
+        referentIds.add(referentId);
       }
       if (referentIds.isEmpty()) {
         log.debug("Cannot add fanout references due to no suitable referents.");
