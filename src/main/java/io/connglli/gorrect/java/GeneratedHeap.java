@@ -524,11 +524,14 @@ class GeneratedHeap {
     // Create a static field in the main class to reference the root object but leave the
     // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
     String fieldName = GeneratedMainClass.computeFieldName(object.getId());
-    mainClazz.addField(
-        FieldSpec.builder(
-                GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
-            .initializer("null")
-            .build());
+    // It is likely that the object is made root for a second time
+    if (!mainClazz.hasField(fieldName)) {
+      mainClazz.addField(
+          FieldSpec.builder(
+                  GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
+              .initializer("null")
+              .build());
+    }
     // Transfer the ownership of the object to the main class
     appendStatement(fieldName + " = " + object.getJavaDerefId());
     object.setType(GObject.Type.GCROOT);
@@ -578,7 +581,7 @@ class GeneratedHeap {
   List<GeneratedReference> getReferences(@NonNull GeneratedObject referer) {
     Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
-    return referents.get(referer.getId());
+    return referents.get(referer.getId()).stream().collect(Collectors.toList());
   }
 
   boolean hasReference(@NonNull GeneratedObject referer, @NonNull GeneratedObject referent) {
@@ -636,10 +639,13 @@ class GeneratedHeap {
       case STRONG:
         {
           // Create a field in our class so that we can reference the referent
-          refererClazz.addField(
-              FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
-                  .initializer("null")
-                  .build());
+          // It is likely that the referer and the referent has been linked before
+          if (!refererClazz.hasField(fieldName)) {
+            refererClazz.addField(
+                FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
+                    .initializer("null")
+                    .build());
+          }
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = %s"
@@ -651,10 +657,13 @@ class GeneratedHeap {
         {
           ClassName softRefClazz = ClassName.get(SoftReference.class);
           // Create a field in our class so that we can reference the referent
-          refererClazz.addField(
-              FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
-                  .initializer("null")
-                  .build());
+          // It is likely that the referer and the referent has been linked before
+          if (!refererClazz.hasField(fieldName)) {
+            refererClazz.addField(
+                FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
+                    .initializer("null")
+                    .build());
+          }
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(%s)"
@@ -668,10 +677,13 @@ class GeneratedHeap {
         {
           ClassName weakRefClazz = ClassName.get(WeakReference.class);
           // Create a field in our class so that we can reference the referent
-          refererClazz.addField(
-              FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
-                  .initializer("null")
-                  .build());
+          // It is likely that the referer and the referent has been linked before
+          if (!refererClazz.hasField(fieldName)) {
+            refererClazz.addField(
+                FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
+                    .initializer("null")
+                    .build());
+          }
           // Reference the referent object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(%s)"
