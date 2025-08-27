@@ -471,6 +471,12 @@ public class GGraph {
               .append("\n");
         }
       }
+
+      sb.append("Reachability:").append("\n");
+      Map<GID, GReference.Type> reachability = markReachability();
+      for (GID id : reachability.keySet()) {
+        sb.append("- ").append(id).append(": ").append(reachability.get(id).name()).append("\n");
+      }
     }
 
     return sb.toString();

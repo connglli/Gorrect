@@ -231,6 +231,7 @@ public class JavaFuzzer {
       // Start the fuzzing loop
       try {
         runFuzzLoop();
+        recoverLogging();
         log.info("Worker %d has finished its work", workerId);
       } catch (Throwable e) {
         recoverLogging();

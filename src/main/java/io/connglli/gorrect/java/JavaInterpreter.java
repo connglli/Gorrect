@@ -263,8 +263,9 @@ public class JavaInterpreter {
             .forEach(
                 referer -> {
                   GeneratedReference reference = heap.getReference(referer, object);
-                  referer.reference(
+                  alloctor.reference(
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
+                      referer,
                       clone,
                       reference.getType());
                 });
@@ -273,8 +274,9 @@ public class JavaInterpreter {
             .forEach(
                 referent -> {
                   GeneratedReference reference = heap.getReference(object, referent);
-                  clone.reference(
+                  alloctor.reference(
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
+                      clone,
                       referent,
                       reference.getType());
                 });

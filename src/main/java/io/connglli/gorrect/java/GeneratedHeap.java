@@ -254,7 +254,7 @@ class GeneratedHeap {
       for (GReference reference : initState.getReferences()) {
         GeneratedObject referer = getObject(reference.getReferer());
         GeneratedObject referent = getObject(reference.getReferent());
-        referer.reference(reference.getId(), referent, reference.getType());
+        allocator.reference(reference.getId(), referer, referent, reference.getType());
       }
     }
   }
@@ -306,6 +306,8 @@ class GeneratedHeap {
   }
 
   class NonRootInPoolAllocator implements AutoCloseable {
+    private List<GID> allocatedObjects = new ArrayList<>();
+
     @SuppressWarnings("UnusedReturnValue")
     public GeneratedObject alloc(@NonNull GID objectId, @NonNull Long objectSize) {
       Assert.set(!hasObject(objectId), "The object with id %s already exists", objectId);
@@ -322,8 +324,24 @@ class GeneratedHeap {
               GReference.Type.STRONG, // It is strongly reachable as it is in the pool
               null);
       appendStatement(
-          OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName); //
+          OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName);
+      allocatedObjects.add(objectId);
       return putObject(object);
+    }
+
+    @NonNull
+    GeneratedReference reference(
+        @NonNull GID referenceId,
+        @NonNull GeneratedObject referer,
+        @NonNull GeneratedObject referent,
+        @NonNull GReference.Type referenceType) {
+      GeneratedReference reference =
+          GeneratedHeap.this.reference(referenceId, referer, referent, referenceType);
+      // After referencing, the reachability of the objects might change.
+      // So we need to patch it back to avoid our allocated objects (and its referents)
+      // from being set as non-strongly reachable.
+      updateHeap(this);
+      return reference;
     }
 
     @Override
@@ -847,13 +865,30 @@ class GeneratedHeap {
   }
 
   private void updateHeap() {
+    updateHeap(/*allocator*/ null);
+  }
+
+  private void updateHeap(NonRootInPoolAllocator allocator) {
     // Update the state of the heap based on the current objects and references
-    GGraph graph = getState();
+    GGraph graph = getState(/* clean= */ false);
+    if (allocator != null) {
+      for (GID objId : allocator.allocatedObjects) {
+        GObject obj = graph.getObject(objId);
+        obj.setType(GObject.Type.GCROOT); // Object in the pool should be treated as root
+      }
+    }
+    graph.removeUnreachableObjects();
     // Update the reachability of all objects based on the current state
     Map<GID, GReference.Type> reachableObjects = graph.markReachability();
     for (GID objId : objects.keySet()) {
       GeneratedObject obj = objects.get(objId);
       obj.setReachability(reachableObjects.getOrDefault(objId, null));
+    }
+    if (allocator != null) {
+      for (GID objId : allocator.allocatedObjects) {
+        GObject obj = graph.getObject(objId);
+        obj.setType(GObject.Type.ORDINARY); // Revert it back to avoid smashing the identifiers
+      }
     }
     // Update the identifiers of all objects based on the strongest reference
     graph.accept(
