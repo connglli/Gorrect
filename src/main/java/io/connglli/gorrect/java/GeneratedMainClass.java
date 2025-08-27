@@ -40,7 +40,7 @@ final class GeneratedMainClass extends GeneratedClass {
 
   // The main method of the main class. It is used to initialize the heap state and execute the
   // heap manipulation sequence and finally waits for heap dumping.
-  private static final MethodSpec.Builder mainMethodSpec =
+  private final MethodSpec.Builder mainMethodSpec =
       MethodSpec.methodBuilder("main")
           .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
           .returns(void.class)
