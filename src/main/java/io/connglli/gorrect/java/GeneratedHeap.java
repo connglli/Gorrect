@@ -914,6 +914,7 @@ class GeneratedHeap {
             if (obj.isRoot()) {
               // Root objects are always referenced by a static field in the main class.
               genObj.setJavaRefId(GeneratedMainClass.computeFieldName(obj.getId()));
+              genObj.setRefToStrongestReferer(null);
               visited.add(obj.getId());
               return;
             }
