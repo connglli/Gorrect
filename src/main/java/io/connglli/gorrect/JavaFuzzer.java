@@ -210,7 +210,7 @@ public class JavaFuzzer {
 
     private final int workerId;
     @NonNull private final String workdir;
-    private String bugsdir = "gc_bugs";
+    private String bugsdir = "found_bugs";
 
     @Override
     public void run() {
