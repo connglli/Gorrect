@@ -45,6 +45,11 @@ public class EpsilonVM extends JavaVM {
   }
 
   @Override
+  public EpsilonVM clone() {
+    return new EpsilonVM(this.getHeapCapacity());
+  }
+
+  @Override
   public long getReferenceSize() {
     return 0;
   }

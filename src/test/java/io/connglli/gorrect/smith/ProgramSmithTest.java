@@ -59,7 +59,6 @@ class ProgramSmithTest {
     // Set up GraphSmith to generate initial states
     GraphSmith.Config graphConfig =
         GraphSmith.Config.builder()
-            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith)
             .minRoots(1)
@@ -74,19 +73,18 @@ class ProgramSmithTest {
 
     configBuilder =
         ProgramSmith.Config.builder()
-            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith);
   }
 
   @Test
   void testCraftBasicProgram() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder.initState(initialState).minInstructions(5).maxInstructions(10).build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     assertNotNull(program, "Program should not be null");
     assertFalse(program.getInstructions().isEmpty(), "Program should have at least 1 instruction");
@@ -106,7 +104,7 @@ class ProgramSmithTest {
 
   @Test
   void testCraftWithMinimalConfiguration() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder
             .initState(initialState)
@@ -117,7 +115,7 @@ class ProgramSmithTest {
             .build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     assertNotNull(program, "Program should not be null");
     assertEquals(1, program.getInstructions().size(), "Should have exactly 1 instruction");
@@ -128,7 +126,7 @@ class ProgramSmithTest {
 
   @Test
   void testCraftWithCustomConfiguration() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder
             .initState(initialState)
@@ -139,14 +137,13 @@ class ProgramSmithTest {
             .build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     assertNotNull(program, "Program should not be null");
     assertFalse(program.getInstructions().isEmpty(), "Should have at least 1 instruction");
     assertTrue(program.getInstructions().size() <= 20, "Should have at most 20 instructions");
 
     // Verify configuration is applied
-    assertEquals(vm, smith.getConfig().getVm(), "VM should match configuration");
     assertEquals(objectIdSmith, smith.getConfig().getObjectIdSmith(), "ObjectIdSmith should match");
     assertEquals(
         referenceIdSmith, smith.getConfig().getReferenceIdSmith(), "ReferenceIdSmith should match");
@@ -162,7 +159,7 @@ class ProgramSmithTest {
         configBuilder.initState(emptyState).minInstructions(5).maxInstructions(10).build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     assertNotNull(program, "Program should not be null");
     // With empty initial state, should still be able to generate root objects
@@ -183,7 +180,6 @@ class ProgramSmithTest {
     // Create a rich initial state with multiple objects and references
     GraphSmith.Config richGraphConfig =
         GraphSmith.Config.builder()
-            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith)
             .minRoots(3)
@@ -195,13 +191,13 @@ class ProgramSmithTest {
             .build();
 
     GraphSmith richGraphSmith = new GraphSmith(richGraphConfig);
-    GGraph richInitialState = richGraphSmith.craft();
+    GGraph richInitialState = richGraphSmith.craft(vm);
 
     ProgramSmith.Config config =
         configBuilder.initState(richInitialState).minInstructions(15).maxInstructions(25).build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     assertNotNull(program, "Program should not be null");
     assertFalse(program.getInstructions().isEmpty(), "Should have at least 1 instruction");
@@ -217,7 +213,7 @@ class ProgramSmithTest {
 
   @Test
   void testStatsTracking() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder.initState(initialState).minInstructions(10).maxInstructions(15).build();
 
@@ -228,7 +224,7 @@ class ProgramSmithTest {
     assertEquals(0, stats.getNumTotalGeneration(), "Initial total generated should be 0");
     assertEquals(0, stats.getNumValidGeneration(), "Initial valid generation should be 0");
 
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     // After crafting, stats should be updated
     assertTrue(stats.getNumTotalGeneration() > 0, "Total generated should be positive");
@@ -246,16 +242,16 @@ class ProgramSmithTest {
 
   @Test
   void testCraftMultiplePrograms() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder.initState(initialState).minInstructions(5).maxInstructions(10).build();
 
     ProgramSmith smith = new ProgramSmith(config);
 
     // Generate multiple programs
-    GProgram program1 = smith.craft();
-    GProgram program2 = smith.craft();
-    GProgram program3 = smith.craft();
+    GProgram program1 = smith.craft(vm);
+    GProgram program2 = smith.craft(vm);
+    GProgram program3 = smith.craft(vm);
 
     assertNotNull(program1, "First program should not be null");
     assertNotNull(program2, "Second program should not be null");
@@ -285,7 +281,6 @@ class ProgramSmithTest {
     // Generate a small initial state
     GraphSmith.Config limitedGraphConfig =
         GraphSmith.Config.builder()
-            .vm(limitedVM)
             .objectIdSmith(limitedObjectIdSmith)
             .referenceIdSmith(limitedReferenceIdSmith)
             .minRoots(1)
@@ -299,11 +294,10 @@ class ProgramSmithTest {
             .build();
 
     GraphSmith limitedGraphSmith = new GraphSmith(limitedGraphConfig);
-    GGraph limitedInitialState = limitedGraphSmith.craft();
+    GGraph limitedInitialState = limitedGraphSmith.craft(limitedVM);
 
     ProgramSmith.Config config =
         ProgramSmith.Config.builder()
-            .vm(limitedVM)
             .objectIdSmith(limitedObjectIdSmith)
             .referenceIdSmith(limitedReferenceIdSmith)
             .initState(limitedInitialState)
@@ -314,7 +308,7 @@ class ProgramSmithTest {
             .build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(limitedVM);
 
     assertNotNull(program, "Program should not be null even with limited memory");
     // Should have fewer instructions due to memory constraints
@@ -325,7 +319,7 @@ class ProgramSmithTest {
 
   @Test
   void testCraftWithDifferentObjectSizes() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
 
     // Test with small objects
     ProgramSmith.Config smallConfig =
@@ -338,7 +332,7 @@ class ProgramSmithTest {
             .build();
 
     ProgramSmith smallSmith = new ProgramSmith(smallConfig);
-    GProgram smallProgram = smallSmith.craft();
+    GProgram smallProgram = smallSmith.craft(vm);
 
     // Test with large objects
     ProgramSmith.Config largeConfig =
@@ -351,7 +345,7 @@ class ProgramSmithTest {
             .build();
 
     ProgramSmith largeSmith = new ProgramSmith(largeConfig);
-    GProgram largeProgram = largeSmith.craft();
+    GProgram largeProgram = largeSmith.craft(vm);
 
     assertNotNull(smallProgram, "Small object program should not be null");
     assertNotNull(largeProgram, "Large object program should not be null");
@@ -364,21 +358,21 @@ class ProgramSmithTest {
 
   @Test
   void testCraftWithDifferentReferenceWeights() {
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
 
     // Test with strong reference preference
     ProgramSmith.Config strongConfig =
         configBuilder.initState(initialState).minInstructions(10).maxInstructions(20).build();
 
     ProgramSmith strongSmith = new ProgramSmith(strongConfig);
-    GProgram strongProgram = strongSmith.craft();
+    GProgram strongProgram = strongSmith.craft(vm);
 
     // Test with weak reference preference
     ProgramSmith.Config weakConfig =
         configBuilder.initState(initialState).minInstructions(10).maxInstructions(20).build();
 
     ProgramSmith weakSmith = new ProgramSmith(weakConfig);
-    GProgram weakProgram = weakSmith.craft();
+    GProgram weakProgram = weakSmith.craft(vm);
 
     assertNotNull(strongProgram, "Strong reference program should not be null");
     assertNotNull(weakProgram, "Weak reference program should not be null");
@@ -393,7 +387,6 @@ class ProgramSmithTest {
   void testConfigBuilderDefaults() {
     ProgramSmith.Config config =
         ProgramSmith.Config.builder()
-            .vm(vm)
             .objectIdSmith(objectIdSmith)
             .referenceIdSmith(referenceIdSmith)
             .initState(new GGraph())
@@ -427,12 +420,12 @@ class ProgramSmithTest {
   @Test
   void testCraftWithValidInitialState() {
     // Test that the program can be executed by an interpreter
-    GGraph initialState = graphSmith.craft();
+    GGraph initialState = graphSmith.craft(vm);
     ProgramSmith.Config config =
         configBuilder.initState(initialState).minInstructions(5).maxInstructions(10).build();
 
     ProgramSmith smith = new ProgramSmith(config);
-    GProgram program = smith.craft();
+    GProgram program = smith.craft(vm);
 
     // Try to create and use an interpreter with the generated program
     assertDoesNotThrow(

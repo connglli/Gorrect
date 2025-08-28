@@ -89,6 +89,8 @@ public abstract class JavaVM extends LangVM {
    * fields and possibly some other header information.
    */
 
+  public abstract JavaVM clone();
+
   public abstract long getReferenceSize();
 
   public long getBoolSize() {

@@ -29,7 +29,6 @@ import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.*;
-import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.NoOpVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.smith.GraphSmith;
@@ -218,9 +217,8 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   protected int optWeakRefWeight = 30;
 
   protected GraphSmith.Config.ConfigBuilder getGraphSmithConfigBuilder(
-      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+      IdSmith objectIdSmith, IdSmith referenceIdSmith) {
     return GraphSmith.Config.builder()
-        .vm(vm)
         .objectIdSmith(objectIdSmith)
         .referenceIdSmith(referenceIdSmith)
         .minRoots(optMinRoots)
@@ -236,8 +234,8 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
         .weakRefWeight(optWeakRefWeight);
   }
 
-  protected GraphSmith buildGraphSmith(LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new GraphSmith(getGraphSmithConfigBuilder(vm, objectIdSmith, referenceIdSmith).build());
+  protected GraphSmith buildGraphSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+    return new GraphSmith(getGraphSmithConfigBuilder(objectIdSmith, referenceIdSmith).build());
   }
 }
 
@@ -256,8 +254,8 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
     NoOpVM vm = new NoOpVM(); // Do nothing
-    GraphSmith smith = buildGraphSmith(vm, objectIdSmith, referenceIdSmith);
-    GGraph graph = smith.craft();
+    GraphSmith smith = buildGraphSmith(objectIdSmith, referenceIdSmith);
+    GGraph graph = smith.craft(vm);
     System.out.println(graph.formatToText());
     return 0;
   }
@@ -280,9 +278,8 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
   protected int optMaxInstructions = 32;
 
   protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfig(
-      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+      IdSmith objectIdSmith, IdSmith referenceIdSmith) {
     return ProgramSmith.Config.builder()
-        .vm(vm)
         .objectIdSmith(objectIdSmith)
         .referenceIdSmith(referenceIdSmith)
         .minInstructions(optMinInstructions)
@@ -292,9 +289,9 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
   }
 
   protected ProgramSmith buildProgramSmith(
-      LangVM vm, IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
+      IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
     return new ProgramSmith(
-        getProgramSmithConfig(vm, objectIdSmith, referenceIdSmith).initState(initState).build());
+        getProgramSmithConfig(objectIdSmith, referenceIdSmith).initState(initState).build());
   }
 }
 
@@ -387,15 +384,15 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
 
-    GraphSmith graphSmith = buildGraphSmith(jvm, objectIdSmith, referenceIdSmith);
-    GGraph initState = graphSmith.craft();
+    GraphSmith graphSmith = buildGraphSmith(objectIdSmith, referenceIdSmith);
+    GGraph initState = graphSmith.craft(jvm);
     System.out.println("Initial State");
     System.out.println("-------------");
     System.out.println(initState.formatToText());
 
-    ProgramSmith programSmith = buildProgramSmith(jvm, objectIdSmith, referenceIdSmith, initState);
+    ProgramSmith programSmith = buildProgramSmith(objectIdSmith, referenceIdSmith, initState);
 
-    GProgram program = programSmith.craft();
+    GProgram program = programSmith.craft(jvm);
     System.out.println("Gorrect IR Program");
     System.out.println("------------------");
     System.out.println(program.toString());
@@ -580,9 +577,9 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
     GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder =
-        getGraphSmithConfigBuilder(jvm, objectIdSmith, referenceIdSmith);
+        getGraphSmithConfigBuilder(objectIdSmith, referenceIdSmith);
     ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder =
-        getProgramSmithConfig(jvm, objectIdSmith, referenceIdSmith);
+        getProgramSmithConfig(objectIdSmith, referenceIdSmith);
     new JavaFuzzer(
             JavaFuzzer.Config.builder()
                 .maxWorkers(optMaxWorkers)

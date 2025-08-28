@@ -280,16 +280,18 @@ public class JavaFuzzer {
     }
 
     private Oracle.ValidationResult fuzzOnce(String testdir) throws Throwable {
+      JavaVM jvm = config.javaVM.clone();
+
       log.info("Generating the initial state ...");
       GraphSmith graphSmith = new GraphSmith(config.graphSmithConfigBuilder.build());
-      GGraph initState = graphSmith.craft();
+      GGraph initState = graphSmith.craft(jvm);
       log.info("Succeeded, the initial state is:");
       log.info(initState.formatToText());
 
       log.info("Generating the GIR program ...");
       ProgramSmith programSmith =
           new ProgramSmith(config.programSmithConfigBuilder.initState(initState).build());
-      GProgram program = programSmith.craft();
+      GProgram program = programSmith.craft(jvm);
       String progFullPath = testdir + File.separator + "program.gir";
       try (PrintStream ps = new PrintStream(new FileOutputStream(progFullPath))) {
         String progStr = program.toString();
@@ -334,7 +336,7 @@ public class JavaFuzzer {
       // Validate if the Java program after execution matches the oracle state.
       log.info("Extracting the final state of the Java program after execution");
       String hprofFilePath =
-          java.executeGeneratedJavaFile(javaFilePath, config.javaVM, testdir, config.useGcOptions);
+          java.executeGeneratedJavaFile(javaFilePath, jvm, testdir, config.useGcOptions);
       String hprofFileFullPath = testdir + File.separator + hprofFilePath;
       GGraph execState = HprofParser.parse(hprofFileFullPath);
 

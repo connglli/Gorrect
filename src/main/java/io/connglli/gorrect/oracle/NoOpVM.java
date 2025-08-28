@@ -41,6 +41,11 @@ public class NoOpVM extends LangVM {
   }
 
   @Override
+  public NoOpVM clone() {
+    return new NoOpVM();
+  }
+
+  @Override
   public long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize) {
     return requestedSize;
   }

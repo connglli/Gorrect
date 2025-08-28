@@ -45,9 +45,6 @@ public class ProgramSmith {
   @Builder
   @Getter
   public static class Config {
-    /// The LVM used to ensure the object graph is valid.
-    @NonNull private LangVM vm;
-
     /// The IdSmith used to generate unique IDs for objects.
     @NonNull private IdSmith objectIdSmith;
 
@@ -173,20 +170,21 @@ public class ProgramSmith {
   @Getter private final Stats stats = new Stats();
   @Getter private final int maxNumTrials = 320;
 
-  public GProgram craft() {
+  public GProgram craft(LangVM vm) {
     stats.reset();
+    vm.reset(); // Reset the VM to a clean state
     stats.generationTimeMillis = System.currentTimeMillis();
     GProgram program =
-        new GProgram(new GSetHeapInstruction(config.vm.getHeapCapacity(), config.initState));
-    OracleInterpreter interpreter = new OracleInterpreter(config.vm, program);
-    SmithImpl smith = new SmithImpl(interpreter, program);
+        new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), config.initState));
+    OracleInterpreter interpreter = new OracleInterpreter(vm, program);
+    SmithImpl smith = new SmithImpl(vm, interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     for (int i = 0; i < numInstructions; i++) {
       if (stats.numTotalGeneration - stats.numValidGeneration > maxNumTrials) {
         log.debug("Too many invalid generations, possibly due to stopping.");
         break;
       }
-      if (config.vm.getHeapUnusedBytes() <= 0) {
+      if (vm.getHeapUnusedBytes() <= 0) {
         log.debug("Cannot generate more instructions due to insufficient memory.");
         break; // Out of memory
       }
@@ -243,6 +241,7 @@ public class ProgramSmith {
      * TODO: Support a soft implementation and make the generated programs more interesting.
      */
 
+    @NonNull private final LangVM vm;
     @NonNull private final OracleInterpreter interpreter;
     @NonNull private final GProgram program;
 
@@ -572,17 +571,17 @@ public class ProgramSmith {
 
     private long randomPadding(@NonNull GID id) {
       long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
-      long objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
-      while (paddingSize > 0 && objectSize > config.vm.getHeapUnusedBytes()) {
+      long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
+      while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {
         paddingSize /= 2;
-        objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
+        objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
       }
       if (paddingSize < config.minObjSizeBytes) {
         log.warning(
             "Adjusting object padding (%s bytes) to be smaller than the minimum size (%s bytes)",
             Formats.toCommaString(paddingSize), Formats.toCommaString(config.minObjSizeBytes));
       }
-      if (paddingSize < 0 || objectSize > config.vm.getHeapUnusedBytes()) {
+      if (paddingSize < 0 || objectSize > vm.getHeapUnusedBytes()) {
         return -1; // We're out of memory
       }
       return paddingSize;

@@ -64,6 +64,8 @@ public abstract class LangVM {
     this.heapUnusedBytes = heapCapacity;
   }
 
+  public abstract LangVM clone();
+
   // -================================================
   // - Heap Helper Methods
   // -================================================

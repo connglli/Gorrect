@@ -42,8 +42,7 @@ import lombok.NonNull;
 public class OracleHeap {
 
   // The language virtual machine that we're simulating
-  @Getter(lombok.AccessLevel.PACKAGE)
-  private final LangVM lvm;
+  @Getter private final LangVM lvm;
 
   // The underlying object graph that we're manipulating
   @Getter(lombok.AccessLevel.PACKAGE)

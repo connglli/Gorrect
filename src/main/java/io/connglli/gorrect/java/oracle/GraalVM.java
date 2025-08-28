@@ -45,6 +45,11 @@ public class GraalVM extends JavaVM {
   }
 
   @Override
+  public GraalVM clone() {
+    return new GraalVM(this.homeDirectory, this.getHeapCapacity());
+  }
+
+  @Override
   public long getReferenceSize() {
     return 0;
   }

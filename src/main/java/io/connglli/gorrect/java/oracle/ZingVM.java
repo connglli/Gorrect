@@ -45,6 +45,11 @@ public class ZingVM extends JavaVM {
   }
 
   @Override
+  public ZingVM clone() {
+    return new ZingVM(this.homeDirectory, this.getHeapCapacity());
+  }
+
+  @Override
   public long getReferenceSize() {
     return 0;
   }

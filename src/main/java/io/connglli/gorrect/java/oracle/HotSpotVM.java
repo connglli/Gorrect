@@ -112,6 +112,16 @@ public class HotSpotVM extends JavaVM {
     this.model = new HotSpotObjects(version, model);
   }
 
+  /*package*/ HotSpotVM(File home, long heapCapacity, HotSpotObjects model) {
+    super(home, heapCapacity);
+    this.model = model;
+  }
+
+  @Override
+  public HotSpotVM clone() {
+    return new HotSpotVM(this.homeDirectory, this.getHeapCapacity(), this.model);
+  }
+
   @Override
   public long getReferenceSize() {
     return this.model.getReferenceSize();

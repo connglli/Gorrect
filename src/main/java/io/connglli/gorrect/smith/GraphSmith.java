@@ -48,9 +48,6 @@ public class GraphSmith {
   @Builder
   @Getter
   public static class Config {
-    /// The LVM used to ensure the object graph is valid.
-    @NonNull private LangVM vm;
-
     /// The IdSmith used to generate unique IDs for objects.
     @NonNull private IdSmith objectIdSmith;
 
@@ -99,8 +96,10 @@ public class GraphSmith {
   @NonNull private final Config config;
 
   @NonNull
-  public GGraph craft() {
-    OracleHeap heap = new OracleHeap(config.vm);
+  public GGraph craft(LangVM vm) {
+    vm.reset(); // Reset the VM to a clean state
+
+    OracleHeap heap = new OracleHeap(vm);
 
     List<OracleObject> objects = new ArrayList<>();
     int numRoots = random.nextInt(config.minRoots, config.maxRoots + 1);
@@ -117,7 +116,7 @@ public class GraphSmith {
     numRefs = Math.min(numRefs, numObjs * (numObjs - 1));
     for (int i = 0; i < numRefs; i++) {
       for (int attempts = 0; attempts < 100; attempts++) {
-        if (nextReference(objects)) {
+        if (nextReference(heap, objects)) {
           break; // Successfully added a reference
         }
       }
@@ -131,19 +130,20 @@ public class GraphSmith {
   }
 
   private OracleObject nextObject(OracleHeap heap, GObject.Type type) {
+    LangVM vm = heap.getLvm();
     GID id = config.objectIdSmith.next();
     long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
-    long objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
-    while (paddingSize > 0 && objectSize > config.vm.getHeapUnusedBytes()) {
+    long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
+    while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {
       paddingSize /= 2;
-      objectSize = config.vm.estimateNewObjectHeapSize(id, paddingSize);
+      objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
     }
     if (paddingSize < config.minObjSizeBytes) {
       log.warning(
           "Adjusting object padding (%s bytes) to be smaller than the minimum size (%s bytes)",
           Formats.toCommaString(paddingSize), Formats.toCommaString(config.minObjSizeBytes));
     }
-    if (paddingSize < 0 || objectSize > config.vm.getHeapUnusedBytes()) {
+    if (paddingSize < 0 || objectSize > vm.getHeapUnusedBytes()) {
       log.error(
           "Too many objects allocated, making heap out of memory. Try increasing the heap size or decreasing the number of objects.");
     }
@@ -158,8 +158,8 @@ public class GraphSmith {
     }
   }
 
-  private boolean nextReference(List<OracleObject> objects) {
-    if (config.vm.getHeapUnusedBytes() == 0) {
+  private boolean nextReference(OracleHeap heap, List<OracleObject> objects) {
+    if (heap.getLvm().getHeapUnusedBytes() == 0) {
       log.error(
           "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
       return false;
@@ -196,7 +196,7 @@ public class GraphSmith {
   }
 
   private void enforceReachabilityFromRoots(OracleHeap heap) {
-    if (config.vm.getHeapUnusedBytes() == 0) {
+    if (heap.getLvm().getHeapUnusedBytes() == 0) {
       log.error(
           "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
     }

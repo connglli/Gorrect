@@ -45,6 +45,11 @@ public class OpenJ9VM extends JavaVM {
   }
 
   @Override
+  public OpenJ9VM clone() {
+    return new OpenJ9VM(this.homeDirectory, this.getHeapCapacity());
+  }
+
+  @Override
   public long getReferenceSize() {
     return 0;
   }
