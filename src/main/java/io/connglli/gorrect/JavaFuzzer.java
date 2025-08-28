@@ -210,7 +210,7 @@ public class JavaFuzzer {
 
     private final int workerId;
     @NonNull private final String workdir;
-    private String bugsdir = "found_bugs";
+    private String bugsdir = "";
 
     @Override
     public void run() {
@@ -219,7 +219,7 @@ public class JavaFuzzer {
       log.info("Worker %d started, working on directory %s", workerId, workdir);
 
       // Create the working directory and the bugs subdirectory if they do not exist.
-      bugsdir = workdir + File.separator + bugsdir;
+      bugsdir = workdir + File.separator + "found_bugs";
       try {
         Files.createDirectories(Path.of(bugsdir));
       } catch (IOException e) {
@@ -387,19 +387,29 @@ public class JavaFuzzer {
       try (PrintStream ps =
           new PrintStream(new FileOutputStream(newTestDir + File.separator + "bug-report.txt"))) {
         ps.println("FAILURE: " + result.getFailureMessage());
-        ps.println(
-            "Object Violations: "
-                + result.getObjectViolations().entrySet().stream()
-                    .map(s -> " - %s: %s".formatted(s.getKey(), s.getValue()))
-                    .collect(Collectors.joining("\n")));
-        ps.println(
-            "Reference Violations: "
-                + result.getReferenceViolations().entrySet().stream()
-                    .map(
-                        s ->
-                            " - (%s -> %s): %s"
-                                .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
-                    .collect(Collectors.joining("\n")));
+        ps.print("Object Violations:");
+        if (result.getObjectViolations().isEmpty()) {
+          ps.println(" Not Found");
+        } else {
+          ps.println();
+          ps.println(
+              result.getObjectViolations().entrySet().stream()
+                  .map(s -> "- %s: %s".formatted(s.getKey(), s.getValue()))
+                  .collect(Collectors.joining("\n")));
+        }
+        ps.println("Reference Violations:");
+        if (result.getReferenceViolations().isEmpty()) {
+          ps.println(" Not Found");
+        } else {
+          ps.println();
+          ps.println(
+              result.getReferenceViolations().entrySet().stream()
+                  .map(
+                      s ->
+                          "- (%s -> %s): %s"
+                              .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
+                  .collect(Collectors.joining("\n")));
+        }
         ps.println();
         ps.println();
         ps.println("--- Oracle " + "-".repeat(50));
@@ -411,9 +421,9 @@ public class JavaFuzzer {
       } catch (FileNotFoundException e) {
         log.warning("Worker %d failed to create bug report file: %s", workerId, e.getMessage());
       }
-      log.info("Fuzzing Statistics");
-      log.info("------------------");
-      log.info(stats.formatAsText());
+      log.info(
+          Logger.AnsiColor.BLUE,
+          "\nFuzzing Statistics\n" + "------------------\n" + stats.formatAsText());
     }
 
     private String createTestNameFormat() {
