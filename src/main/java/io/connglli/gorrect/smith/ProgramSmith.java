@@ -472,7 +472,11 @@ public class ProgramSmith {
       GReference reference = s.getReference(referenceId);
       GID oldReferentId = reference.getReferent();
       GID newReferentId =
-          s.randomObject(o -> !o.getId().equals(oldReferentId) && s.isStronglyReachable(o.getId()));
+          s.randomObject(
+              o ->
+                  !o.getId().equals(oldReferentId)
+                      && !s.hasReference(reference.getReferer(), o.getId())
+                      && s.isStronglyReachable(o.getId()));
       if (newReferentId == null) {
         log.debug("Cannot replace a referent due to no strongly reachable objects.");
         return null;
@@ -589,7 +593,8 @@ public class ProgramSmith {
 
     private Pair<GID, GID> randomNewReference(GReference.Type type) {
       // We restrict the referer and the referent to be strongly reachable
-      List<GID> strongly = currState().getStronglyReachableObjects();
+      StateRandDecor s = currState();
+      List<GID> strongly = s.getStronglyReachableObjects();
       if (strongly.size() < 2) {
         log.debug(
             "Cannot add a "
@@ -611,6 +616,9 @@ public class ProgramSmith {
           }
           if (referentId.equals(refererId)) {
             continue; // We do not allow self-references
+          }
+          if (s.hasReference(refererId, referentId)) {
+            continue; // We do not allow duplicate references
           }
           return new Pair<>(refererId, referentId);
         }
