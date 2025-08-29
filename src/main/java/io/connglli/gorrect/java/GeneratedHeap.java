@@ -31,6 +31,7 @@ import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.gir.model.visitor.GObjectReversePostorderVisitor;
+import io.connglli.gorrect.gir.utility.UnmodifiableGraph;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.io.File;
@@ -804,6 +805,114 @@ class GeneratedHeap {
 
     // The reference relationship is changed, we should update the heap
     updateHeap();
+  }
+
+  // -========================================================================
+  // Oracle Checking and Generation
+  // -========================================================================
+
+  // Generate the oracle state check at the end of the main method to ensure that the heap
+  // state of the generated Java code after execution matches the oracle state.
+  // Note, this is a softer check compared to the one in JavaOracle.
+  void appendOracleCheck(@NonNull GGraph oracleState) {
+    // Update the heap to ensure the state is up-to-date
+    updateHeap();
+
+    GGraph currState = getState();
+    // We have to ensure that our state matches the oracle state
+    Assert.set(
+        currState.equals(oracleState),
+        "The current heap state of the JavaInterpreter does not match the oracle state");
+
+    // This implementation should be aligned with JavaOracle
+    UnmodifiableGraph state = UnmodifiableGraph.of(currState);
+
+    // Root objects in the oracle should still be roots in the runtime state.
+    for (GObject obj : state.getObjects()) {
+      if (obj.isRoot()) {
+        appendStatement(
+            """
+            assert %s != null : "The root object with ID %s (in the oracle state) is not found in the runtime state"\
+            """
+                .formatted(getObject(obj.getId()).getJavaRefId(), obj.getId()));
+      }
+    }
+
+    // Strongly reachable objects in the oracle should remain strongly reachable.
+    for (GID objId : state.getStronglyReachableObjects()) {
+      GeneratedObject obj = getObject(objId);
+      appendStatement(
+          """
+          assert %s != null : "The %s-reachable object with ID %s (in the oracle state) is not found in the runtime state"\
+          """
+              .formatted(obj.getJavaRefId(), GReference.Type.STRONG, obj.getId()));
+    }
+
+    // Softly reachable objects in the oracle can be softly reachable or cleared.
+    for (GID objId : state.getSoftlyReachableObjects()) {
+      GeneratedObject obj = getObject(objId);
+      appendStatement(
+          """
+          if (%s != null) {
+              assert %s != null : "The %s-reachable object with ID %s (in the oracle state) is not found in the runtime state";
+          }
+          """
+              .formatted(
+                  obj.getJavaRefId(), obj.getJavaDerefId(), GReference.Type.SOFT, obj.getId()));
+    }
+
+    // Weakly reachable objects are expected to be cleared after each GC cycle.
+    for (GID objId : state.getWeaklyReachableObjects()) {
+      GeneratedObject obj = getObject(objId);
+      appendStatement(
+          """
+          assert %s == null : "The %s-reachable object with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+          """
+              .formatted(obj.getJavaRefId(), GReference.Type.WEAK, obj.getId()));
+    }
+
+    // See the matrix in JavaOracle for the expected relationship between referers and referents.
+    for (GReference oracleRef : state.getReferences()) {
+      GID oracleReferer = oracleRef.getReferer();
+      GID oracleReferent = oracleRef.getReferent();
+      GReference.Type oracleRefererReach = state.getReachability(oracleReferer);
+      GReference.Type oracleReferentReach = state.getReachability(oracleReferent);
+      if (oracleRefererReach == GReference.Type.STRONG
+          && oracleReferentReach == GReference.Type.STRONG) {
+        appendStatement(
+            """
+            assert %s != null : "The %s-reachable referer with ID %s (in the oracle state) is not found in the runtime state"\
+            """
+                .formatted(
+                    getObject(oracleReferer).getJavaRefId(),
+                    GReference.Type.STRONG,
+                    oracleReferer));
+        appendStatement(
+            """
+            assert %s != null : "The %s-reachable referent with ID %s (in the oracle state) is not found in the runtime state"\
+            """
+                .formatted(
+                    getObject(oracleReferent).getJavaRefId(),
+                    GReference.Type.STRONG,
+                    oracleReferent));
+      } else if (oracleReferentReach == GReference.Type.WEAK) {
+        appendStatement(
+            """
+            assert %s == null : "The %s-reachable referent with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+            """
+                .formatted(
+                    getObject(oracleReferent).getJavaRefId(),
+                    GReference.Type.WEAK,
+                    oracleReferent));
+      } else if (oracleRefererReach == GReference.Type.WEAK) {
+        appendStatement(
+            """
+            assert %s == null : "The %s-reachable referer with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+            """
+                .formatted(
+                    getObject(oracleReferer).getJavaRefId(), GReference.Type.WEAK, oracleReferer));
+      }
+    }
   }
 
   // -========================================================================

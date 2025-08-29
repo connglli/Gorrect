@@ -71,12 +71,12 @@ public abstract class Oracle {
   protected abstract ValidationResult doValidate(@NonNull UnmodifiableGraph obtained);
 
   /** Returns a successful validation result. */
-  protected ValidationResult success(@NonNull UnmodifiableGraph obtained) {
+  public ValidationResult success(@NonNull UnmodifiableGraph obtained) {
     return new ValidationResult(true, obtained, null, null, null);
   }
 
   /** Returns a failed validation result with the given failure message and violations. */
-  protected ValidationResult failure(
+  public ValidationResult failure(
       @NonNull UnmodifiableGraph obtained,
       String failureMessage,
       Map<Pair<GID, GID>, String> referenceViolations,

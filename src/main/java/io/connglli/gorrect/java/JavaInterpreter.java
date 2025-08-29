@@ -30,21 +30,11 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.utility.*;
 import java.io.*;
-import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.TimeUnit;
-import java.util.concurrent.TimeoutException;
-import java.util.concurrent.atomic.AtomicLong;
 import lombok.Getter;
 import lombok.NonNull;
-import org.zeroturnaround.exec.InvalidExitValueException;
-import org.zeroturnaround.exec.ProcessExecutor;
-import org.zeroturnaround.exec.ProcessOutput;
-import org.zeroturnaround.exec.ProcessResult;
-import org.zeroturnaround.exec.listener.ProcessListener;
 
 public class JavaInterpreter {
 
@@ -75,68 +65,21 @@ public class JavaInterpreter {
   }
 
   /// Generate the Java code and return the relative file path to the workdir parameter.
-  public String exportToJava(String workdir) {
-    String file = heap.exportToJava(workdir);
-    log.info("Java code generated: " + file);
-    return file;
-  }
-
-  /// Generate the Java code and execute it in the given workdir. Return the relative path
-  /// to the heap dump file or null if the dump failed.
-  public String executeJava(JavaVM jvm, String workdir, String... extraExecOptions)
-      throws IOException, InterruptedException, TimeoutException {
-    String javaFile = exportToJava(workdir);
-    return executeGeneratedJavaFile(javaFile, jvm, workdir, extraExecOptions);
-  }
-
-  /// Execute the generated Java file in the given workdir.
-  public String executeGeneratedJavaFile(
-      String javaFile, JavaVM jvm, String workdir, String... extraExecOptions)
-      throws IOException, InterruptedException, TimeoutException {
-    // Compile the generated Java code; will throw an exception if the compilation fails
-    new ProcessExecutor()
-        .command(jvm.getJavaCompilerPath(), "-cp", workdir, workdir + File.separator + javaFile)
-        .redirectErrorStream(true)
-        .timeout(30, TimeUnit.SECONDS) // A simple compilation should finish within 30 seconds
-        .exitValue(0) // Throw an exception if the exit value is not 0
-        .execute();
-
-    String className = // Convert the file name to a full-qualified class name
-        javaFile.substring(0, javaFile.indexOf(".java")).replace(File.separator, ".");
-    String heapDumpFile = className + ".hprof";
-
-    // Execute the generated Java code and dump the heap
-    AtomicLong pid = new AtomicLong(-1L);
-    Impl.HeapDumper dumper = impl.heapDumper(pid, workdir + File.separator + heapDumpFile);
-    List<String> command = new ArrayList<>();
-    command.add(jvm.getJavaExecutablePath());
-    command.add("-cp");
-    command.add(workdir);
-    command.add(
-        "-Xmx" + MemorySize.toString(program.getConfiguration().getHeapSize(), 0).replace("B", ""));
-    command.addAll(List.of(extraExecOptions));
-    command.add(className);
-    new ProcessExecutor(command)
-        .timeout(1, TimeUnit.MINUTES)
-        .listener(
-            new ProcessListener() {
-              @Override
-              public void afterStart(Process process, ProcessExecutor executor) {
-                pid.set(process.pid());
-              }
-            })
-        .redirectErrorStream(true)
-        .redirectInput(dumper)
-        .exitValue(0) // Throw an exception if the exit value is not 0
-        .execute();
-
-    if (!dumper.succeeded) {
-      throw new InvalidExitValueException(
-          "Failed to dump the heap for process " + pid.get(),
-          new ProcessResult(-1, new ProcessOutput("".getBytes())));
+  /// The generated code will include soft assertions to validate the runtime state against the
+  /// oracle. If heapDump is true, the generated code will leave a prompt at the end of the main
+  /// method to wait for the user to trigger a heap dump using the HprofDumper utility.
+  public String exportToJava(String workdir, GGraph oracleState, boolean heapDump) {
+    // Insert oracle validation at the end of the main method
+    heap.appendComment("Validate the runtime state against the oracle state");
+    heap.appendOracleCheck(oracleState);
+    if (heapDump) {
+      // Insert a dump heap instruction at the end of the main method
+      heap.appendComment("Wait until the heap state is dumped");
+      heap.appendStatement("System.in.read()"); // See HprofDumper
     }
-
-    return heapDumpFile;
+    String file = heap.exportToJava(workdir);
+    log.info("Java code generated into " + file);
+    return file;
   }
 
   private class Impl implements GProgramVisitor<Void> {
@@ -159,60 +102,9 @@ public class JavaInterpreter {
         log.debug(heap.formatGraphStateToText().indent(5).stripTrailing());
         log.debug(heap.formatObjectStateToText().indent(5).stripTrailing());
       }
-      heap.appendComment("Final State:");
+      heap.appendComment("Current State:");
       heap.appendComment(heap.getState().formatToText());
-      // Insert a dump heap instruction at the end of the main method
-      heap.appendComment("Wait until the heap is dumped");
-      heap.appendStatement("System.in.read()"); // See HeapDumper
       return null;
-    }
-
-    public HeapDumper heapDumper(@NonNull AtomicLong pid, @NonNull String file) {
-      Assert.set(!(new File(file).exists()), "The hprof file %s already exists", file);
-      return new HeapDumper(pid, file);
-    }
-
-    private static class HeapDumper extends InputStream {
-      @NonNull private final AtomicLong pid;
-      @NonNull private final String file;
-
-      boolean succeeded = false;
-      volatile boolean closed = false;
-
-      public HeapDumper(@NonNull AtomicLong pid, @NonNull String file) {
-        this.pid = pid;
-        this.file = file;
-        this.pid.set(-1L); // Initialize the pid to -1L to indicate not started
-      }
-
-      @Override
-      public int read() throws IOException {
-        if (closed) {
-          return -1; // EOF
-        }
-        // Wait until the process is started
-        while (pid.get() == -1L) {
-          try {
-            Thread.sleep(5L);
-          } catch (InterruptedException e) {
-            log.error(
-                "Thread interrupted while waiting for the generated java process to start: %s", e);
-            closed = true;
-            return -1; // EOF if interrupted
-          }
-        }
-        log.info("DUMPING HEAP " + pid.get() + "...");
-        try {
-          Jcmd.dumpHeap(pid.get(), file, /* dead= */ false);
-          succeeded = true;
-          log.info("SUCCEEDED! Heap dumped to " + file);
-        } catch (Exception e) {
-          log.warning("FAILED: %s", e.getMessage());
-          succeeded = false;
-        }
-        closed = true;
-        return '\n'; // Signal that we have finished dumping the heap
-      }
     }
 
     public Void visit(GSetHeapInstruction instruction) {

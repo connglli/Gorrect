@@ -27,6 +27,7 @@ package io.connglli.gorrect;
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
+import io.connglli.gorrect.java.JavaExecutor;
 import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.*;
 import io.connglli.gorrect.oracle.NoOpVM;
@@ -216,11 +217,8 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optWeakRefWeight = 30;
 
-  protected GraphSmith.Config.ConfigBuilder getGraphSmithConfigBuilder(
-      IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+  protected GraphSmith.Config.ConfigBuilder getGraphSmithConfigBuilder() {
     return GraphSmith.Config.builder()
-        .objectIdSmith(objectIdSmith)
-        .referenceIdSmith(referenceIdSmith)
         .minRoots(optMinRoots)
         .maxRoots(optMaxRoots)
         .minNonRoots(optMinNonRoots)
@@ -235,7 +233,11 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   }
 
   protected GraphSmith buildGraphSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new GraphSmith(getGraphSmithConfigBuilder(objectIdSmith, referenceIdSmith).build());
+    return new GraphSmith(
+        getGraphSmithConfigBuilder()
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith)
+            .build());
   }
 }
 
@@ -277,11 +279,8 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
 
-  protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfig(
-      IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+  protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfig() {
     return ProgramSmith.Config.builder()
-        .objectIdSmith(objectIdSmith)
-        .referenceIdSmith(referenceIdSmith)
         .minInstructions(optMinInstructions)
         .maxInstructions(optMaxInstructions)
         .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
@@ -291,7 +290,11 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
   protected ProgramSmith buildProgramSmith(
       IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
     return new ProgramSmith(
-        getProgramSmithConfig(objectIdSmith, referenceIdSmith).initState(initState).build());
+        getProgramSmithConfig()
+            .objectIdSmith(objectIdSmith)
+            .referenceIdSmith(referenceIdSmith)
+            .initState(initState)
+            .build());
   }
 }
 
@@ -432,7 +435,8 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       // Export the Java program to a file and execute it
       System.out.println("Java Program");
       System.out.println("------------");
-      String javaFilePath = java.exportToJava(optOutputDir.toString());
+      String javaFilePath =
+          java.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
       String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
       System.out.println(Files.readString(Path.of(javaFileFullPath)));
 
@@ -440,10 +444,21 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
         // Validate if the Java program after execution matches the oracle state.
         System.out.println("Java Execution State");
         System.out.println("--------------------");
+        JavaExecutor executor = new JavaExecutor(jvm);
         try {
-          String hprofFilePath =
-              java.executeGeneratedJavaFile(
-                  javaFilePath, jvm, optOutputDir.toString(), optUseGC.enableOptions);
+          String hprofFilePath = javaFilePath + ".hprof";
+          JavaExecutor.Result execResult =
+              executor.execute(
+                  javaFilePath, hprofFilePath, optOutputDir.toString(), optUseGC.enableOptions);
+          if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {
+            System.out.println("FOUND A GC BUG");
+            System.out.println(execResult.errorMessage());
+            return 0;
+          } else if (execResult.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
+            System.out.println("Java program execution failed: " + execResult.errorMessage());
+            return 1;
+          }
+
           String hprofFileFullPath = optOutputDir + File.separator + hprofFilePath;
           GGraph execState = HprofParser.parse(hprofFileFullPath);
           System.out.println(execState.formatToText());
@@ -452,26 +467,26 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
           System.out.println("------------");
           // Validate the Java execution state against the oracle interpreter state.
           JavaOracle validator = new JavaOracle(oracleState);
-          JavaOracle.ValidationResult result = validator.validate(execState);
-          if (result.isValid()) {
+          JavaOracle.ValidationResult valiResult = validator.validate(execState);
+          if (valiResult.isValid()) {
             System.out.println(
                 "SUCCESS: The Java execution state matches the oracle interpreter state.");
           } else {
-            System.out.println("FAILURE: " + result.getFailureMessage());
+            System.out.println("FAILURE: " + valiResult.getFailureMessage());
             System.out.println(
                 "Object Violations: "
-                    + result.getObjectViolations().entrySet().stream()
+                    + valiResult.getObjectViolations().entrySet().stream()
                         .map(s -> " - %s: %s".formatted(s.getKey(), s.getValue()))
                         .collect(Collectors.joining("\n")));
             System.out.println(
                 "Reference Violations: "
-                    + result.getReferenceViolations().entrySet().stream()
+                    + valiResult.getReferenceViolations().entrySet().stream()
                         .map(
                             s ->
                                 " - (%s -> %s): %s"
                                     .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
                         .collect(Collectors.joining("\n")));
-            return 1;
+            return 0;
           }
         } catch (Exception e) {
           System.out.println("FAILED to execute Java code: " + e.getMessage());
@@ -509,6 +524,15 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       description = "The maximum number of iterations to run the fuzzer (0 for infinite)",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxIterations = 0;
+
+  @CommandLine.Option(
+      names = {"--strict-validation"},
+      negatable = true,
+      description =
+          "Validation by dumping the runtime heap and parsing and analyzing the HPROF "
+              + "instead of directly checking the runtime state loosely",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected boolean optStrictValidation = false;
 
   @CommandLine.Option(
       names = {"-H", "--heap-capacity"},
@@ -574,19 +598,14 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   @Override
   public Integer runCommand() throws Exception {
     JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
-    IdSmith objectIdSmith = new IdSmith("o");
-    IdSmith referenceIdSmith = new IdSmith("l");
-    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder =
-        getGraphSmithConfigBuilder(objectIdSmith, referenceIdSmith);
-    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder =
-        getProgramSmithConfig(objectIdSmith, referenceIdSmith);
+    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = getGraphSmithConfigBuilder();
+    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder = getProgramSmithConfig();
     new JavaFuzzer(
             JavaFuzzer.Config.builder()
+                .strictValidation(optStrictValidation)
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
                 .maxIterations(optMaxIterations)
-                .objectIdSmith(objectIdSmith)
-                .referenceIdSmith(referenceIdSmith)
                 .graphSmithConfigBuilder(graphSmithConfigBuilder)
                 .programSmithConfigBuilder(programSmithConfigBuilder)
                 .javaVM(jvm)
