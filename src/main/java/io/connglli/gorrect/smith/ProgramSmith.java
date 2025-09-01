@@ -149,8 +149,14 @@ public class ProgramSmith {
     instWeights.put(GAddWeakRefInstruction.class, 10);
     instWeights.put(GAddFaninRefsInstruction.class, 5);
     instWeights.put(GAddFanoutRefsInstruction.class, 5);
-    instWeights.put(GReplaceReferentInstruction.class, 5);
-    // Currently, we disable swapping referents as the requirements are overly strict.
+    // FIXME: Currently, we disable replacing referents due to bugs in Java generation.
+    //  For example:
+    //    initial state: a->b, c // => a.b = b
+    //    1. replace_referent(a->b, c) // => a.b = c
+    //    2. add_strong_ref(a, b) // => a.b = b
+    //  In this case, the reference a->c (represented in Java a.b) is lost after step 2.
+    instWeights.put(GReplaceReferentInstruction.class, 0);
+    // TODO: Currently, we disable swapping referents due the the above issue.
     instWeights.put(GSwapReferentsInstruction.class, 0);
     instWeights.put(GSoftenRefInstruction.class, 5);
     instWeights.put(GStrengthRefInstruction.class, 5);
@@ -616,6 +622,7 @@ public class ProgramSmith {
           if (s.hasReference(refererId, referentId)) {
             continue; // We do not allow duplicate references
           }
+
           return new Pair<>(refererId, referentId);
         }
       }
