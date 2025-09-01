@@ -44,6 +44,7 @@ import lombok.RequiredArgsConstructor;
 /** GraphSmith crafts a random object graph GGraph */
 @RequiredArgsConstructor
 public class GraphSmith {
+  private final Logger log = Logger.getLogger(GraphSmith.class);
 
   @Builder
   @Getter
@@ -90,7 +91,6 @@ public class GraphSmith {
     @Builder.Default private long maxObjSizeBytes = 128_000; // 128KB
   }
 
-  private static final Logger log = Logger.getLogger(GraphSmith.class);
   private final Rand random = Rand.getInstance();
 
   @NonNull private final Config config;

@@ -49,9 +49,25 @@ import org.netbeans.lib.profiler.heap.*;
  * NetBeans Profiler library.
  */
 public class HprofParser {
-  public static final Logger log = Logger.getLogger(HprofParser.class);
+  private final Logger log = Logger.getLogger(HprofParser.class);
+  private final Map<Long, GID> cachedIds = new WeakHashMap<>();
+
+  private record GObjRecord(
+      @NonNull GID id,
+      @NonNull GObject.Type type,
+      long size,
+      @NonNull Map<GID, GReference.Type> referents) {
+
+    boolean isRoot() {
+      return type == GObject.Type.GCROOT;
+    }
+  }
 
   public static GGraph parse(@NonNull String hprofFile) throws IOException {
+    return new HprofParser().parseHprof(hprofFile);
+  }
+
+  private GGraph parseHprof(@NonNull String hprofFile) throws IOException {
     deleteCacheIfNecessary(hprofFile);
 
     Heap heap = HeapFactory.createHeap(new File(hprofFile));
@@ -82,11 +98,10 @@ public class HprofParser {
       }
       Assert.set(
           // We're a root reference, so it must a generated object
-          GObjRecord.isGeneratedByUs(o),
-          "Expected Instance for strong reference, but got " + o.getClass());
+          isGeneratedObject(o), "Expected Instance for strong reference, but got " + o.getClass());
       Instance instance = (Instance) o;
       long instanceId = instance.getInstanceId();
-      GObjRecord root = GObjRecord.parse(instance, GObject.Type.GCROOT);
+      GObjRecord root = parseGeneratedObject(instance, GObject.Type.GCROOT);
       objects.put(instanceId, root);
       logFoundObject(instance, root, true);
     }
@@ -108,7 +123,7 @@ public class HprofParser {
 
       while (objectIterator.hasNext()) {
         Object o = objectIterator.next();
-        if (!GObjRecord.isGeneratedByUs(o)) {
+        if (!isGeneratedObject(o)) {
           continue;
         }
         Instance instance = (Instance) o;
@@ -116,7 +131,7 @@ public class HprofParser {
         if (objects.containsKey(instanceId)) {
           continue;
         }
-        GObjRecord object = GObjRecord.parse(instance, GObject.Type.ORDINARY);
+        GObjRecord object = parseGeneratedObject(instance, GObject.Type.ORDINARY);
         objects.put(instanceId, object);
         logFoundObject(instance, object, false);
       }
@@ -149,144 +164,132 @@ public class HprofParser {
     return graph;
   }
 
-  private record GObjRecord(
-      @NonNull GID id,
-      @NonNull GObject.Type type,
-      long size,
-      @NonNull Map<GID, GReference.Type> referents) {
-    private static final Map<Long, GID> cachedIds = new WeakHashMap<>();
-
-    static boolean isGeneratedByUs(Object o) {
-      return o instanceof Instance
-          && ((Instance) o)
-              .getJavaClass()
-              .getName()
-              .startsWith(GeneratedObjectClass.CLAZZ_NAME_PREFIX);
-    }
-
-    @SuppressWarnings("rawtypes")
-    static boolean isReferenceInstance(Object o, Class<? extends Reference> clazz) {
-      return o instanceof Instance
-          && ((Instance) o).getJavaClass().getName().equals(clazz.getCanonicalName());
-    }
-
-    static GObjRecord parse(@NonNull Instance instance, GObject.Type type) {
-      Assert.set(isGeneratedByUs(instance), "Expected a generated object, but got: " + instance);
-      GID id = parseIdField(instance);
-      Long size = parseSizeField(instance);
-      Map<GID, GReference.Type> referents = parseReferentFields(instance);
-      return new GObjRecord(id, type, size, referents);
-    }
-
-    static GID parseIdField(@NonNull Instance instance) {
-      long instanceId = instance.getInstanceId();
-      GID objectId = cachedIds.getOrDefault(instanceId, null);
-      if (objectId != null) {
-        return objectId; // Return cached ID if available
-      }
-      Assert.set(
-          GeneratedObjectBaseClass.objectId.type().equals(ClassName.get(String.class)),
-          "Expected objectId field to be of type String, but got "
-              + GeneratedObjectBaseClass.objectId.type());
-      String idIntern =
-          NBHprofParser.parseStringField(instance, GeneratedObjectBaseClass.objectId.name(), false);
-      Assert.set(idIntern != null, "Expected a non-null id for instance " + instance);
-      objectId = new GID(idIntern);
-      cachedIds.put(instanceId, objectId);
-      return objectId;
-    }
-
-    static Long parseSizeField(@NonNull Instance instance) {
-      Assert.set(
-          GeneratedObjectBaseClass.objectSize.type().equals(TypeName.get(long.class)),
-          "Expected objectSize field to be of type long, but got "
-              + GeneratedObjectBaseClass.objectSize.type());
-      Long size =
-          NBHprofParser.parsePrimitiveField(
-              instance, GeneratedObjectBaseClass.objectSize.name(), Long.class, false);
-      Assert.set(size != null, "Expected a non-null size for instance " + instance);
-      return size;
-    }
-
-    static Map<GID, GReference.Type> parseReferentFields(@NonNull Instance instance) {
-      Map<GID, GReference.Type> referents = new HashMap<>();
-      for (Object f : instance.getFieldValues()) {
-        Assert.set(f instanceof FieldValue, "Expected FieldValue, but got " + f.getClass());
-        FieldValue fieldValuePair = (FieldValue) f;
-        Field field = fieldValuePair.getField();
-        if (field.isStatic()) {
-          continue; // Skip static fields as all our references are instance fields
-        }
-        switch (field.getName()) {
-          case String fieldName
-              when fieldName.startsWith(GeneratedObjectClass.STRONG_REF_FIELD_NAME_PREFIX) -> {
-            Object o = instance.getValueOfField(fieldName);
-            if (o == null) {
-              continue; // The referent no longer reachable.
-            }
-            Assert.set(
-                // We're a strong reference, so it must a generated object
-                isGeneratedByUs(o),
-                "Expected Instance for strong reference, but got " + o.getClass());
-            GID id = parseIdField((Instance) o);
-            referents.put(id, GReference.Type.STRONG);
-          }
-          case String fieldName
-              when fieldName.startsWith(GeneratedObjectClass.SOFT_REF_FIELD_NAME_PREFIX) -> {
-            Object o = instance.getValueOfField(fieldName);
-            if (o == null) {
-              continue; // The referent no longer reachable.
-            }
-            Assert.set(
-                // We're a soft reference, so it must a SoftReference
-                isReferenceInstance(o, SoftReference.class),
-                "Expected Instance for soft reference, but got " + o.getClass());
-            Instance refInstance = (Instance) o;
-            o = refInstance.getValueOfField("referent");
-            if (o == null) {
-              continue; // The referent no longer reachable.
-            }
-            Assert.set(
-                isGeneratedByUs(o),
-                "Expected Instance for soft reference's referent, but got " + o.getClass());
-            GID id = parseIdField((Instance) o);
-            referents.put(id, GReference.Type.SOFT);
-          }
-          case String fieldName
-              when fieldName.startsWith(GeneratedObjectClass.WEAK_REF_FIELD_NAME_PREFIX) -> {
-            Object o = instance.getValueOfField(fieldName);
-            if (o == null) {
-              continue; // The referent no longer reachable.
-            }
-            Assert.set(
-                // We're a weak reference, so it must a WeakReference
-                isReferenceInstance(o, WeakReference.class),
-                "Expected Instance for weak reference, but got " + o.getClass());
-            Instance refInstance = (Instance) o;
-            o = refInstance.getValueOfField("referent");
-            if (o == null) {
-              continue; // The referent no longer reachable.
-            }
-            Assert.set(
-                isGeneratedByUs(o),
-                "Expected Instance for weak reference's referent, but got " + o.getClass());
-            GID id = parseIdField((Instance) o);
-            referents.put(id, GReference.Type.WEAK);
-          }
-          default -> {
-            // Ignore other fields
-          }
-        }
-      }
-      return referents;
-    }
-
-    boolean isRoot() {
-      return type == GObject.Type.GCROOT;
-    }
+  private static boolean isGeneratedObject(Object o) {
+    return o instanceof Instance
+        && ((Instance) o)
+            .getJavaClass()
+            .getName()
+            .startsWith(GeneratedObjectClass.CLAZZ_NAME_PREFIX);
   }
 
-  private static void deleteCacheIfNecessary(@NonNull String hprof) {
+  @SuppressWarnings("rawtypes")
+  private static boolean isReferenceInstance(Object o, Class<? extends Reference> clazz) {
+    return o instanceof Instance
+        && ((Instance) o).getJavaClass().getName().equals(clazz.getCanonicalName());
+  }
+
+  private GObjRecord parseGeneratedObject(@NonNull Instance instance, GObject.Type type) {
+    Assert.set(isGeneratedObject(instance), "Expected a generated object, but got: " + instance);
+    GID id = parseGObjIdField(instance);
+    Long size = parseGObjSizeField(instance);
+    Map<GID, GReference.Type> referents = parseGObjReferentFields(instance);
+    return new GObjRecord(id, type, size, referents);
+  }
+
+  private GID parseGObjIdField(@NonNull Instance instance) {
+    long instanceId = instance.getInstanceId();
+    GID objectId = cachedIds.getOrDefault(instanceId, null);
+    if (objectId != null) {
+      return objectId; // Return cached ID if available
+    }
+    Assert.set(
+        GeneratedObjectBaseClass.objectId.type().equals(ClassName.get(String.class)),
+        "Expected objectId field to be of type String, but got "
+            + GeneratedObjectBaseClass.objectId.type());
+    String idIntern =
+        NBHprofParser.parseStringField(instance, GeneratedObjectBaseClass.objectId.name(), false);
+    Assert.set(idIntern != null, "Expected a non-null id for instance " + instance);
+    objectId = new GID(idIntern);
+    cachedIds.put(instanceId, objectId);
+    return objectId;
+  }
+
+  private Long parseGObjSizeField(@NonNull Instance instance) {
+    Assert.set(
+        GeneratedObjectBaseClass.objectSize.type().equals(TypeName.get(long.class)),
+        "Expected objectSize field to be of type long, but got "
+            + GeneratedObjectBaseClass.objectSize.type());
+    Long size =
+        NBHprofParser.parsePrimitiveField(
+            instance, GeneratedObjectBaseClass.objectSize.name(), Long.class, false);
+    Assert.set(size != null, "Expected a non-null size for instance " + instance);
+    return size;
+  }
+
+  private Map<GID, GReference.Type> parseGObjReferentFields(@NonNull Instance instance) {
+    Map<GID, GReference.Type> referents = new HashMap<>();
+    for (Object f : instance.getFieldValues()) {
+      Assert.set(f instanceof FieldValue, "Expected FieldValue, but got " + f.getClass());
+      FieldValue fieldValuePair = (FieldValue) f;
+      Field field = fieldValuePair.getField();
+      if (field.isStatic()) {
+        continue; // Skip static fields as all our references are instance fields
+      }
+      switch (field.getName()) {
+        case String fieldName
+            when fieldName.startsWith(GeneratedObjectClass.STRONG_REF_FIELD_NAME_PREFIX) -> {
+          Object o = instance.getValueOfField(fieldName);
+          if (o == null) {
+            continue; // The referent no longer reachable.
+          }
+          Assert.set(
+              // We're a strong reference, so it must a generated object
+              isGeneratedObject(o),
+              "Expected Instance for strong reference, but got " + o.getClass());
+          GID id = parseGObjIdField((Instance) o);
+          referents.put(id, GReference.Type.STRONG);
+        }
+        case String fieldName
+            when fieldName.startsWith(GeneratedObjectClass.SOFT_REF_FIELD_NAME_PREFIX) -> {
+          Object o = instance.getValueOfField(fieldName);
+          if (o == null) {
+            continue; // The referent no longer reachable.
+          }
+          Assert.set(
+              // We're a soft reference, so it must a SoftReference
+              isReferenceInstance(o, SoftReference.class),
+              "Expected Instance for soft reference, but got " + o.getClass());
+          Instance refInstance = (Instance) o;
+          o = refInstance.getValueOfField("referent");
+          if (o == null) {
+            continue; // The referent no longer reachable.
+          }
+          Assert.set(
+              isGeneratedObject(o),
+              "Expected Instance for soft reference's referent, but got " + o.getClass());
+          GID id = parseGObjIdField((Instance) o);
+          referents.put(id, GReference.Type.SOFT);
+        }
+        case String fieldName
+            when fieldName.startsWith(GeneratedObjectClass.WEAK_REF_FIELD_NAME_PREFIX) -> {
+          Object o = instance.getValueOfField(fieldName);
+          if (o == null) {
+            continue; // The referent no longer reachable.
+          }
+          Assert.set(
+              // We're a weak reference, so it must a WeakReference
+              isReferenceInstance(o, WeakReference.class),
+              "Expected Instance for weak reference, but got " + o.getClass());
+          Instance refInstance = (Instance) o;
+          o = refInstance.getValueOfField("referent");
+          if (o == null) {
+            continue; // The referent no longer reachable.
+          }
+          Assert.set(
+              isGeneratedObject(o),
+              "Expected Instance for weak reference's referent, but got " + o.getClass());
+          GID id = parseGObjIdField((Instance) o);
+          referents.put(id, GReference.Type.WEAK);
+        }
+        default -> {
+          // Ignore other fields
+        }
+      }
+    }
+    return referents;
+  }
+
+  private void deleteCacheIfNecessary(@NonNull String hprof) {
     File hprofFile = new File(hprof);
     Assert.set(hprofFile.exists(), "Hprof file does not exist: " + hprofFile.getAbsolutePath());
     Assert.set(
@@ -306,8 +309,7 @@ public class HprofParser {
     }
   }
 
-  private static void logFoundObject(
-      @NonNull Instance instance, GObjRecord object, boolean isRoot) {
+  private void logFoundObject(@NonNull Instance instance, GObjRecord object, boolean isRoot) {
     log.info(
         "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, shallow_size=%dB, retained_size=%dB, reachable_size=%dB)",
         isRoot ? "root" : "non-root",

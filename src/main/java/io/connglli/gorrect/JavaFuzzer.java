@@ -49,7 +49,7 @@ import java.util.stream.Collectors;
 import lombok.*;
 
 public class JavaFuzzer {
-  private static final Logger log = Logger.getLogger(JavaFuzzer.class);
+  private final Logger log = Logger.getLogger(JavaFuzzer.class);
 
   @Builder
   public static class Config {

@@ -57,7 +57,7 @@ import lombok.NonNull;
  * not yet manually freed, even though it is already unreachable from the root objects.
  */
 class GeneratedHeap {
-  private static final Logger log = Logger.getLogger(GeneratedHeap.class);
+  private final Logger log = Logger.getLogger(GeneratedHeap.class);
 
   // Strict mode means we disable all operations on non-strongly reachable objects as this might
   // introduce NullPointerExceptions in the generated code.
@@ -307,7 +307,7 @@ class GeneratedHeap {
   }
 
   class NonRootInPoolAllocator implements AutoCloseable {
-    private List<GID> allocatedObjects = new ArrayList<>();
+    private final List<GID> allocatedObjects = new ArrayList<>();
 
     @SuppressWarnings("UnusedReturnValue")
     public GeneratedObject alloc(@NonNull GID objectId, @NonNull Long objectSize) {

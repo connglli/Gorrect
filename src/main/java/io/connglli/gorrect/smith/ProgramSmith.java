@@ -42,6 +42,8 @@ import lombok.*;
 /** ProgramSmith generates a random GIR program. */
 @RequiredArgsConstructor
 public class ProgramSmith {
+  private final Logger log = Logger.getLogger(ProgramSmith.class);
+
   @Builder
   @Getter
   public static class Config {
@@ -136,7 +138,6 @@ public class ProgramSmith {
     }
   }
 
-  private static final Logger log = Logger.getLogger(ProgramSmith.class);
   private final Rand random = Rand.getInstance();
 
   // TODO: Make the weights configurable.

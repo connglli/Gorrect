@@ -37,8 +37,7 @@ import lombok.Getter;
 import lombok.NonNull;
 
 public class JavaInterpreter {
-
-  private static final Logger log = Logger.getLogger(JavaInterpreter.class);
+  private final Logger log = Logger.getLogger(JavaInterpreter.class);
 
   @Getter @NonNull private final GProgram program;
   @NonNull private final GeneratedHeap heap;

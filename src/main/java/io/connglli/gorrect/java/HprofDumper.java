@@ -34,7 +34,7 @@ import lombok.NonNull;
 /// A heap dumper that dumps the heap of a process (set by PID) to the given hprof file when the
 /// process is ready, i.e., when the process starts to read something from us.
 public class HprofDumper extends InputStream {
-  private static final Logger log = Logger.getLogger(JavaExecutor.class);
+  private final Logger log = Logger.getLogger(JavaExecutor.class);
 
   @NonNull private final String file;
   @NonNull private final AtomicLong pid;
