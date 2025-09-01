@@ -137,7 +137,7 @@ public class ProgramSmith {
   }
 
   private static final Logger log = Logger.getLogger(ProgramSmith.class);
-  private static final Rand random = Rand.getInstance();
+  private final Rand random = Rand.getInstance();
 
   // TODO: Make the weights configurable.
   private static final SequencedMap<Class<? extends GInstruction>, Integer> instWeights =
@@ -177,6 +177,7 @@ public class ProgramSmith {
     GProgram program =
         new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), config.initState));
     OracleInterpreter interpreter = new OracleInterpreter(vm, program);
+    interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     SmithImpl smith = new SmithImpl(vm, interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     for (int i = 0; i < numInstructions; i++) {
@@ -705,7 +706,7 @@ public class ProgramSmith {
 }
 
 class StateRandDecor extends UnmodifiableGraph {
-  private static final Rand random = Rand.getInstance();
+  private final Rand random = Rand.getInstance();
 
   StateRandDecor(@NonNull OracleInterpreter interpreter) {
     super(interpreter.getState());

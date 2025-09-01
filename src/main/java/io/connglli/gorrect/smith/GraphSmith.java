@@ -91,7 +91,7 @@ public class GraphSmith {
   }
 
   private static final Logger log = Logger.getLogger(GraphSmith.class);
-  private static final Rand random = Rand.getInstance();
+  private final Rand random = Rand.getInstance();
 
   @NonNull private final Config config;
 

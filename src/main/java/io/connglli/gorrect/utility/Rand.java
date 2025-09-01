@@ -31,14 +31,11 @@ import java.util.stream.LongStream;
 
 /** Rand manages the randomness of Gorrect to enable a reproducible result */
 public class Rand {
-  private static Rand instance;
-  private final Random random;
+  private static final ThreadLocal<Rand> instance = ThreadLocal.withInitial(Rand::new);
+  private final Random random = new Random();
 
   public static Rand getInstance() {
-    if (instance == null) {
-      instance = new Rand();
-    }
-    return instance;
+    return instance.get();
   }
 
   public void setSeed(long seed) {
@@ -208,7 +205,5 @@ public class Rand {
     return random.doubles(randomNumberOrigin, randomNumberBound);
   }
 
-  private Rand() {
-    random = new Random();
-  }
+  private Rand() {}
 }

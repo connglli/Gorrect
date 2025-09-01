@@ -182,7 +182,10 @@ public class JavaFuzzer {
       for (int i = 0; config.maxWorkers == 0 || i < config.maxWorkers; i++) {
         log.info("Requesting the %d-th worker ...", i);
         workers.submit(
-            new FuzzWorker(i, config.outputDir + File.separator + "fuzz_proc_%05d".formatted(i)));
+            new FuzzWorker(
+                i,
+                config.outputDir + File.separator + "fuzz_proc_%05d".formatted(i),
+                Rand.getInstance().nextLong()));
       }
       log.info("Waiting for all workers to finish ...");
       workers.close();
@@ -211,6 +214,7 @@ public class JavaFuzzer {
 
     private final int workerId;
     @NonNull private final String workdir;
+    @NonNull private final Long seed;
     private String bugsdir = "";
 
     @Override
@@ -218,7 +222,11 @@ public class JavaFuzzer {
       recoverLogging();
 
       log.info(
-          Logger.AnsiColor.GREEN, "Worker %d started, working on directory %s", workerId, workdir);
+          Logger.AnsiColor.GREEN,
+          "Worker %d started: seed=%d, workdir=%s",
+          workerId,
+          seed,
+          workdir);
 
       // Create the working directory and the bugs subdirectory if they do not exist.
       bugsdir = workdir + File.separator + "found_bugs";
@@ -229,6 +237,8 @@ public class JavaFuzzer {
         log.error(e);
         return;
       }
+      // Initialize the random seed for this worker
+      Rand.getInstance().setSeed(seed);
 
       // Start the fuzzing loop
       try {
