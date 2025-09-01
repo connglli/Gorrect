@@ -458,7 +458,17 @@ class GeneratedHeap {
         .getReferers()
         .forEach(
             referer -> {
-              unlink(getReference(referer, object));
+              // It is likely that unlink a reference will cause other objects to be unreachable
+              // For example, b<->a, when removing b->a, a becomes unreachable. So it is unlikely
+              // to unlink b<-a. In this case, we only need to free the link.
+              GeneratedReference reference = getReference(referer, object);
+              // The referent depends on us, now it is no longer reachable, i.e.,
+              // being null in the generated Java. In this case, we only move it.
+              if (referer.isReachable()) {
+                unlink(reference);
+              } else {
+                moveReferenceToDead(reference);
+              }
             });
     if (object.isRoot()) {
       makeNonRoot(object);
@@ -798,7 +808,13 @@ class GeneratedHeap {
         referer.getClazz().hasField(fieldName),
         "Cannot remove reference to %s, as it does not exist",
         fieldName);
-    appendStatement(referer.getJavaDerefId() + "." + reference.getField() + " = null");
+    ensureReachable(referer, "The referer object %s is not reachable".formatted(referer.getId()));
+    // When the referer is already null, we do not need to set it to null again
+    if (!referent.isReachable()) {
+      appendComment("The referent is already null (i.e., unreachable).");
+    } else {
+      appendStatement(referer.getJavaDerefId() + "." + reference.getField() + " = null");
+    }
 
     // Remove the reference from the referents map
     moveReferenceToDead(reference);
@@ -1062,6 +1078,18 @@ class GeneratedHeap {
         });
   }
 
+  // Ensure the object is reachable with any reachability type
+  private void ensureReachable(GeneratedObject object, String message) {
+    if (object.getReachability() == null) {
+      if (strict) {
+        log.error(message);
+      } else {
+        log.warning(message);
+      }
+    }
+  }
+
+  // Ensure the object is reachable with the expected reachability type
   private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {
     if (object.getReachability() != type) {
       if (strict) {
