@@ -167,14 +167,15 @@ public class JavaFuzzer {
   }
 
   public void start() {
+    recoverLogging();
     log.info(
+        Logger.AnsiColor.GREEN,
         "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, gcOptions='%s', strictValidation=%s",
         config.maxWorkers,
         config.outputDir,
         config.maxIterations == 0 ? "infinite" : Integer.toString(config.maxIterations),
         config.useGcOptions,
         config.strictValidation ? "enabled" : "disabled");
-    recoverLogging();
     ExecutorService workers = Executors.newFixedThreadPool(config.maxWorkers);
     try {
       stats.setStartTimeMills(System.currentTimeMillis());
@@ -216,7 +217,8 @@ public class JavaFuzzer {
     public void run() {
       recoverLogging();
 
-      log.info("Worker %d started, working on directory %s", workerId, workdir);
+      log.info(
+          Logger.AnsiColor.GREEN, "Worker %d started, working on directory %s", workerId, workdir);
 
       // Create the working directory and the bugs subdirectory if they do not exist.
       bugsdir = workdir + File.separator + "found_bugs";
@@ -273,7 +275,12 @@ public class JavaFuzzer {
           stats.incTotalBugs();
           recoverLogging();
           log.info(
-              Logger.AnsiColor.GREEN, "Worker %d FOUND A GC BUG at iteration %d: %s", i, testdir);
+              Logger.AnsiColor.GREEN,
+              "Worker %d FOUND A GC BUG (strict=%b) at iteration %d: %s",
+              workerId,
+              e.strict,
+              i,
+              testdir);
           handleValidationFailure(e, testdir, "bug-report.txt");
           log.info(
               Logger.AnsiColor.BLUE,
@@ -408,7 +415,7 @@ public class JavaFuzzer {
         log.info(
             Logger.AnsiColor.GREEN,
             "GC BUG FOUND: The Java execution state does NOT match the oracle!");
-        throw new OracleValidationFailure(false, valiResult);
+        throw new OracleValidationFailure(true, valiResult);
       }
     }
 
@@ -442,8 +449,7 @@ public class JavaFuzzer {
     private void generateBugReport(PrintStream ps, JavaExecutor.Result result) {
       ps.println("FAILURE: " + result.exitCode().name());
       if (result.errorMessage() != null && !result.errorMessage().isEmpty()) {
-        ps.println("Error Message:");
-        ps.println(result.errorMessage());
+        ps.println("Message: " + result.errorMessage());
       }
     }
 
@@ -459,7 +465,7 @@ public class JavaFuzzer {
                 .map(s -> "- %s: %s".formatted(s.getKey(), s.getValue()))
                 .collect(Collectors.joining("\n")));
       }
-      ps.println("Reference Violations:");
+      ps.print("Reference Violations:");
       if (result.getReferenceViolations().isEmpty()) {
         ps.println(" Not Found");
       } else {
