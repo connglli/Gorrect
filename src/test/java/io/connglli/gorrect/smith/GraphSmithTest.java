@@ -50,14 +50,13 @@ class GraphSmithTest {
     objectIdSmith = new IdSmith("obj");
     referenceIdSmith = new IdSmith("ref");
 
-    configBuilder =
-        GraphSmith.Config.builder().objectIdSmith(objectIdSmith).referenceIdSmith(referenceIdSmith);
+    configBuilder = GraphSmith.Config.builder();
   }
 
   @Test
   void testCraftBasicGraph() {
     GraphSmith.Config config = configBuilder.build();
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
     GGraph graph = smith.craft(vm);
 
@@ -78,7 +77,7 @@ class GraphSmithTest {
             .maxRefs(1)
             .build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     assertEquals(1, graph.getRoots().size(), "Should have exactly 1 root object");
@@ -102,7 +101,7 @@ class GraphSmithTest {
             .weakRefWeight(20)
             .build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     int rootCount = graph.getRoots().size();
@@ -128,7 +127,7 @@ class GraphSmithTest {
             .maxRefs(10)
             .build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     Set<GID> allObjects =
@@ -159,7 +158,7 @@ class GraphSmithTest {
             .weakRefWeight(20)
             .build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     long strongRefs =
@@ -186,7 +185,7 @@ class GraphSmithTest {
     GraphSmith.Config config =
         configBuilder.minObjSizeBytes(minSize).maxObjSizeBytes(maxSize).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     for (GObject obj : graph.getObjects()) {
@@ -204,7 +203,7 @@ class GraphSmithTest {
     GraphSmith.Config config =
         configBuilder.minRoots(5).maxRoots(5).minNonRoots(15).maxNonRoots(15).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     Set<GID> objectIds =
@@ -219,7 +218,7 @@ class GraphSmithTest {
   void testUniqueReferenceIds() {
     GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     Set<GID> referenceIds =
@@ -235,7 +234,7 @@ class GraphSmithTest {
   void testNoSelfReferences() {
     GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     for (GReference ref : graph.getReferences()) {
@@ -248,7 +247,7 @@ class GraphSmithTest {
   void testNoDuplicateReferences() {
     GraphSmith.Config config = configBuilder.minRefs(15).maxRefs(15).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     Set<String> referenceKeys = new java.util.HashSet<>();
@@ -261,7 +260,7 @@ class GraphSmithTest {
   @Test
   void testMultipleGraphsAreIndependent() {
     GraphSmith.Config config = configBuilder.build();
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
     GGraph graph1 = smith.craft(vm);
     GGraph graph2 = smith.craft(vm);
@@ -270,7 +269,7 @@ class GraphSmithTest {
     objectIdSmith.reset();
     referenceIdSmith.reset();
 
-    GraphSmith smith2 = new GraphSmith(config);
+    GraphSmith smith2 = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph3 = smith2.craft(vm);
 
     assertNotEquals(
@@ -293,7 +292,7 @@ class GraphSmithTest {
             .maxNonRoots(20)
             .build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
     assertThrows(
         AssertionError.class,
@@ -305,11 +304,7 @@ class GraphSmithTest {
 
   @Test
   void testConfigBuilderDefaults() {
-    GraphSmith.Config config =
-        GraphSmith.Config.builder()
-            .objectIdSmith(objectIdSmith)
-            .referenceIdSmith(referenceIdSmith)
-            .build();
+    GraphSmith.Config config = GraphSmith.Config.builder().build();
 
     assertEquals(1, config.getMinRoots());
     assertEquals(10, config.getMaxRoots());
@@ -329,7 +324,7 @@ class GraphSmithTest {
     GraphSmith.Config config =
         configBuilder.minRoots(3).maxRoots(3).minNonRoots(5).maxNonRoots(5).build();
 
-    GraphSmith smith = new GraphSmith(config);
+    GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
 
     long rootCount =

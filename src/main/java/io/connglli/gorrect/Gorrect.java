@@ -233,11 +233,7 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   }
 
   protected GraphSmith buildGraphSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new GraphSmith(
-        getGraphSmithConfigBuilder()
-            .objectIdSmith(objectIdSmith)
-            .referenceIdSmith(referenceIdSmith)
-            .build());
+    return new GraphSmith(getGraphSmithConfigBuilder().build(), objectIdSmith, referenceIdSmith);
   }
 }
 
@@ -287,14 +283,8 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
         .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize));
   }
 
-  protected ProgramSmith buildProgramSmith(
-      IdSmith objectIdSmith, IdSmith referenceIdSmith, GGraph initState) {
-    return new ProgramSmith(
-        getProgramSmithConfig()
-            .objectIdSmith(objectIdSmith)
-            .referenceIdSmith(referenceIdSmith)
-            .initState(initState)
-            .build());
+  protected ProgramSmith buildProgramSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
+    return new ProgramSmith(getProgramSmithConfig().build(), objectIdSmith, referenceIdSmith);
   }
 }
 
@@ -393,9 +383,9 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     System.out.println("-------------");
     System.out.println(initState.formatToText());
 
-    ProgramSmith programSmith = buildProgramSmith(objectIdSmith, referenceIdSmith, initState);
+    ProgramSmith programSmith = buildProgramSmith(objectIdSmith, referenceIdSmith);
 
-    GProgram program = programSmith.craft(jvm);
+    GProgram program = programSmith.craft(jvm, initState);
     System.out.println("Gorrect IR Program");
     System.out.println("------------------");
     System.out.println(program.toString());
@@ -598,16 +588,14 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   @Override
   public Integer runCommand() throws Exception {
     JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
-    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = getGraphSmithConfigBuilder();
-    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder = getProgramSmithConfig();
     new JavaFuzzer(
             JavaFuzzer.Config.builder()
                 .strictValidation(optStrictValidation)
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
                 .maxIterations(optMaxIterations)
-                .graphSmithConfigBuilder(graphSmithConfigBuilder)
-                .programSmithConfigBuilder(programSmithConfigBuilder)
+                .graphSmithConfig(getGraphSmithConfigBuilder().build())
+                .programSmithConfig(getProgramSmithConfig().build())
                 .javaVM(jvm)
                 .useGcOptions(argUseGc.enableOptions)
                 .build())

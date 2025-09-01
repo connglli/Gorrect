@@ -57,29 +57,29 @@ public class JavaFuzzer {
     /// Java execution state against the oracle state. This includes dumping the runtime heap
     /// into HPROF and parsing and analyzing it. If false, the fuzzer relies on some injected
     /// loosely runtime checks into the generated code.
-    public boolean strictValidation;
+    private final boolean strictValidation;
 
     /// The maximum number of worker threads to use for fuzzing.
-    public int maxWorkers;
+    private final int maxWorkers;
 
     /// The directory where the output files will be stored.
-    public String outputDir;
+    private final String outputDir;
 
     /// The maximum number of iterations to perform in the fuzzing process.
     /// If set to 0, it will run indefinitely until manually stopped.
-    public final int maxIterations;
+    private final int maxIterations;
 
     /// The config builder for GraphSmith, which is used to generate init states.
-    public final GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder;
+    private final GraphSmith.Config graphSmithConfig;
 
     /// The config builder for ProgramSmith, which is used to generate programs.
-    public final ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder;
+    private final ProgramSmith.Config programSmithConfig;
 
     /// The Java virtual machine (JVM) under testing
-    public final JavaVM javaVM;
+    private final JavaVM javaVM;
 
     /// The options to enable a specific garbage collector (GC) for the Java VM.
-    public String useGcOptions;
+    private final String useGcOptions;
   }
 
   // Statistics for tracking the fuzzer's performance and results.
@@ -325,26 +325,15 @@ public class JavaFuzzer {
 
       log.info("Generating the initial state ...");
       GraphSmith graphSmith =
-          new GraphSmith(
-              config
-                  .graphSmithConfigBuilder
-                  .objectIdSmith(objectIdSmith)
-                  .referenceIdSmith(referenceIdSmith)
-                  .build());
+          new GraphSmith(config.graphSmithConfig, objectIdSmith, referenceIdSmith);
       GGraph initState = graphSmith.craft(jvm);
       log.info("Succeeded, the initial state is:");
       log.info(initState.formatToText());
 
       log.info("Generating the GIR program ...");
       ProgramSmith programSmith =
-          new ProgramSmith(
-              config
-                  .programSmithConfigBuilder
-                  .objectIdSmith(objectIdSmith)
-                  .referenceIdSmith(referenceIdSmith)
-                  .initState(initState)
-                  .build());
-      GProgram program = programSmith.craft(jvm);
+          new ProgramSmith(config.programSmithConfig, objectIdSmith, referenceIdSmith);
+      GProgram program = programSmith.craft(jvm, initState);
       String progFullPath = testdir + File.separator + "program.gir";
       try (PrintStream ps = new PrintStream(new FileOutputStream(progFullPath))) {
         String progStr = program.toString();

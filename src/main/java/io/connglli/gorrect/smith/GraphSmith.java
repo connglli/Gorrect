@@ -49,51 +49,47 @@ public class GraphSmith {
   @Builder
   @Getter
   public static class Config {
-    /// The IdSmith used to generate unique IDs for objects.
-    @NonNull private IdSmith objectIdSmith;
-
-    /// The IdSmith used to generate unique IDs for references.
-    @NonNull private IdSmith referenceIdSmith;
-
     /// The minimum number of root objects in the graph (inclusive).
-    @Builder.Default private int minRoots = 1;
+    @Builder.Default private final int minRoots = 1;
 
     /// The maximum number of root objects in the graph (inclusive).
-    @Builder.Default private int maxRoots = 10;
+    @Builder.Default private final int maxRoots = 10;
 
     /// The minimum number of non-root objects in the graph (inclusive).
-    @Builder.Default private int minNonRoots = 5;
+    @Builder.Default private final int minNonRoots = 5;
 
     /// The maximum number of non-root objects in the graph (inclusive).
-    @Builder.Default private int maxNonRoots = 20;
+    @Builder.Default private final int maxNonRoots = 20;
 
     /// The minimum number of references in the graph (inclusive).
-    @Builder.Default private int minRefs = 5;
+    @Builder.Default private final int minRefs = 5;
 
     /// The maximum number of references in the graph (inclusive).
     /// This is a soft limit, as we may add more references to ensure reachability.
-    @Builder.Default private int maxRefs = 30;
+    @Builder.Default private final int maxRefs = 30;
 
     /// The weight of adding a strong reference.
-    @Builder.Default private int strongRefWeight = 50;
+    @Builder.Default private final int strongRefWeight = 50;
 
     /// The weight of adding a soft reference.
-    @Builder.Default private int softRefWeight = 20;
+    @Builder.Default private final int softRefWeight = 20;
 
     /// The weight of adding a weak reference.
-    @Builder.Default private int weakRefWeight = 30;
+    @Builder.Default private final int weakRefWeight = 30;
 
     /// The minimum size (inclusive) of an object's padding in bytes.
     /// This is a soft limit as we may further decrease the object size to ensure allocation.
-    @Builder.Default private long minObjSizeBytes = 1; // 1B
+    @Builder.Default private final long minObjSizeBytes = 1; // 1B
 
     /// The maximum size (inclusive) of an object's padding in bytes.
-    @Builder.Default private long maxObjSizeBytes = 128_000; // 128KB
+    @Builder.Default private final long maxObjSizeBytes = 128_000; // 128KB
   }
 
   private final Rand random = Rand.getInstance();
 
   @NonNull private final Config config;
+  @NonNull private final IdSmith objectIdSmith;
+  @NonNull private final IdSmith referenceIdSmith;
 
   @NonNull
   public GGraph craft(LangVM vm) {
@@ -131,7 +127,7 @@ public class GraphSmith {
 
   private OracleObject nextObject(OracleHeap heap, GObject.Type type) {
     LangVM vm = heap.getLvm();
-    GID id = config.objectIdSmith.next();
+    GID id = objectIdSmith.next();
     long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
     long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
     while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {
@@ -177,7 +173,7 @@ public class GraphSmith {
       return false; // We do not allow duplicate references
     }
 
-    GID refId = config.referenceIdSmith.next(referer.getId(), referent.getId());
+    GID refId = referenceIdSmith.next(referer.getId(), referent.getId());
     GReference.Type refType =
         random.nextItem(
             new GReference.Type[] {
@@ -210,7 +206,7 @@ public class GraphSmith {
       }
       // Let's randomly select an object and add a strong reference to it.
       GID refererId = reachable.get(random.nextInt(0, reachable.size()));
-      GID referenceId = config.referenceIdSmith.next(refererId, referentId);
+      GID referenceId = referenceIdSmith.next(refererId, referentId);
       OracleObject referer = heap.getObject(refererId);
       OracleObject referent = heap.getObject(referentId);
       try {

@@ -47,28 +47,19 @@ public class ProgramSmith {
   @Builder
   @Getter
   public static class Config {
-    /// The IdSmith used to generate unique IDs for objects.
-    @NonNull private IdSmith objectIdSmith;
-
-    /// The IdSmith used to generate unique IDs for references.
-    @NonNull private IdSmith referenceIdSmith;
-
-    /// The initial state of the heap.
-    @NonNull private GGraph initState;
-
     /// The minimum number of instructions (including).
-    @Builder.Default private int minInstructions = 1;
+    @Builder.Default private final int minInstructions = 1;
 
     /// The maximum number of instructions (including).
     /// This is a soft limit, as we may stop when the heap is full.
-    @Builder.Default private int maxInstructions = 100;
+    @Builder.Default private final int maxInstructions = 100;
 
     /// The minimum size (inclusive) of an object's padding in bytes.
     /// This is a soft limit as we may further decrease the object size to ensure allocation.
-    @Builder.Default private long minObjSizeBytes = 1; // 1B
+    @Builder.Default private final long minObjSizeBytes = 1; // 1B
 
     /// The maximum size (inclusive) of an object's padding in bytes.
-    @Builder.Default private long maxObjSizeBytes = 128_000; // 128KB
+    @Builder.Default private final long maxObjSizeBytes = 128_000; // 128KB
   }
 
   @ToString
@@ -167,16 +158,19 @@ public class ProgramSmith {
     instWeights.put(GRemoveAllReferentsInstruction.class, 30);
   }
 
-  @Getter private final Config config;
+  @Getter @NonNull private final Config config;
+  @NonNull private IdSmith objectIdSmith;
+  @NonNull private IdSmith referenceIdSmith;
+
   @Getter private final Stats stats = new Stats();
   @Getter private final int maxNumTrials = 320;
 
-  public GProgram craft(LangVM vm) {
+  /// Craft a GIR program for the given vm with the given initial graph state.
+  public GProgram craft(LangVM vm, @NonNull GGraph initState) {
     stats.reset();
     vm.reset(); // Reset the VM to a clean state
     stats.generationTimeMillis = System.currentTimeMillis();
-    GProgram program =
-        new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), config.initState));
+    GProgram program = new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), initState));
     OracleInterpreter interpreter = new OracleInterpreter(vm, program);
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     SmithImpl smith = new SmithImpl(vm, interpreter, program);
@@ -261,7 +255,7 @@ public class ProgramSmith {
 
     @Override
     public GInstruction visit(GAddRootObjInstruction unused) {
-      GID rootId = config.objectIdSmith.next();
+      GID rootId = objectIdSmith.next();
       long rootSize = randomPadding(rootId);
       if (rootSize < 0) {
         log.debug("Cannot add root object due to insufficient memory.");
@@ -283,8 +277,8 @@ public class ProgramSmith {
         log.debug("Cannot add non-root object due to insufficient memory.");
         return null;
       }
-      GID objectId = config.objectIdSmith.next();
-      GID referenceId = config.referenceIdSmith.next(refererId, objectId);
+      GID objectId = objectIdSmith.next();
+      GID referenceId = referenceIdSmith.next(refererId, objectId);
       GReference.Type referenceType = randomReferenceType();
       return new GAddNonRootObjInstruction(
           objectSize, refererId, referenceType, objectId, referenceId);
@@ -331,7 +325,7 @@ public class ProgramSmith {
         return null;
       }
       // We found a candidate object to clone.
-      GID cloneId = config.objectIdSmith.next();
+      GID cloneId = objectIdSmith.next();
       return new GCloneObjInstruction(objectId, cloneId, "__" + cloneId + "__cloned");
     }
 
@@ -353,7 +347,7 @@ public class ProgramSmith {
       if (data == null) {
         return null;
       }
-      GID referenceId = config.referenceIdSmith.next(data.a(), data.b());
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
       return new GAddStrongRefInstruction(data.a(), data.b(), referenceId);
     }
 
@@ -363,7 +357,7 @@ public class ProgramSmith {
       if (data == null) {
         return null;
       }
-      GID referenceId = config.referenceIdSmith.next(data.a(), data.b());
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
       return new GAddSoftRefInstruction(data.a(), data.b(), referenceId);
     }
 
@@ -373,7 +367,7 @@ public class ProgramSmith {
       if (data == null) {
         return null;
       }
-      GID referenceId = config.referenceIdSmith.next(data.a(), data.b());
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
       return new GAddWeakRefInstruction(data.a(), data.b(), referenceId);
     }
 
@@ -413,7 +407,7 @@ public class ProgramSmith {
 
       List<GID> referenceIds =
           refererIds.stream()
-              .map(refererId -> config.referenceIdSmith.next(refererId, referentId))
+              .map(refererId -> referenceIdSmith.next(refererId, referentId))
               .toList();
 
       return new GAddFaninRefsInstruction(refererIds, referentId, referenceTypes, referenceIds);
@@ -455,7 +449,7 @@ public class ProgramSmith {
 
       List<GID> referenceIds =
           referentIds.stream()
-              .map(referentId -> config.referenceIdSmith.next(refererId, referentId))
+              .map(referentId -> referenceIdSmith.next(refererId, referentId))
               .toList();
 
       return new GAddFanoutRefsInstruction(refererId, referentIds, referenceTypes, referenceIds);
