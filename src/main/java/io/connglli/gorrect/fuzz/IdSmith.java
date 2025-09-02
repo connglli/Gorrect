@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.smith;
+package io.connglli.gorrect.fuzz;
 
 import io.connglli.gorrect.gir.model.GID;
 import java.util.Arrays;

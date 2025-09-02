@@ -24,6 +24,10 @@
 
 package io.connglli.gorrect;
 
+import io.connglli.gorrect.fuzz.GraphSmith;
+import io.connglli.gorrect.fuzz.IdSmith;
+import io.connglli.gorrect.fuzz.JavaFuzzer;
+import io.connglli.gorrect.fuzz.ProgramSmith;
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
@@ -32,9 +36,6 @@ import io.connglli.gorrect.java.JavaInterpreter;
 import io.connglli.gorrect.java.oracle.*;
 import io.connglli.gorrect.oracle.NoOpVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
-import io.connglli.gorrect.smith.GraphSmith;
-import io.connglli.gorrect.smith.IdSmith;
-import io.connglli.gorrect.smith.ProgramSmith;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import io.connglli.gorrect.utility.MemorySize;
@@ -264,14 +265,14 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
   @CommandLine.Option(
       names = {"--min-instructions"},
       paramLabel = "number",
-      description = "Minimum number of instructions to smith",
+      description = "Minimum number of instructions to fuzz",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinInstructions = 1;
 
   @CommandLine.Option(
       names = {"--max-instructions"},
       paramLabel = "number",
-      description = "Maximum number of instructions to smith",
+      description = "Maximum number of instructions to fuzz",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
 

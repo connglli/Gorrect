@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect;
+package io.connglli.gorrect.fuzz;
 
 import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
@@ -34,9 +34,6 @@ import io.connglli.gorrect.java.oracle.JavaOracle;
 import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.oracle.Oracle;
 import io.connglli.gorrect.oracle.OracleInterpreter;
-import io.connglli.gorrect.smith.GraphSmith;
-import io.connglli.gorrect.smith.IdSmith;
-import io.connglli.gorrect.smith.ProgramSmith;
 import io.connglli.gorrect.utility.*;
 import java.io.*;
 import java.nio.file.Files;

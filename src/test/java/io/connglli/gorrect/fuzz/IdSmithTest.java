@@ -22,7 +22,7 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.smith;
+package io.connglli.gorrect.fuzz;
 
 import static org.junit.jupiter.api.Assertions.*;
 

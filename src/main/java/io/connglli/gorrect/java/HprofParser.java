@@ -26,11 +26,11 @@ package io.connglli.gorrect.java;
 
 import com.palantir.javapoet.ClassName;
 import com.palantir.javapoet.TypeName;
+import io.connglli.gorrect.fuzz.IdSmith;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.smith.IdSmith;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Files;
 import io.connglli.gorrect.utility.Logger;
