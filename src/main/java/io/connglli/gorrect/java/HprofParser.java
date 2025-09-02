@@ -84,6 +84,7 @@ public class HprofParser {
     IdSmith refIdSmith = new IdSmith("ref");
 
     // Walk the main class in the heap to find all root objects
+    log.debug("Parsing root objects from our main class: " + mainClazz.getName());
     for (Object f : mainClazz.getStaticFieldValues()) {
       Assert.set(f instanceof FieldValue, "Expected FieldValue, but got " + f.getClass());
       FieldValue fieldValuePair = (FieldValue) f;
@@ -92,8 +93,10 @@ public class HprofParser {
           || !field.getName().startsWith(GeneratedMainClass.ROOT_REF_FIELD_NAME_PREFIX)) {
         continue; // Skip static fields as all our references are instance fields
       }
+      log.debug("Parsing root reference field: " + field.getName());
       Object o = mainClazz.getValueOfStaticField(field.getName());
       if (o == null) {
+        log.debug("The root reference is null");
         continue; // The root reference is no longer reachable.
       }
       Assert.set(
@@ -107,6 +110,9 @@ public class HprofParser {
     }
 
     // Walk the heap to find all non-root objects
+    log.debug(
+        "Parsing non-root objects from the heap, starting from instances of our base class: "
+            + GeneratedObjectBaseClass.clazzName.canonicalName());
     JavaClass objectBaseClazz =
         heap.getJavaClassByName(GeneratedObjectBaseClass.clazzName.canonicalName());
     Assert.set(
@@ -117,6 +123,8 @@ public class HprofParser {
     for (Object c : objectBaseClazz.getSubClasses()) {
       Assert.set(c instanceof JavaClass, "Expected JavaClass, but got " + c.getClass());
       JavaClass clazz = (JavaClass) c;
+
+      log.debug("Parsing instances of subclass: " + clazz.getName());
 
       @SuppressWarnings("rawtypes")
       Iterator objectIterator = clazz.getInstancesIterator();
