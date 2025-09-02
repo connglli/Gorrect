@@ -148,8 +148,8 @@ public class JavaExecutor {
   }
 
   /// Create a heap dumper that dumps the heap of a process (set by PID) to the given hprof file.
-  public static HprofDumper heapDumper(@NonNull String hprof) {
+  public HprofDumper heapDumper(@NonNull String hprof) {
     Assert.set(!(new File(hprof).exists()), "The hprof file %s already exists", hprof);
-    return new HprofDumper(hprof);
+    return new HprofDumper(jvm, hprof);
   }
 }

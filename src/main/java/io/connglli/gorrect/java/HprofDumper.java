@@ -24,7 +24,7 @@
 
 package io.connglli.gorrect.java;
 
-import io.connglli.gorrect.utility.Jcmd;
+import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.utility.Logger;
 import java.io.IOException;
 import java.io.InputStream;
@@ -37,15 +37,15 @@ import lombok.NonNull;
 public class HprofDumper extends InputStream {
   private final Logger log = Logger.getLogger(JavaExecutor.class);
 
+  @NonNull private final JavaVM jvm;
   @NonNull private final String file;
   @NonNull private final AtomicLong pid;
 
-  @Getter
-  private boolean succeeded = false;
-  @Getter
-  private volatile boolean closed = false;
+  @Getter private boolean succeeded = false;
+  @Getter private volatile boolean closed = false;
 
-  public HprofDumper(@NonNull String file) {
+  public HprofDumper(@NonNull JavaVM jvm, @NonNull String file) {
+    this.jvm = jvm;
     this.file = file;
     // Initialize the pid to -1L to indicate not started
     this.pid = new AtomicLong(-1L);
@@ -76,7 +76,7 @@ public class HprofDumper extends InputStream {
       }
     }
     try {
-      Jcmd.dumpHeap(pid.get(), file, /* dead= */ false);
+      jvm.dumpHeap(pid.get(), file, /* dead= */ false);
       succeeded = true;
     } catch (Exception e) {
       succeeded = false;

@@ -27,8 +27,12 @@ package io.connglli.gorrect.java.oracle;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.utility.Assert;
 import java.io.File;
+import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
+import org.zeroturnaround.exec.ProcessExecutor;
 
 /**
  * Abstract class representing a Java Virtual Machine (JVM) for the OracleInterpreter. This class
@@ -59,6 +63,10 @@ public abstract class JavaVM extends LangVM {
 
   public String getJavaExecutablePath() {
     return homeDirectory.toString() + File.separator + "bin" + File.separator + "java";
+  }
+
+  public String getJcmdExecutablePath() {
+    return homeDirectory.toString() + File.separator + "bin" + File.separator + "jcmd";
   }
 
   /*
@@ -127,5 +135,14 @@ public abstract class JavaVM extends LangVM {
 
   public long align(int unit, long size) {
     return size + (unit - (size % unit)) % unit;
+  }
+
+  public void dumpHeap(long pid, String hprof, boolean dead)
+      throws IOException, InterruptedException, TimeoutException {
+    new ProcessExecutor(
+            getJcmdExecutablePath(), String.valueOf(pid), "GC.heap_dump", dead ? "-all" : "", hprof)
+        .timeout(5, TimeUnit.MINUTES)
+        .exitValue(0)
+        .execute();
   }
 }

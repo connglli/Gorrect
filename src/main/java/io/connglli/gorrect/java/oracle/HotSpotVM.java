@@ -277,7 +277,7 @@ public class HotSpotVM extends JavaVM {
   private static final String generatedObjectBaseClassChecksum = "0125df9f6f9dd1df015e39ef78fae78b";
   private static volatile Class<?> generatedObjectBaseClass = null;
 
-  private static Class<?> loadGeneratedObjectBaseClass() {
+  private Class<?> loadGeneratedObjectBaseClass() {
     if (generatedObjectBaseClass == null) {
       synchronized (generatedObjectBaseClassChecksum) {
         if (generatedObjectBaseClass == null) {
@@ -320,7 +320,7 @@ public class HotSpotVM extends JavaVM {
             File javaFile = new File(tempDir.toFile(), className + ".java");
             Files.writeString(javaFile.toPath(), javaCode);
             new ProcessExecutor()
-                .command("javac", "-cp", tempDir.toString(), javaFile.toString())
+                .command(getJavaCompilerPath(), "-cp", tempDir.toString(), javaFile.toString())
                 .redirectErrorStream(true)
                 .timeout(30, TimeUnit.SECONDS)
                 .exitValue(0)

@@ -43,12 +43,4 @@ public class Jcmd {
       Assert.panic("jcmd command not found or not executable");
     }
   }
-
-  public static void dumpHeap(long pid, String hprof, boolean dead)
-      throws IOException, InterruptedException, TimeoutException {
-    new ProcessExecutor("jcmd", String.valueOf(pid), "GC.heap_dump", dead ? "-all" : "", hprof)
-        .timeout(5, TimeUnit.MINUTES)
-        .exitValue(0)
-        .execute();
-  }
 }
