@@ -42,7 +42,6 @@ import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.concurrent.*;
 import java.util.concurrent.atomic.AtomicInteger;
-import java.util.stream.Collectors;
 import lombok.*;
 
 public class JavaFuzzer {
@@ -283,7 +282,7 @@ public class JavaFuzzer {
           recoverLogging();
           log.info(
               Logger.AnsiColor.GREEN,
-              "Worker %d FOUND A GC BUG (strict=%b) at iteration %d: %s",
+              "**GOTCHA**: Worker %d FOUND A GC BUG (strict=%b) at iteration %d: %s",
               workerId,
               e.strict,
               i,
@@ -451,35 +450,7 @@ public class JavaFuzzer {
 
     private void generateBugReport(PrintStream ps, Oracle.ValidationResult result) {
       ps.println("FAILURE: " + result.getFailureMessage());
-      ps.print("Object Violations:");
-      if (result.getObjectViolations().isEmpty()) {
-        ps.println(" Not Found");
-      } else {
-        ps.println();
-        ps.println(
-            result.getObjectViolations().entrySet().stream()
-                .map(s -> "- %s: %s".formatted(s.getKey(), s.getValue()))
-                .collect(Collectors.joining("\n")));
-      }
-      ps.print("Reference Violations:");
-      if (result.getReferenceViolations().isEmpty()) {
-        ps.println(" Not Found");
-      } else {
-        ps.println();
-        ps.println(
-            result.getReferenceViolations().entrySet().stream()
-                .map(
-                    s -> "- (%s -> %s): %s".formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
-                .collect(Collectors.joining("\n")));
-      }
-      ps.println();
-      ps.println();
-      ps.println("--- Oracle " + "-".repeat(50));
-      ps.println(result.getOracle().formatToText());
-      ps.println();
-      ps.println();
-      ps.println("--- Actual " + "-".repeat(50));
-      ps.println(result.getObtained().formatToText());
+      ps.println(result.getSummary());
     }
 
     private String createTestNameFormat() {

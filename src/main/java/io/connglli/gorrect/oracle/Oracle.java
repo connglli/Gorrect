@@ -54,6 +54,40 @@ public abstract class Oracle {
     public UnmodifiableGraph getOracle() {
       return oracle;
     }
+
+    public String getSummary() {
+      if (isValid) {
+        return "Validation SUCCEEDED";
+      }
+      StringBuilder sb = new StringBuilder();
+      sb.append("Validation FAILURE: ")
+          .append(failureMessage != null ? failureMessage : "<not-provided>")
+          .append("\n");
+      sb.append("Object Violations:");
+      if (objectViolations != null && !objectViolations.isEmpty()) {
+        sb.append("\n");
+        objectViolations.forEach(
+            (id, msg) -> sb.append("- ").append(id).append(": ").append(msg).append("\n"));
+      } else {
+        sb.append(" No violations found\n");
+      }
+      sb.append("Reference Violations:");
+      if (referenceViolations != null && !referenceViolations.isEmpty()) {
+        sb.append("\n");
+        referenceViolations.forEach(
+            (ids, msg) ->
+                sb.append("- (")
+                    .append(ids.a())
+                    .append(" -> ")
+                    .append(ids.b())
+                    .append("): ")
+                    .append(msg)
+                    .append("\n"));
+      } else {
+        sb.append(" No violations found\n");
+      }
+      return sb.toString();
+    }
   }
 
   /**
