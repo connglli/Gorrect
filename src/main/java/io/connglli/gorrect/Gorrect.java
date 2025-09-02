@@ -622,6 +622,13 @@ class StateCompareCommand implements GorrectSubCommand {
   @CommandLine.ParentCommand protected Gorrect parent;
 
   @CommandLine.Option(
+      names = {"-K", "--keep-workdir"},
+      negatable = true,
+      description = "Keep the temporarily created working directory for debugging purpose",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected boolean optKeepWorkdir = false;
+
+  @CommandLine.Option(
       names = {"-H", "--heap-capacity"},
       paramLabel = "size",
       required = true,
@@ -707,7 +714,11 @@ class StateCompareCommand implements GorrectSubCommand {
       return 1;
     }
 
-    io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(Path.of(workdir));
+    if (!optKeepWorkdir) {
+      io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(Path.of(workdir));
+    } else {
+      System.out.println("The working directory is kept at: " + workdir);
+    }
 
     return 0;
   }
