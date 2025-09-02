@@ -40,12 +40,12 @@ import org.openjdk.jol.layouters.HotSpotLayouter;
  */
 public class HotSpotObjects {
 
+  // We cache the shallow sizes of classes to reduce the cost of parsing.
+  private static final Map<Class<?>, Long> cachedShallowSizes = new HashMap<>();
+
   // We utilize JOL to avoid calculating the sizes manually.
   private final DataModel model;
   private final HotSpotLayouter layout;
-
-  // We cache the shallow sizes of classes to reduce the cost of parsing.
-  private final Map<Class<?>, Long> cachedShallowSizes = new HashMap<>();
 
   public HotSpotObjects(
       int version,
@@ -113,12 +113,15 @@ public class HotSpotObjects {
     if (clazz.isPrimitive()) {
       return getPrimitiveSize(clazz);
     }
-    if (cachedShallowSizes.containsKey(clazz)) {
-      return cachedShallowSizes.get(clazz);
+    if (!cachedShallowSizes.containsKey(clazz)) {
+      synchronized (cachedShallowSizes) {
+        if (!cachedShallowSizes.containsKey(clazz)) {
+          long size = layout.layout(ClassData.parseClass(clazz)).instanceSize();
+          cachedShallowSizes.put(clazz, size);
+        }
+      }
     }
-    long size = layout.layout(ClassData.parseClass(clazz)).instanceSize();
-    cachedShallowSizes.put(clazz, size);
-    return size;
+    return cachedShallowSizes.get(clazz);
   }
 
   /// Compute the shallow size of an object.

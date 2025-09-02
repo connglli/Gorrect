@@ -275,60 +275,67 @@ public class HotSpotVM extends JavaVM {
   }
 
   private static final String generatedObjectBaseClassChecksum = "0125df9f6f9dd1df015e39ef78fae78b";
-  private static Class<?> generatedObjectBaseClass = null;
+  private static volatile Class<?> generatedObjectBaseClass = null;
 
   private static Class<?> loadGeneratedObjectBaseClass() {
     if (generatedObjectBaseClass == null) {
-      // Since we do not have access to the package-level class (I don't want to make it public),
-      // we load the class using reflection. This is subject to change if the class is changed.
-      try {
-        ClassLoader thisClassLoader = HotSpotVM.class.getClassLoader();
+      synchronized (generatedObjectBaseClassChecksum) {
+        if (generatedObjectBaseClass == null) {
+          // Since we do not have access to the package-level class (I don't want to make it
+          // public),
+          // we load the class using reflection. This is subject to change if the class is changed.
+          try {
+            ClassLoader thisClassLoader = HotSpotVM.class.getClassLoader();
 
-        Class<?> heapClass = thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedHeap");
-        Constructor<?> heapConstructor = heapClass.getDeclaredConstructor();
-        heapConstructor.setAccessible(true);
-        Object heap = heapConstructor.newInstance();
+            Class<?> heapClass =
+                thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedHeap");
+            Constructor<?> heapConstructor = heapClass.getDeclaredConstructor();
+            heapConstructor.setAccessible(true);
+            Object heap = heapConstructor.newInstance();
 
-        Class<?> objectBaseClass =
-            thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedObjectBaseClass");
-        Constructor<?> objectBaseConstructor = objectBaseClass.getDeclaredConstructor(heapClass);
-        objectBaseConstructor.setAccessible(true);
-        Object objectBase = objectBaseConstructor.newInstance(heap);
-        Method toJavaCodeMethod = Reflections.getMethod(objectBaseClass, "toJavaCode");
-        toJavaCodeMethod.setAccessible(true);
-        Field classNameField = Reflections.getField(objectBaseClass, "clazzName");
-        classNameField.setAccessible(true);
+            Class<?> objectBaseClass =
+                thisClassLoader.loadClass("io.connglli.gorrect.java.GeneratedObjectBaseClass");
+            Constructor<?> objectBaseConstructor =
+                objectBaseClass.getDeclaredConstructor(heapClass);
+            objectBaseConstructor.setAccessible(true);
+            Object objectBase = objectBaseConstructor.newInstance(heap);
+            Method toJavaCodeMethod = Reflections.getMethod(objectBaseClass, "toJavaCode");
+            toJavaCodeMethod.setAccessible(true);
+            Field classNameField = Reflections.getField(objectBaseClass, "clazzName");
+            classNameField.setAccessible(true);
 
-        String className = ((ClassName) classNameField.get(null)).canonicalName();
-        String javaCode = (String) toJavaCodeMethod.invoke(objectBase);
-        // Compute the checksum of the generated code to ensure no changes have been made
-        String checksum = Checksums.md5(javaCode.strip());
-        Assert.set(
-            generatedObjectBaseClassChecksum.equals(checksum),
-            "The checksum of the generated code does not match the expected one, "
-                + "indicating that the implementation of the generated object has changed. "
-                + "Expected: %s. Actual: %s",
-            generatedObjectBaseClassChecksum,
-            checksum);
+            String className = ((ClassName) classNameField.get(null)).canonicalName();
+            String javaCode = (String) toJavaCodeMethod.invoke(objectBase);
+            // Compute the checksum of the generated code to ensure no changes have been made
+            String checksum = Checksums.md5(javaCode.strip());
+            Assert.set(
+                generatedObjectBaseClassChecksum.equals(checksum),
+                "The checksum of the generated code does not match the expected one, "
+                    + "indicating that the implementation of the generated object has changed. "
+                    + "Expected: %s. Actual: %s",
+                generatedObjectBaseClassChecksum,
+                checksum);
 
-        Path tempDir = Files.createTempDirectory(UUID.randomUUID().toString());
-        File javaFile = new File(tempDir.toFile(), className + ".java");
-        Files.writeString(javaFile.toPath(), javaCode);
-        new ProcessExecutor()
-            .command("javac", "-cp", tempDir.toString(), javaFile.toString())
-            .redirectErrorStream(true)
-            .timeout(30, TimeUnit.SECONDS)
-            .exitValue(0)
-            .execute();
+            Path tempDir = Files.createTempDirectory(UUID.randomUUID().toString());
+            File javaFile = new File(tempDir.toFile(), className + ".java");
+            Files.writeString(javaFile.toPath(), javaCode);
+            new ProcessExecutor()
+                .command("javac", "-cp", tempDir.toString(), javaFile.toString())
+                .redirectErrorStream(true)
+                .timeout(30, TimeUnit.SECONDS)
+                .exitValue(0)
+                .execute();
 
-        try (URLClassLoader classLoader =
-            new URLClassLoader(new URL[] {tempDir.toUri().toURL()}, thisClassLoader)) {
-          generatedObjectBaseClass = classLoader.loadClass(className);
+            try (URLClassLoader classLoader =
+                new URLClassLoader(new URL[] {tempDir.toUri().toURL()}, thisClassLoader)) {
+              generatedObjectBaseClass = classLoader.loadClass(className);
+            }
+          } catch (Exception e) {
+            Assert.panic(
+                "Failed to load the GeneratedObjectBaseClass, perhaps the implementation of it has changed: "
+                    + e.getMessage());
+          }
         }
-      } catch (Exception e) {
-        Assert.panic(
-            "Failed to load the GeneratedObjectBaseClass, perhaps the implementation of it has changed: "
-                + e.getMessage());
       }
     }
     return generatedObjectBaseClass;
