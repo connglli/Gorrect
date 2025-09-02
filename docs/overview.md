@@ -233,3 +233,71 @@ sync-point all-threads  # Synchronization barrier
 
 7. **Stress patterns**: Consider patterns that push specific GC limits
 8. **Realistic workload patterns**: Consider patterns based on common application behaviors
+
+## Limitations and Future Work
+
+For now, our operations are all based on strongly reachable objects. Soft/weak references are only added to them. This
+treatment is due to the implementation challenges incurred by them. Let's take Java as an example:
+
+Suppose our initial state is:
+
+```
+Objects:
+ a (root,30m)
+ b (nonroot,25k)
+
+References:
+ a: a -> b (soft)
+```
+
+Or simply:
+
+```
+a --soft--> b
+```
+
+We're applying the following two operations
+
+```shell
+c <- add-nonroot-obj b, strong // add a non-root object c which is connected strongly from b
+r <- add-strong-ref a, c // add a strong reference between object a and object c
+```
+
+After executing these two operations, it is apparently that our oracle graph should be:
+
+```
+a --soft--> b
+b --strong--> c
+a --strong--> c
+```
+
+This oracle state asserts that objects a and c are strongly reachable, while object b is softly reachable.
+
+The generated Java program might look like (where `?.` is the safe navigation operator like that in TypeScript):
+
+```typescript
+A a = new A();
+a.soft_to_b = new SoftReference<B>(b);
+a.soft_to_b.get()?.strong_to_c = new C();
+a.strong_to_c = a.soft_to_b.get()?.strong_to_c;
+```
+
+Since `b` is softly reachable at the initial state, it is likely that the execution of this program can have multiple
+different yet correct actual state:
+
+1. **Object b exists all the time**: In this execution, the two operations will succeed and our actual state exactly
+   matches our oracle state.
+2. **Object b does not exist any more after the initial state**: In this execution, the first operation will fail and
+   object c won't be created successfully. This leads to the second operation failing as well since c does not exist.
+   The our actual state becomes: `a`. Neither b nor c exists.
+3. **Object b exists after the initial state but got collected after executing the first operation**: In this execution,
+   c will be successfully created after the first operation. However, it is immediately collected together with b since
+   it is softly reachable. Thus, the second operation will fail and our actual state is: `a`.
+4. **Object b exists after the initial state but got collected after executing the second operation**: This execution is
+   similar to the first execution, but our actual state is: `a --strong--> c`.
+
+In fact, all the four actual states are correct but mismatch our oracle state. This is a challenge.
+
+A future work may consider modeling state divergence in the implementation of the Oracle Interpreter so that each GIR
+program can lead to multiple different oracle state. These states form a state divergence tree. However, this may cause
+exponentially-increased oracle states, a new challenge to be addressed.
