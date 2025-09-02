@@ -398,7 +398,7 @@ public class JavaFuzzer {
 
       // Dump and analyze the heap to validate the result for a strict validation
       String hprofFileFullPath = testdir + File.separator + dumpFilePath;
-      GGraph execState = HprofParser.parse(hprofFileFullPath);
+      GGraph execState = HprofParser.parse(hprofFileFullPath, java.getUUID());
 
       log.info("The extracted heap state:");
       log.info(execState.formatToText());

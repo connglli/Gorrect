@@ -58,6 +58,11 @@ public class JavaInterpreter {
     heap.clean();
   }
 
+  /// Get the UUID of the generated Java class.
+  public String getUUID() {
+    return heap.getUUID();
+  }
+
   /// Get the cleaned state of the heap.
   public GGraph getState() {
     return heap.getState();

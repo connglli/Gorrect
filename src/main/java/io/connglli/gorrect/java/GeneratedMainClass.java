@@ -25,10 +25,13 @@
 package io.connglli.gorrect.java;
 
 import com.palantir.javapoet.ClassName;
+import com.palantir.javapoet.FieldSpec;
 import com.palantir.javapoet.MethodSpec;
 import com.palantir.javapoet.TypeSpec;
 import io.connglli.gorrect.gir.model.GID;
+import java.util.UUID;
 import javax.lang.model.element.Modifier;
+import lombok.Getter;
 import lombok.NonNull;
 
 /**
@@ -36,8 +39,11 @@ import lombok.NonNull;
  */
 final class GeneratedMainClass extends GeneratedClass {
   static final ClassName clazzName = ClassName.get("", "GGeneratedMain");
+  static final String UUID_FIELD_NAME = "uuid";
   static final String ROOT_REF_FIELD_NAME_PREFIX = "root_ref_to_";
 
+  // Add an UUID to each case so that we can distinguish them easily.
+  @Getter private final String uuid = UUID.randomUUID().toString();
   // The main method of the main class. It is used to initialize the heap state and execute the
   // heap manipulation sequence and finally waits for heap dumping.
   private final MethodSpec.Builder mainMethodSpec =
@@ -49,6 +55,11 @@ final class GeneratedMainClass extends GeneratedClass {
 
   GeneratedMainClass(GeneratedHeap heap) {
     super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
+    addField(
+        FieldSpec.builder(
+                ClassName.get(String.class), UUID_FIELD_NAME, Modifier.PUBLIC, Modifier.STATIC)
+            .initializer("$S", uuid)
+            .build());
   }
 
   void addStatement(@NonNull String stmtFormat, Object... stmtArgs) {

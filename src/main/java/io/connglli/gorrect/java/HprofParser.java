@@ -64,10 +64,14 @@ public class HprofParser {
   }
 
   public static GGraph parse(@NonNull String hprofFile) throws IOException {
-    return new HprofParser().parseHprof(hprofFile);
+    return new HprofParser().parseHprof(hprofFile, null);
   }
 
-  private GGraph parseHprof(@NonNull String hprofFile) throws IOException {
+  public static GGraph parse(@NonNull String hprofFile, String expectedUUID) throws IOException {
+    return new HprofParser().parseHprof(hprofFile, expectedUUID);
+  }
+
+  private GGraph parseHprof(@NonNull String hprofFile, String expectedUUID) throws IOException {
     deleteCacheIfNecessary(hprofFile);
 
     Heap heap = HeapFactory.createHeap(new File(hprofFile));
@@ -79,6 +83,19 @@ public class HprofParser {
         "Main class not found in the heap: clazz=%s, hprof=%s",
         className,
         hprofFile);
+
+    log.debug("Parsing the UUID from our main class: " + mainClazz.getName());
+    String actualUUID =
+        NBHprofParser.parseStringField(mainClazz, GeneratedMainClass.UUID_FIELD_NAME);
+    Assert.set(actualUUID != null, "Expected a non-null UUID field in the main class");
+    log.info("The UUID of tour main class is: " + actualUUID);
+    if (expectedUUID != null) {
+      Assert.set(
+          actualUUID.equals(expectedUUID),
+          "The UUID of the heap does not match the expected one: expected=%s, actual=%s",
+          expectedUUID,
+          actualUUID);
+    }
 
     Map<Long, GObjRecord> objects = new HashMap<>();
     IdSmith refIdSmith = new IdSmith("ref");

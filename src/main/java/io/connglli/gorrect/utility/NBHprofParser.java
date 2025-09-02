@@ -27,6 +27,7 @@ package io.connglli.gorrect.utility;
 import java.lang.reflect.Array;
 import java.util.Set;
 import org.netbeans.lib.profiler.heap.Instance;
+import org.netbeans.lib.profiler.heap.JavaClass;
 import org.netbeans.lib.profiler.heap.PrimitiveArrayInstance;
 
 public final class NBHprofParser {
@@ -36,6 +37,10 @@ public final class NBHprofParser {
     } else {
       return instance.getJavaClass().getValueOfStaticField(fieldName);
     }
+  }
+
+  public static Object getFieldValue(JavaClass clazz, String fieldName) {
+    return clazz.getValueOfStaticField(fieldName);
   }
 
   private static final Set<Class<?>> BOXED_PRIMITIVE_TYPES =
@@ -50,12 +55,24 @@ public final class NBHprofParser {
           Double.class);
 
   public static <T> T parsePrimitiveField(
+      JavaClass clazz, String fieldName, Class<T> expectedType) {
+    Assert.set(
+        BOXED_PRIMITIVE_TYPES.contains(expectedType),
+        "Expected a boxed primitive type, but got " + expectedType);
+    // Primitive fields are their boxed primitive type by NetBeans Profiler.
+    return parsePrimitiveFieldValue(getFieldValue(clazz, fieldName), expectedType);
+  }
+
+  public static <T> T parsePrimitiveField(
       Instance instance, String fieldName, Class<T> expectedType, boolean isStatic) {
     Assert.set(
         BOXED_PRIMITIVE_TYPES.contains(expectedType),
         "Expected a boxed primitive type, but got " + expectedType);
     // Primitive fields are their boxed primitive type by NetBeans Profiler.
-    Object o = getFieldValue(instance, fieldName, isStatic);
+    return parsePrimitiveFieldValue(getFieldValue(instance, fieldName, isStatic), expectedType);
+  }
+
+  public static <T> T parsePrimitiveFieldValue(Object o, Class<T> expectedType) {
     if (o == null) {
       return null;
     }
@@ -67,13 +84,24 @@ public final class NBHprofParser {
     return expectedType.cast(o);
   }
 
-  @SuppressWarnings("unchecked")
+  public static <T> T[] parsePrimitiveArrayField(
+      JavaClass clazz, String fieldName, Class<T> elementType) {
+    Assert.set(
+        BOXED_PRIMITIVE_TYPES.contains(elementType),
+        "Expected the element type to be a boxed primitive type, but got " + elementType);
+    return parsePrimitiveArrayFieldValue(getFieldValue(clazz, fieldName), elementType);
+  }
+
   public static <T> T[] parsePrimitiveArrayField(
       Instance instance, String fieldName, Class<T> elementType, boolean isStatic) {
     Assert.set(
         BOXED_PRIMITIVE_TYPES.contains(elementType),
         "Expected the element type to be a boxed primitive type, but got " + elementType);
-    Object o = getFieldValue(instance, fieldName, isStatic);
+    return parsePrimitiveArrayFieldValue(getFieldValue(instance, fieldName, isStatic), elementType);
+  }
+
+  @SuppressWarnings("unchecked")
+  private static <T> T[] parsePrimitiveArrayFieldValue(Object o, Class<T> elementType) {
     if (o == null) {
       return null;
     }
@@ -114,9 +142,17 @@ public final class NBHprofParser {
     return resultArray;
   }
 
+  public static String parseStringField(JavaClass clazz, String fieldName) {
+    // String instances are all Instances according to NetBeans' HPROF parser.
+    return parseStringFieldValue(getFieldValue(clazz, fieldName));
+  }
+
   public static String parseStringField(Instance instance, String fieldName, boolean isStatic) {
     // String instances are all Instances according to NetBeans' HPROF parser.
-    Object o = getFieldValue(instance, fieldName, isStatic);
+    return parseStringFieldValue(getFieldValue(instance, fieldName, isStatic));
+  }
+
+  private static String parseStringFieldValue(Object o) {
     if (o == null) {
       return null;
     }

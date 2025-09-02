@@ -109,6 +109,11 @@ class GeneratedHeap {
     deadReferences = new LinkedList<>();
   }
 
+  /// Get the UUID of the generated Java class.
+  public String getUUID() {
+    return mainClazz.getUuid();
+  }
+
   ///  Get the state of the heap.
   GGraph getState(boolean clean) {
     GGraph graph = new GGraph();
