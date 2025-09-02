@@ -140,7 +140,7 @@ public class JavaExecutor {
     }
 
     // Check if the heap dump succeeded
-    if (dumper != null && !dumper.succeeded) {
+    if (dumper != null && !dumper.isSucceeded()) {
       return Result.failure(ExitCode.HEAP_DUMP_FAILURE, oss.toString().strip());
     }
 

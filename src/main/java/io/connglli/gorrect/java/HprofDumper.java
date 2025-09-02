@@ -29,6 +29,7 @@ import io.connglli.gorrect.utility.Logger;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.atomic.AtomicLong;
+import lombok.Getter;
 import lombok.NonNull;
 
 /// A heap dumper that dumps the heap of a process (set by PID) to the given hprof file when the
@@ -39,8 +40,10 @@ public class HprofDumper extends InputStream {
   @NonNull private final String file;
   @NonNull private final AtomicLong pid;
 
-  boolean succeeded = false;
-  volatile boolean closed = false;
+  @Getter
+  private boolean succeeded = false;
+  @Getter
+  private volatile boolean closed = false;
 
   public HprofDumper(@NonNull String file) {
     this.file = file;
