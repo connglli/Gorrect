@@ -8,7 +8,7 @@ manipulations on it:
 1. Initialize a graph G = (V, E): Nodes represent objects, edges represent references.
 2. Generate manipulation sequence t: A sequence of operations: add_node, remove_node, add_edge, remove_edge, where edges
    may be labeled with reference strength (strong/soft/weak/phantom/...).
-3. Apply t to G: Resulting in a new graph state G*.
+3. Apply t to G: Resulting in a new graph state G*. This is the expected, oracle state.
 4. Object association: Each node n is mapped to a LVM object o.
 5. Reference association: Each edge e is implemented as a reference field between objects.
 6. Operation association: Each operation op is implemneted as a series of statements allowed by LVM.
@@ -16,19 +16,49 @@ manipulations on it:
    correct reference types).
 8. Run T in LVM: Execute with full GC enabled (or specific GC configurations).
 9. Extract the reached heap state and translate it into a graph G$: Via JVMTI, jmap, heap dump, or Java Flight Recorder.
-10. Compare G$ with expected G*: Differences suggest issues in GC implementation or test harness logic.
+   This is the actual, runtime state.
+10. Compare G$ with G*: Differences suggest issues in GC implementation or test harness logic.
 
 ## Oracle
 
-For step 10, the correctness oracle should be: For each edge e (from node A to B, with ID) in G*:
+For step 10, the correctness oracle can be viewed from two aspects: the object view and the reference view.
 
-* Strong Reference: If B is reachable via strong paths in G*, then G$ must have the same strong edge. If B is
-  unreachable, it’s fine for the edge to be absent.
-* Soft Reference: G$ may or may not contain it. Missing soft edge ≠ bug.
-* Weak Reference: If B is only reachable via weak paths in G*,
-  G$ must not contain the edge. If B is still strongly/softly reachable, the edge may still exist in G$.
-* Any unexpected strong reference in G$ (not in G*) → GC bug.
-* Any weak reference in G$ whose referent was only weakly reachable in G* → GC bug.
+### Object View
+
+1. Root objects in G* should still be roots in G$.
+2. Any root object in G$ that is not found in G* should be reported.
+3. Strongly reachable objects in G* should remain strongly reachable.
+4. Strongly reachable objects in G$ that are not found or not strongly reachable in G* should be
+   reported.
+5. Softly reachable objects in G* can be softly reachable or cleared in G$.
+6. Softly reachable objects in G$ that are not found or not softly reachable in G* should be
+   reported.
+7. All weakly reachable objects in G* should not exist in G$ since they were all cleared after the last GC
+   cycle.
+8. There shouldn't be any weakly reachable objects in G$.
+
+### Reference View
+
+For each reference in G*, the reachability of the referer and referent and the
+existence of the reference in G$ must satisfy the following matrix (where v means
+must exist, o means it's okay if it doesn't exist, and x means must not exist):
+
+```text
+              referer
+                 |
+                 v
+             +--------+--------+------+------+
+referent --> |        | STRONG | SOFT | WEAK |
+             +--------+--------+------+------+
+             | STRONG |   v    |  o   |  x   |
+             +--------+--------+------+------+
+             |  SOFT  |   o    |  o   |  x   |
+             +--------+--------+------+------+
+             |  WEAK  |   x    |  x   |  x   |
+             +--------+--------+------+------+
+```
+
+The matrix should be satisfied for all references in G*, regardless of its type.
 
 ## Operations
 
@@ -81,7 +111,7 @@ The following advanced operations may exist:
 
 ### More Advanced Operations
 
-Here are some complementary operations that could enhance your test coverage:
+Here are some complementary operations that could enhance in the future:
 
 ##### Memory Pressure Operations
 
@@ -180,7 +210,7 @@ able, at least not easy, to control the generated state in this way.
 2. **Precondition Checking**: Some operations need preconditions (e.g., we can't remove a reference that doesn't
    exist).
 3. **Operation Composition**: Some complex scenarios might benefit from composite operations that combine atomic ones.
-4. **Reference Type Constraints**: Different GC implementations handle reference types differently - ensure your
+4. **Reference Type Constraints**: Different GC implementations handle reference types differently - ensure the
    operations can test these variations.
 5. **Concurrent Operations**: Consider operations that simulate concurrent access patterns if testing concurrent GCs.
    The GIR program generator should control whether to generate operations that can cause concurrent GCs (while the
