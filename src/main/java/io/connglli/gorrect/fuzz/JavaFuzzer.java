@@ -28,7 +28,7 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaExecutor;
-import io.connglli.gorrect.java.JavaInterpreter;
+import io.connglli.gorrect.java.JavaTranslator;
 import io.connglli.gorrect.java.oracle.EpsilonVM;
 import io.connglli.gorrect.java.oracle.JavaOracle;
 import io.connglli.gorrect.java.oracle.JavaVM;
@@ -87,7 +87,7 @@ public class JavaFuzzer {
     // The total number of bugs found during fuzzing.
     private final AtomicInteger totalBugs = new AtomicInteger(0);
 
-    // The number of failed iterations, e.g., when the Java interpreter does not match the oracle.
+    // The number of failed iterations, e.g., when the Java translator does not match the oracle.
     private final AtomicInteger failedIterations = new AtomicInteger(0);
     // The total number of iterations attempted during fuzzing.
     private final AtomicInteger totalIterations = new AtomicInteger(0);
@@ -345,30 +345,30 @@ public class JavaFuzzer {
       // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
       log.info("Interpret the GIR using the Oracle Interpreter ...");
       JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
-      OracleInterpreter oracle = new OracleInterpreter(unlimitedJvm, program);
-      oracle.interpret();
+      OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm, program);
+      interpreter.interpret();
 
-      GGraph oracleState = oracle.getState();
+      GGraph oracleState = interpreter.getState();
       log.info("Succeeded. The interpreter stopped with the following final state:");
       log.info(oracleState.formatToText());
 
       // Translate the Gorrect IR program to Java code and obtain the interpreter state.
-      log.info("Generating the Java program by interpreting the GIR program ...");
-      JavaInterpreter java = new JavaInterpreter(program);
-      java.interpret();
+      log.info("Generating the Java program by translating the GIR program ...");
+      JavaTranslator translator = new JavaTranslator(program);
+      translator.translate();
 
-      GGraph interpState = java.getState();
-      log.info("Succeeded. The interpreter stopped with the following final state:");
-      log.info(interpState.formatToText());
+      GGraph transState = translator.getState();
+      log.info("Succeeded. The translator stopped with the following final state:");
+      log.info(transState.formatToText());
 
-      if (oracleState.equals(interpState)) {
-        log.info("Good: The state of the Java interpreter matches the Oracle interpreter state.");
+      if (oracleState.equals(transState)) {
+        log.info("Good: The state of the Java translator matches the Oracle interpreter state.");
       } else {
-        log.error("BAD: There must be a bug in the Java interpreter due to state mismatch!");
+        log.error("BAD: There must be a bug in the Java translator due to state mismatch!");
       }
 
       // Export the Java program to a file and execute it
-      String javaFilePath = java.exportToJava(testdir, oracleState, config.strictValidation);
+      String javaFilePath = translator.exportToJava(testdir, oracleState, config.strictValidation);
       String javaFileFullPath = testdir + File.separator + javaFilePath;
       log.info("The Java program has been exported to %s", javaFileFullPath);
 
@@ -377,9 +377,9 @@ public class JavaFuzzer {
           "Execute the generated Java program %s...",
           config.strictValidation ? "and dump the heap state " : "");
       String dumpFilePath = config.strictValidation ? javaFilePath + ".hprof" : null;
-      JavaExecutor exec = new JavaExecutor(jvm);
+      JavaExecutor executor = new JavaExecutor(jvm);
       JavaExecutor.Result execResult =
-          exec.execute(javaFilePath, dumpFilePath, testdir, config.useGcOptions);
+          executor.execute(javaFilePath, dumpFilePath, testdir, config.useGcOptions);
 
       // The embedded oracle validation reports us a bug
       if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {
@@ -398,7 +398,7 @@ public class JavaFuzzer {
 
       // Dump and analyze the heap to validate the result for a strict validation
       String hprofFileFullPath = testdir + File.separator + dumpFilePath;
-      GGraph execState = HprofParser.parse(hprofFileFullPath, java.getUUID());
+      GGraph execState = HprofParser.parse(hprofFileFullPath, translator.getUUID());
 
       log.info("The extracted heap state:");
       log.info(execState.formatToText());

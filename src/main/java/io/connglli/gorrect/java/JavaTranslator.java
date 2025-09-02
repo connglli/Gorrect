@@ -31,29 +31,28 @@ import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.utility.*;
-import java.io.*;
 import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
 
-public class JavaInterpreter {
-  private final Logger log = Logger.getLogger(JavaInterpreter.class);
+public class JavaTranslator {
+  private final Logger log = Logger.getLogger(JavaTranslator.class);
 
   @Getter @NonNull private final GProgram program;
   @NonNull private final GeneratedHeap heap;
   @NonNull private final Impl impl;
 
-  public JavaInterpreter(@NonNull GProgram program) {
+  public JavaTranslator(@NonNull GProgram program) {
     this(program, true);
   }
 
-  public JavaInterpreter(@NonNull GProgram program, boolean strict) {
+  public JavaTranslator(@NonNull GProgram program, boolean strict) {
     this.program = program;
     this.heap = new GeneratedHeap(strict);
     this.impl = new Impl();
   }
 
-  public void interpret() {
+  public void translate() {
     program.accept(this.impl);
     heap.clean();
   }

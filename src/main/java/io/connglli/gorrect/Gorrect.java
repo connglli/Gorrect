@@ -32,7 +32,7 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.java.HprofParser;
 import io.connglli.gorrect.java.JavaExecutor;
-import io.connglli.gorrect.java.JavaInterpreter;
+import io.connglli.gorrect.java.JavaTranslator;
 import io.connglli.gorrect.java.oracle.*;
 import io.connglli.gorrect.oracle.NoOpVM;
 import io.connglli.gorrect.oracle.OracleInterpreter;
@@ -398,27 +398,27 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
     // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
     JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
-    OracleInterpreter oracle = new OracleInterpreter(unlimitedJvm, program);
-    oracle.interpret();
-    GGraph oracleState = oracle.getState();
+    OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm, program);
+    interpreter.interpret();
+    GGraph oracleState = interpreter.getState();
     System.out.println("Oracle Interpreter State");
     System.out.println("------------------------");
     System.out.println(oracleState.formatToText());
 
-    // Translate the Gorrect IR program to Java code and obtain the interpreter state.
-    JavaInterpreter java = new JavaInterpreter(program);
-    java.interpret();
-    GGraph interpState = java.getState();
-    System.out.println("Java Interpreter State");
+    // Translate the Gorrect IR program to Java code and obtain the translator state.
+    JavaTranslator translator = new JavaTranslator(program);
+    translator.translate();
+    GGraph transState = translator.getState();
+    System.out.println("Java Translator State");
     System.out.println("----------------------");
-    System.out.println(interpState.formatToText());
+    System.out.println(transState.formatToText());
 
-    System.out.println("Interpreter State Comparison");
-    System.out.println("----------------------------");
-    if (oracleState.equals(interpState)) {
+    System.out.println("State Comparison");
+    System.out.println("----------------");
+    if (oracleState.equals(transState)) {
       System.out.println("Equals\n");
     } else {
-      System.out.println("Not equals; there must be a bug in the Java interpreter!\n");
+      System.out.println("Not equals; there must be a bug in the Java translator!\n");
       return 1;
     }
 
@@ -427,7 +427,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       System.out.println("Java Program");
       System.out.println("------------");
       String javaFilePath =
-          java.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
+          translator.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
       String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
       System.out.println(Files.readString(Path.of(javaFileFullPath)));
 
