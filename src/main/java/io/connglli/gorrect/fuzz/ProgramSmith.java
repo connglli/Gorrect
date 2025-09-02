@@ -337,11 +337,18 @@ public class ProgramSmith {
 
     @Override
     public GInstruction visit(GRemoveObjInstruction unused) {
-      // We restrict the object to remove to be strongly reachable
-      // FIXME: We may also require the referers to be strongly reachable or there may be NPEs
-      GID objectId = currState().randomStronglyReachableObject();
+      // We restrict the object and all its referers to be strongly reachable
+      StateRandDecor s = currState();
+      GID objectId =
+          s.randomObject(
+              o ->
+                  s.isStronglyReachable(o.getId())
+                      && s.getReferers(o.getId()).stream()
+                          .allMatch(or -> s.isStronglyReachable(or.getId())));
       if (objectId == null) {
-        log.debug("Cannot remove an object due to no strongly reachable objects.");
+        log.debug(
+            "Cannot remove an object due to no available candidates "
+                + "(strongly reachable and strongly-reachable referers).");
         return null;
       }
       return new GRemoveObjInstruction(objectId);

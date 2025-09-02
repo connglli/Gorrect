@@ -467,11 +467,11 @@ class GeneratedHeap {
               // For example, b<->a, when removing b->a, a becomes unreachable. So it is unlikely
               // to unlink b<-a. In this case, we only need to free the link.
               GeneratedReference reference = getReference(referer, object);
-              // The referent depends on us, now it is no longer reachable, i.e.,
-              // being null in the generated Java. In this case, we only move it.
               if (referer.isReachable()) {
                 unlink(reference);
               } else {
+                // The referent depends on us, now it is no longer reachable, i.e.,
+                // being null in the generated Java. In this case, we only move it.
                 moveReferenceToDead(reference);
               }
             });
