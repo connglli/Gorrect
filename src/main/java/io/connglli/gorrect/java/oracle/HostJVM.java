@@ -26,15 +26,23 @@ package io.connglli.gorrect.java.oracle;
 
 import io.connglli.gorrect.utility.Assert;
 import java.io.File;
+import java.io.PrintStream;
 import lombok.NonNull;
-import org.openjdk.jol.datamodel.ModelVM;
+import org.openjdk.jol.vm.ModelVMExt;
 
 public final class HostJVM {
 
   public static @NonNull JavaVM getInstance(long heapCapacity, String... defaultOptions) {
     return switch (getBrandName()) {
       case HotSpotVM.BRAND_NAME ->
-          new HotSpotVM(new File(getHome()), heapCapacity, getJavaMajorVersion(), new ModelVM());
+          new HotSpotVM(new File(getHome()), heapCapacity, getJavaMajorVersion(), new ModelVMExt());
+
+      case GraalVM.BRAND_NAME ->
+          new GraalVM(new File(getHome()), heapCapacity, getJavaMajorVersion(), new ModelVMExt());
+
+      case ZingVM.BRAND_NAME ->
+          new ZingVM(new File(getHome()), heapCapacity, getJavaMajorVersion(), new ModelVMExt());
+
       default -> {
         Assert.panic("Not yet implemented for JVM brand: " + getBrandName());
         throw new RuntimeException(); // Cannot reach here, but needed for compilation
@@ -123,20 +131,19 @@ public final class HostJVM {
     return safeGetProperty("java.runtime.version");
   }
 
-  public static void printInfo() {
-    System.out.println("Java Version: " + getJavaVersion());
-    System.out.println("Java Vendor: " + getJavaVendor());
-    System.out.println("Java Vendor URL: " + getJavaVendorURL());
-    System.out.println("Java Home: " + getHome());
-    System.out.println("JVM Name: " + getName());
-    System.out.println("JVM Brand: " + getBrandName());
-    System.out.println("JVM Vendor: " + getVendor());
-    System.out.println("JVM Version: " + getVersion());
-    System.out.println("JVM Specification: " + safeGetProperty("java.vm.specification.name"));
-    System.out.println(
-        "JVM Specification Version: " + safeGetProperty("java.vm.specification.version"));
-    System.out.println("Java Runtime Name: " + getJavaRuntimeName());
-    System.out.println("Java Runtime Version: " + getJavaRuntimeVersion());
+  public static void printInfo(PrintStream ps) {
+    ps.println("Java Version: " + getJavaVersion());
+    ps.println("Java Vendor: " + getJavaVendor());
+    ps.println("Java Vendor URL: " + getJavaVendorURL());
+    ps.println("Java Home: " + getHome());
+    ps.println("Java Runtime Name: " + getJavaRuntimeName());
+    ps.println("Java Runtime Version: " + getJavaRuntimeVersion());
+    ps.println("JVM Name: " + getName());
+    ps.println("JVM Brand: " + getBrandName());
+    ps.println("JVM Vendor: " + getVendor());
+    ps.println("JVM Version: " + getVersion());
+    ps.println("JVM Specification: " + safeGetProperty("java.vm.specification.name"));
+    ps.println("JVM Specification Version: " + safeGetProperty("java.vm.specification.version"));
   }
 
   private static @NonNull String safeGetProperty(String key) {
@@ -148,6 +155,8 @@ public final class HostJVM {
   private HostJVM() {}
 
   public static void main(String[] args) {
-    printInfo();
+    printInfo(System.out);
+    JavaVM jvm = getInstance(1024L);
+    jvm.printInfo(System.out);
   }
 }

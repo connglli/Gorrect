@@ -75,6 +75,18 @@ public class Logger {
     return new Logger(clazz.getName());
   }
 
+  public static OutputStream getOutput() {
+    return settingOutput.get();
+  }
+
+  public static Level getLevel() {
+    return settingLevel;
+  }
+
+  public static boolean isHeadless() {
+    return settingHeadless.get();
+  }
+
   public static void setLevel(Level level) {
     settingLevel = level;
   }
@@ -129,7 +141,7 @@ public class Logger {
   // - ===========================================
 
   public void error(Throwable t) {
-    log(Level.SEVERE, "[**ERROR**] %s: %s", t.getClass().getCanonicalName(), t.getMessage());
+    log(Level.SEVERE, "%s: %s", t.getClass().getCanonicalName(), t.getMessage());
     for (StackTraceElement e : t.getStackTrace()) {
       log(Level.SEVERE, "    at " + e.toString());
     }
@@ -143,12 +155,12 @@ public class Logger {
   }
 
   public void error(String message, Object... args) {
-    log(Level.SEVERE, "[**ERROR**] " + safeFormat(message, args));
+    log(Level.SEVERE, safeFormat(message, args));
     Assert.panic(safeFormat(message, args));
   }
 
   public void warning(String message, Object... args) {
-    log(Level.WARNING, "[WARNING] " + safeFormat(message, args));
+    log(Level.WARNING, safeFormat(message, args));
   }
 
   public void debug(AnsiColor color, String message, Object... args) {

@@ -166,12 +166,13 @@ public class JavaFuzzer {
     recoverLogging();
     log.info(
         Logger.AnsiColor.GREEN,
-        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, gcOptions='%s', strictValidation=%s",
+        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, strictValidation=%s, gcOptions='%s', jvm=%s",
         config.maxWorkers,
         config.outputDir,
         config.maxIterations == 0 ? "infinite" : Integer.toString(config.maxIterations),
+        config.strictValidation ? "enabled" : "disabled",
         config.useGcOptions,
-        config.strictValidation ? "enabled" : "disabled");
+        config.javaVM.getHomeDirectory());
     ExecutorService workers = Executors.newFixedThreadPool(config.maxWorkers);
     try {
       stats.setStartTimeMills(System.currentTimeMillis());
@@ -387,7 +388,12 @@ public class JavaFuzzer {
 
       // Our execution encountered unexpected errors
       if (execResult.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
-        throw new RuntimeException(execResult.errorMessage());
+        StringBuilder sb = new StringBuilder();
+        sb.append(execResult.exitCode().name()).append(": ").append(execResult.errorMessage());
+        if (execResult.exception() != null) {
+          sb.append(". Caused by Exception: ").append(execResult.exception().getMessage());
+        }
+        throw new RuntimeException(sb.toString());
       }
 
       // Our execution succeeded, but we do not need strict validation

@@ -34,6 +34,7 @@ import io.connglli.gorrect.utility.Checksums;
 import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.Reflections;
 import java.io.File;
+import java.io.PrintStream;
 import java.lang.ref.Reference;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
@@ -47,7 +48,7 @@ import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
 import lombok.NonNull;
-import org.openjdk.jol.datamodel.DataModel;
+import org.openjdk.jol.datamodel.DataModelExt;
 import org.zeroturnaround.exec.ProcessExecutor;
 
 public class HotSpotVM extends JavaVM {
@@ -87,11 +88,11 @@ public class HotSpotVM extends JavaVM {
    * - The Structure of the Java Virtual Machine (https://docs.oracle.com/javase/specs/jvms/se21/html/jvms-2.html)
    * - Java Object Layout for HotSpot: https://github.com/openjdk/jol
    */
-  private final HotSpotObjects model;
+  protected final HotSpotObjects model;
 
   // We trace the allocated objects so that we can estimate the heap size
-  private final Map<GID, Long> allocatedObjects = new LinkedHashMap<>();
-  private final Map<GID, Long> freedObjects = new LinkedHashMap<>();
+  protected final Map<GID, Long> allocatedObjects = new LinkedHashMap<>();
+  protected final Map<GID, Long> freedObjects = new LinkedHashMap<>();
 
   public HotSpotVM(
       File home,
@@ -107,7 +108,7 @@ public class HotSpotVM extends JavaVM {
             version, mode64, enableCompressedOops, enableCompressedClassPointers, alignment);
   }
 
-  /*package*/ HotSpotVM(File home, long heapCapacity, int version, DataModel model) {
+  /*package*/ HotSpotVM(File home, long heapCapacity, int version, DataModelExt model) {
     super(home, heapCapacity);
     this.model = new HotSpotObjects(version, model);
   }
@@ -141,6 +142,7 @@ public class HotSpotVM extends JavaVM {
     allocatedObjects.put(objectId, estimatedSize);
   }
 
+  @Override
   public void onOracleFree(@NonNull OracleObject object) {
     reclaimMemory(List.of(object));
   }
@@ -231,6 +233,11 @@ public class HotSpotVM extends JavaVM {
         (long) object.getWeakReferents().size()
             * (getReferenceSize() + computeReferenceObjectSize(WeakReference.class));
     return model.align(initSize + strongRefsSize + softRefsSize + weakRefsSize);
+  }
+
+  @Override
+  public void printInfo(PrintStream ps) {
+    ps.println(model.vmDetails());
   }
 
   @SuppressWarnings("rawtypes")

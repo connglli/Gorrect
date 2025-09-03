@@ -114,12 +114,13 @@ interface GorrectSubCommand extends Callable<Integer> {
     ZGC(HotSpotVM.BRAND_NAME, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
     SHENANDOAH(
         HotSpotVM.BRAND_NAME, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
+    // C4(ZingVM.BRAND_NAME, "-XX:+UseC4"), // Zing's C4 Garbage Collector
     DEFAULT("", ""); // Use the default garbage collector
 
     // Which VM this GC is supported on
-    String vmBrand;
+    final String vmBrand;
     // The command line option to enable the GC
-    String enableOptions;
+    final String enableOptions;
 
     SupportedGCs(String vmBrand, String enable) {
       this.vmBrand = vmBrand;
@@ -591,6 +592,18 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   @Override
   public Integer runCommand() throws Exception {
     JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
+
+    // Print the host JVM information
+    Logger log = Logger.getLogger(Gorrect.class);
+    Logger.setOutput(System.out);
+    Logger.disableHeadless();
+
+    log.info("Detected JVM: " + HostJVM.getBrandName());
+    HostJVM.printInfo(System.out);
+    System.out.println("JVM Implementation Details:");
+    jvm.printInfo(System.out);
+
+    // Start the fuzzer
     new JavaFuzzer(
             JavaFuzzer.Config.builder()
                 .strictValidation(optStrictValidation)
@@ -603,6 +616,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
                 .useGcOptions(argUseGc.enableOptions)
                 .build())
         .start();
+
     return 0;
   }
 }

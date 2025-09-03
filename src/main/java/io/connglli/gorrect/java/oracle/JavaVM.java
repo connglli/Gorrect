@@ -28,6 +28,7 @@ import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.utility.Assert;
 import java.io.File;
 import java.io.IOException;
+import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.concurrent.TimeUnit;
@@ -54,7 +55,14 @@ public abstract class JavaVM extends LangVM {
         "Java compiler (javac) not found at " + getJavaCompilerPath());
     Assert.set(
         Files.exists(Path.of(getJavaExecutablePath())),
-        "Java executable (java) not found at " + getJavaCompilerPath());
+        "Java executable (java) not found at " + getJavaExecutablePath());
+    Assert.set(
+        Files.exists(Path.of(getJcmdExecutablePath())),
+        "Jcmd executable (jcmd) not found at " + getJcmdExecutablePath());
+  }
+
+  public String getHomeDirectory() {
+    return homeDirectory.toString();
   }
 
   public String getJavaCompilerPath() {
@@ -145,4 +153,6 @@ public abstract class JavaVM extends LangVM {
         .exitValue(0)
         .execute();
   }
+
+  public void printInfo(PrintStream ps) {}
 }

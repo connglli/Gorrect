@@ -26,6 +26,7 @@ package io.connglli.gorrect.java;
 
 import io.connglli.gorrect.java.oracle.JavaVM;
 import io.connglli.gorrect.utility.Assert;
+import io.connglli.gorrect.utility.Logger;
 import io.connglli.gorrect.utility.MemorySize;
 import java.io.*;
 import java.util.ArrayList;
@@ -41,6 +42,7 @@ import org.zeroturnaround.exec.listener.ProcessListener;
 /// JavaExecutor execute the generated Java code and dump the heap if necessary.
 @RequiredArgsConstructor
 public class JavaExecutor {
+  private final Logger log = Logger.getLogger(JavaExecutor.class);
 
   @NonNull private final JavaVM jvm;
 
@@ -55,13 +57,18 @@ public class JavaExecutor {
     UNKNOWN_FAILURE
   }
 
-  public record Result(@NonNull ExitCode exitCode, String errorMessage) {
+  public record Result(@NonNull ExitCode exitCode, String errorMessage, Throwable exception) {
     public static Result success() {
-      return new Result(ExitCode.SUCCESS, null);
+      return new Result(ExitCode.SUCCESS, null, null);
     }
 
-    public static Result failure(ExitCode code, String errorMessage) {
-      return new Result(code, errorMessage);
+    public static Result failure(@NonNull ExitCode code, @NonNull String errorMessage) {
+      return new Result(code, errorMessage, null);
+    }
+
+    public static Result failure(
+        @NonNull ExitCode code, @NonNull String errorMessage, @NonNull Throwable exception) {
+      return new Result(code, errorMessage, exception);
     }
   }
 
@@ -86,11 +93,11 @@ public class JavaExecutor {
           .exitValue(0) // Throw an exception if the exit value is not 0
           .execute();
     } catch (InvalidExitValueException e) {
-      return Result.failure(ExitCode.COMPILATION_FAILURE, oss.toString().strip());
+      return Result.failure(ExitCode.COMPILATION_FAILURE, oss.toString().strip(), e);
     } catch (TimeoutException e) {
-      return Result.failure(ExitCode.COMPILATION_TIMEOUT, oss.toString().strip());
+      return Result.failure(ExitCode.COMPILATION_TIMEOUT, oss.toString().strip(), e);
     } catch (Exception e) {
-      return Result.failure(ExitCode.UNKNOWN_FAILURE, oss.toString().strip());
+      return Result.failure(ExitCode.UNKNOWN_FAILURE, oss.toString().strip(), e);
     }
 
     // Prepare arguments for executing the generated Java code
@@ -99,13 +106,18 @@ public class JavaExecutor {
     command.add("-cp");
     command.add(workdir);
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
-    command.addAll(List.of(extraExecOptions));
+    for (String opt : extraExecOptions) {
+      if (opt != null && !opt.isEmpty()) {
+        command.add(opt);
+      }
+    }
     command.add(className);
 
     // Prepare a heap dumper if necessary
     HprofDumper dumper = dumpFile == null ? null : heapDumper(workdir + File.separator + dumpFile);
 
     // Execute the Java code
+    log.debug("Executing the Java class by command: %s", String.join(" ", command));
     oss = new ByteArrayOutputStream();
     ProcessExecutor executor =
         new ProcessExecutor(command)
@@ -129,19 +141,20 @@ public class JavaExecutor {
     } catch (InvalidExitValueException e) {
       String errMsg = oss.toString().strip();
       if (errMsg.contains("AssertionError") && errMsg.contains("oracle state")) {
-        return Result.failure(ExitCode.EXECUTION_ASSERTION, errMsg);
+        return Result.failure(ExitCode.EXECUTION_ASSERTION, errMsg, e);
       } else {
-        return Result.failure(ExitCode.EXECUTION_FAILURE, errMsg);
+        return Result.failure(ExitCode.EXECUTION_FAILURE, errMsg, e);
       }
     } catch (TimeoutException e) {
-      return Result.failure(ExitCode.EXECUTION_TIMEOUT, oss.toString().strip());
+      return Result.failure(ExitCode.EXECUTION_TIMEOUT, oss.toString().strip(), e);
     } catch (Exception e) {
-      return Result.failure(ExitCode.UNKNOWN_FAILURE, oss.toString().strip());
+      return Result.failure(ExitCode.UNKNOWN_FAILURE, oss.toString().strip(), e);
     }
 
     // Check if the heap dump succeeded
     if (dumper != null && !dumper.isSucceeded()) {
-      return Result.failure(ExitCode.HEAP_DUMP_FAILURE, oss.toString().strip());
+      return Result.failure(
+          ExitCode.HEAP_DUMP_FAILURE, oss.toString().strip(), dumper.getException());
     }
 
     return Result.success();

@@ -27,9 +27,7 @@ package io.connglli.gorrect.java.oracle;
 import io.connglli.gorrect.utility.Assert;
 import java.util.HashMap;
 import java.util.Map;
-import org.openjdk.jol.datamodel.DataModel;
-import org.openjdk.jol.datamodel.Model32;
-import org.openjdk.jol.datamodel.Model64;
+import org.openjdk.jol.datamodel.*;
 import org.openjdk.jol.info.ClassData;
 import org.openjdk.jol.layouters.HotSpotLayouter;
 
@@ -44,7 +42,7 @@ public class HotSpotObjects {
   private static final Map<Class<?>, Long> cachedShallowSizes = new HashMap<>();
 
   // We utilize JOL to avoid calculating the sizes manually.
-  private final DataModel model;
+  private final DataModelExt model;
   private final HotSpotLayouter layout;
 
   public HotSpotObjects(
@@ -56,11 +54,11 @@ public class HotSpotObjects {
     this(
         version,
         mode64
-            ? new Model64(enableCompressedOops, enableCompressedClassPointers, alignment)
-            : new Model32(alignment));
+            ? new Model64Ext(enableCompressedOops, enableCompressedClassPointers, alignment)
+            : new Model32Ext(alignment));
   }
 
-  /*package*/ HotSpotObjects(int version, DataModel model) {
+  /*package*/ HotSpotObjects(int version, DataModelExt model) {
     this.model = model;
     this.layout = new HotSpotLayouter(this.model, version);
   }
@@ -96,6 +94,10 @@ public class HotSpotObjects {
 
   public long getReferenceSize() {
     return model.sizeOf("reference");
+  }
+
+  public String vmDetails() {
+    return model.vmDetails();
   }
 
   /// Compute the shallow size of an object of a class.

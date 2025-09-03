@@ -43,6 +43,7 @@ public class HprofDumper extends InputStream {
 
   @Getter private boolean succeeded = false;
   @Getter private volatile boolean closed = false;
+  @Getter private Exception exception = null;
 
   public HprofDumper(@NonNull JavaVM jvm, @NonNull String file) {
     this.jvm = jvm;
@@ -80,6 +81,7 @@ public class HprofDumper extends InputStream {
       succeeded = true;
     } catch (Exception e) {
       succeeded = false;
+      exception = e;
     }
     closed = true;
     return '\n'; // Signal that we have finished dumping the heap

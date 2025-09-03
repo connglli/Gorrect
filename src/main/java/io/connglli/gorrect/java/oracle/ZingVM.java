@@ -24,68 +24,42 @@
 
 package io.connglli.gorrect.java.oracle;
 
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.oracle.OracleObject;
-import io.connglli.gorrect.utility.Assert;
 import java.io.File;
-import java.util.List;
-import lombok.NonNull;
+import org.openjdk.jol.datamodel.DataModelExt;
 
-public class ZingVM extends JavaVM {
+/** ZingVM represents the Azul Zing JVM, which is based on HotSpot. */
+public class ZingVM extends HotSpotVM {
   public static final String BRAND_NAME = "Zing/Azul";
 
-  static {
-    Assert.panic("Not yet implemented for Zing VM");
+  public ZingVM(
+      File home,
+      long heapCapacity,
+      int version,
+      boolean mode64,
+      boolean enableCompressedOops,
+      boolean enableCompressedClassPointers,
+      int alignment) {
+    super(
+        home,
+        heapCapacity,
+        version,
+        mode64,
+        enableCompressedOops,
+        enableCompressedClassPointers,
+        alignment);
   }
 
-  public ZingVM(File home, long heapCapacity) {
-    super(home, heapCapacity);
+  /*package*/ ZingVM(File home, long heapCapacity, int version, DataModelExt model) {
+    super(home, heapCapacity, version, model);
   }
 
+  /*package*/ ZingVM(File home, long heapCapacity, HotSpotObjects model) {
+    super(home, heapCapacity, model);
+  }
+
+  @SuppressWarnings("MethodDoesntCallSuperMethod")
   @Override
   public ZingVM clone() {
-    return new ZingVM(this.homeDirectory, this.getHeapCapacity());
-  }
-
-  @Override
-  public long getReferenceSize() {
-    return 0;
-  }
-
-  @Override
-  public void onOracleAllocate(@NonNull GID objectId, long size, GObject.Type type) {}
-
-  @Override
-  public void onOracleFree(@NonNull OracleObject object) {}
-
-  @Override
-  public void onOracleReference(
-      @NonNull GID referenceId,
-      @NonNull OracleObject referer,
-      @NonNull OracleObject referent,
-      GReference.@NonNull Type type) {}
-
-  @Override
-  public void onOracleUnlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {}
-
-  @Override
-  public void onOracleClean(@NonNull List<OracleObject> removedObjects) {}
-
-  @Override
-  public void onOracleCompact(@NonNull List<OracleObject> removedObjects) {}
-
-  @Override
-  public void onOracleStressCompact(@NonNull List<OracleObject> removedObjects) {}
-
-  @Override
-  public long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize) {
-    return 0;
-  }
-
-  @Override
-  public long estimateObjectHeapSize(@NonNull OracleObject object) {
-    return 0;
+    return new ZingVM(this.homeDirectory, this.getHeapCapacity(), this.model);
   }
 }

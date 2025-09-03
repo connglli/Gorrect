@@ -335,8 +335,20 @@ public class HprofParser {
   }
 
   private void logFoundObject(@NonNull Instance instance, GObjRecord object, boolean isRoot) {
+    String retainedSize = "N/A";
+    try {
+      retainedSize = instance.getRetainedSize() + "B";
+    } catch (Exception e) {
+      // Ignore
+    }
+    String reachableSize = "N/A";
+    try {
+      reachableSize = instance.getReachableSize() + "B";
+    } catch (Exception e) {
+      // Ignore
+    }
     log.info(
-        "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, shallow_size=%dB, retained_size=%dB, reachable_size=%dB)",
+        "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, shallow_size=%dB, retained_size=%s, reachable_size=%s)",
         isRoot ? "root" : "non-root",
         object.id,
         instance.getInstanceId(),
@@ -344,7 +356,7 @@ public class HprofParser {
         object.referents.size(),
         object.size,
         instance.getSize(),
-        instance.getRetainedSize(),
-        instance.getReachableSize());
+        retainedSize,
+        reachableSize);
   }
 }
