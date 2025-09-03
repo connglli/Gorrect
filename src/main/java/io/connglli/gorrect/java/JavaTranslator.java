@@ -116,6 +116,13 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GForceAnyGCInstruction instruction) {
+      instruction.checkValidity(getState());
+      heap.compact();
+      return null;
+    }
+
     public Void visit(GAddRootObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.allocRootWithoutInitializer(instruction.getObjectId(), instruction.getObjectSize());

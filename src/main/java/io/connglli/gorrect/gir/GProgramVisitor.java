@@ -46,6 +46,12 @@ public interface GProgramVisitor<T> {
   T visit(GSetHeapInstruction instruction);
 
   // -=======================================================
+  // Garbage collector instructions
+  // -=======================================================
+
+  T visit(GForceAnyGCInstruction instruction);
+
+  // -=======================================================
   // Object management instructions
   // -=======================================================
 

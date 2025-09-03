@@ -136,6 +136,7 @@ public class ProgramSmith {
       new LinkedHashMap<>();
 
   static {
+    instWeights.put(GForceAnyGCInstruction.class, 10);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);
@@ -181,7 +182,8 @@ public class ProgramSmith {
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     SmithImpl smith = new SmithImpl(vm, interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
-    for (int i = 0; i < numInstructions; i++) {
+    // TODO: Add force-GC instructions manually and intentionally
+    for (int i = 0; i < numInstructions - 1; i++) { // The last instruction is forcing GC
       if (stats.numTotalGeneration - stats.numValidGeneration > maxNumTrials) {
         log.debug("Too many invalid generations, possibly due to stopping.");
         break;
@@ -191,7 +193,7 @@ public class ProgramSmith {
         break; // Out of memory
       }
       Class<? extends GInstruction> instClazz = random.nextItem(instWeights);
-      GInstruction mock = mockInstruction(instClazz, interpreter);
+      GInstruction mock = mockInstruction(instClazz);
       log.debug("Generating instruction: " + mock.getOpCode());
       GInstruction instruction = mock.accept(smith);
       if (instruction == null) {
@@ -215,6 +217,7 @@ public class ProgramSmith {
         stats.numTotalGeneration++;
       }
     }
+    program.addInstruction(mockInstruction(GForceAnyGCInstruction.class).accept(smith));
     stats.generationTimeMillis = System.currentTimeMillis() - stats.generationTimeMillis;
     return program;
   }
@@ -257,6 +260,11 @@ public class ProgramSmith {
     public GInstruction visit(GSetHeapInstruction unused) {
       Assert.panic("Cannot reach here.");
       return null;
+    }
+
+    @Override
+    public GInstruction visit(GForceAnyGCInstruction instruction) {
+      return new GForceAnyGCInstruction();
     }
 
     @Override
@@ -662,6 +670,7 @@ public class ProgramSmith {
       new HashMap<>();
 
   static {
+    fakeInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
     fakeInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
     fakeInstructions.put(
@@ -708,8 +717,7 @@ public class ProgramSmith {
         GRemoveAllReferentsInstruction.class, new GRemoveAllReferentsInstruction(new GID("_")));
   }
 
-  private GInstruction mockInstruction(
-      Class<? extends GInstruction> instructionClass, OracleInterpreter interpreter) {
+  private GInstruction mockInstruction(Class<? extends GInstruction> instructionClass) {
     return fakeInstructions.get(instructionClass);
   }
 }

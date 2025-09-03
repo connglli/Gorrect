@@ -89,6 +89,12 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   }
 
   @Override
+  public Void visit(GForceAnyGCInstruction instruction) {
+    heap.compact();
+    return null;
+  }
+
+  @Override
   public Void visit(GAddRootObjInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());

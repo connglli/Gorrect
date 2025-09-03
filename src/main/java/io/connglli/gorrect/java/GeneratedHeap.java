@@ -34,9 +34,7 @@ import io.connglli.gorrect.gir.model.visitor.GObjectReversePostorderVisitor;
 import io.connglli.gorrect.gir.utility.UnmodifiableGraph;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
-import java.io.File;
-import java.io.FileOutputStream;
-import java.io.IOException;
+import java.io.*;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.*;
@@ -169,6 +167,7 @@ class GeneratedHeap {
     String relativePath = mainClazz.getClazzName() + ".java";
     String fullPath = directory + File.separator + relativePath;
     try (FileOutputStream fout = new FileOutputStream(fullPath)) {
+      // Export all generated classes
       fout.write(mainClazz.toJavaCode().getBytes());
       fout.write(new GeneratedObjectBaseClass(this).toJavaCode().getBytes());
       List<GID> sorted = new LinkedList<>();
@@ -180,6 +179,8 @@ class GeneratedHeap {
         Assert.set(obj != null, "The object with id %s does not exist", objId);
         fout.write(obj.getClazz().toJavaCode().getBytes());
       }
+      // Export the ForceGC class
+      fout.write(getForceGCCode().getBytes());
       return relativePath;
     } catch (IOException e) {
       Assert.panic("Cannot write to file %s: %s", fullPath, e.getMessage());
@@ -494,6 +495,8 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
+    // Insert a GC call to try triggering the garbage collection
+    appendStatement("ForceGC.tryGC()");
   }
 
   public void compact() {
@@ -509,6 +512,8 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
+    // Insert a forced GC call to trigger collecting weakly reachable objects
+    appendStatement("ForceGC.forceGC()");
   }
 
   public void stressCompact() {
@@ -523,6 +528,8 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
+    // Insert a forced GC call to trigger collecting weakly and softly reachable objects
+    appendStatement("ForceGC.forceGCInMemoryPressure()");
   }
 
   // -========================================================================
@@ -1102,6 +1109,25 @@ class GeneratedHeap {
       } else {
         log.warning(message);
       }
+    }
+  }
+
+  private static String getForceGCCode() {
+    InputStream iss = GeneratedHeap.class.getClassLoader().getResourceAsStream("ForceGC.java");
+    Assert.set(iss != null, "Cannot find ForceGC.java in the resources");
+    try (BufferedReader reader = new BufferedReader(new InputStreamReader(iss))) {
+      List<String> lines = new ArrayList<>();
+      for (String line : reader.lines().toList()) {
+        // We do not need the package declaration and imports
+        if (line.startsWith("package ") || line.startsWith("import ")) {
+          continue;
+        }
+        lines.add(line);
+      }
+      return String.join("\n", lines);
+    } catch (IOException e) {
+      Assert.panic("Cannot read ForceGC.java from the resources: %s", e.getMessage());
+      return null; // Unreachable, but required by the compiler
     }
   }
 }
