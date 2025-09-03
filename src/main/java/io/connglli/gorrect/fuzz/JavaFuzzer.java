@@ -163,6 +163,9 @@ public class JavaFuzzer {
   }
 
   public void start() {
+    FuzzThreadFactory threadFactory = new FuzzThreadFactory();
+    ExecutorService workers = Executors.newFixedThreadPool(config.maxWorkers, threadFactory);
+
     recoverLogging();
     log.info(
         Logger.AnsiColor.GREEN,
@@ -173,14 +176,13 @@ public class JavaFuzzer {
         config.strictValidation ? "enabled" : "disabled",
         config.useGcOptions,
         config.javaVM.getHomeDirectory());
-    ExecutorService workers = Executors.newFixedThreadPool(config.maxWorkers);
+
     try {
       stats.setStartTimeMills(System.currentTimeMillis());
       for (int i = 0; config.maxWorkers == 0 || i < config.maxWorkers; i++) {
         log.info("Requesting the %d-th worker ...", i);
         workers.submit(
             new FuzzWorker(
-                i,
                 config.outputDir + File.separator + "fuzz_proc_%05d".formatted(i),
                 Rand.getInstance().nextLong()));
       }
@@ -198,7 +200,7 @@ public class JavaFuzzer {
       workers.close();
     }
 
-    log.info("Fuzzer has been shut down successfully");
+    log.info(Logger.AnsiColor.GREEN, "Fuzzer has been shut down successfully");
   }
 
   private void recoverLogging() {
@@ -206,10 +208,25 @@ public class JavaFuzzer {
     Logger.setOutput(System.out);
   }
 
+  private static class FuzzThreadFactory implements ThreadFactory {
+    private final ThreadFactory fact = Executors.defaultThreadFactory();
+    private final AtomicInteger wids = new AtomicInteger(0);
+
+    public FuzzThreadFactory() {
+      Thread.currentThread().setName("MANAGER");
+    }
+
+    @Override
+    public Thread newThread(Runnable r) {
+      Thread t = fact.newThread(r);
+      t.setName("WORKER" + wids.getAndIncrement());
+      return t;
+    }
+  }
+
   @RequiredArgsConstructor
   private class FuzzWorker implements Runnable {
 
-    private final int workerId;
     @NonNull private final String workdir;
     @NonNull private final Long seed;
     private String bugsdir = "";
@@ -218,12 +235,7 @@ public class JavaFuzzer {
     public void run() {
       recoverLogging();
 
-      log.info(
-          Logger.AnsiColor.GREEN,
-          "Worker %d started: seed=%d, workdir=%s",
-          workerId,
-          seed,
-          workdir);
+      log.info(Logger.AnsiColor.GREEN, "Worker started: seed=%d, workdir=%s", seed, workdir);
 
       // Create the working directory and the bugs subdirectory if they do not exist.
       bugsdir = workdir + File.separator + "found_bugs";
@@ -241,19 +253,19 @@ public class JavaFuzzer {
       try {
         runFuzzLoop();
         recoverLogging();
-        log.info("Worker %d has finished its work", workerId);
+        log.info("Worker has finished its work");
       } catch (Throwable e) {
         recoverLogging();
-        log.warning("Worker %d has encountered an error: %s", workerId, e.getMessage());
+        log.warning("Worker has encountered an error: %s", e.getMessage());
         try {
           log.error(e);
         } catch (AssertionError ex) {
           // pass
         }
-        log.warning("Worker %d is shutting down due to the error", workerId);
+        log.warning("Worker is shutting down due to the error");
       }
 
-      log.info("Worker %d has been shut down", workerId);
+      log.info("Worker has been shut down");
     }
 
     @RequiredArgsConstructor
@@ -266,7 +278,7 @@ public class JavaFuzzer {
       // We create a separate directory for each generated test.
       String testNameFormat = createTestNameFormat();
       for (int i = 0; config.maxIterations == 0 || i < config.maxIterations; i++) {
-        log.info("Worker %d starting iteration %d ...", workerId, i);
+        log.info("Worker started fuzz iteration %d ...", i);
         stats.incTotalGenerations();
         // Maintain a separate directory for each tests
         String testdir = workdir + File.separator + testNameFormat.formatted(i);
@@ -283,8 +295,7 @@ public class JavaFuzzer {
           recoverLogging();
           log.info(
               Logger.AnsiColor.GREEN,
-              "**GOTCHA**: Worker %d FOUND A GC BUG (strict=%b) at iteration %d: %s",
-              workerId,
+              "**GOTCHA**: Worker FOUND A GC BUG (strict=%b) at iteration %d: %s",
               e.strict,
               i,
               testdir);
@@ -297,8 +308,7 @@ public class JavaFuzzer {
           stats.incFailedGenerations();
           recoverLogging();
           log.warning(
-              "Worker %d encountered errors during fuzzing at iteration %d: %s",
-              workerId, i, e.getMessage());
+              "Worker encountered errors during fuzzing at iteration %d: %s", i, e.getMessage());
           try {
             log.error(e);
           } catch (AssertionError ex) {
@@ -310,7 +320,8 @@ public class JavaFuzzer {
           recoverLogging();
           io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
         } catch (Exception e) {
-          log.warning("Worker %d failed to remove work directory: %s", workerId, e.getMessage());
+          log.warning(
+              "Worker failed to remove the work directory of iteration %d: %s", i, e.getMessage());
         }
       }
     }
@@ -428,9 +439,7 @@ public class JavaFuzzer {
       try {
         Files.move(testPath, Path.of(newTestDir));
       } catch (IOException e) {
-        log.warning(
-            "Worker %d failed to move the bug's directory from %s to %s",
-            workerId, testdir, newTestDir);
+        log.warning("Worker failed to move the bug's directory from %s to %s", testdir, newTestDir);
         return;
       }
 
@@ -443,7 +452,7 @@ public class JavaFuzzer {
           generateBugReport(ps, (JavaExecutor.Result) failure.failure);
         }
       } catch (FileNotFoundException e) {
-        log.warning("Worker %d failed to create bug report file: %s", workerId, e.getMessage());
+        log.warning("Worker failed to create the bug report file: %s", e.getMessage());
       }
     }
 

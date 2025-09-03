@@ -72,7 +72,7 @@ public class Logger {
   // - ===========================================
 
   public static Logger getLogger(Class<?> clazz) {
-    return new Logger(clazz.getName());
+    return new Logger(clazz.getSimpleName());
   }
 
   public static OutputStream getOutput() {
@@ -117,7 +117,7 @@ public class Logger {
           "[%s::%s::%s] [%s] %s"
               .formatted(
                   java.time.LocalDateTime.now()
-                      .format(DateTimeFormatter.ofPattern("yy-MM-dd-HH:mm:ss")),
+                      .format(DateTimeFormatter.ofPattern("yyMMdd-HH:mm:ss")),
                   Thread.currentThread().getName(),
                   name,
                   level.getName(),
