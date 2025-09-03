@@ -41,6 +41,7 @@ import java.nio.file.Path;
 import java.time.LocalDateTime;
 import java.time.format.DateTimeFormatterBuilder;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
 import lombok.*;
 
@@ -156,10 +157,12 @@ public class JavaFuzzer {
 
   @NonNull private final Config config; // Configuration for the fuzzer
   @NonNull private final Stats stats; // Statistics for tracking fuzzer performance
+  @NonNull private final AtomicBoolean stopEvent; // Flag to signal stopping the fuzzer
 
   public JavaFuzzer(@NonNull Config config) {
     this.config = config;
     this.stats = new Stats();
+    stopEvent = new AtomicBoolean(false);
   }
 
   public void start() {
@@ -176,6 +179,20 @@ public class JavaFuzzer {
         config.strictValidation ? "enabled" : "disabled",
         config.useGcOptions,
         config.javaVM.getHomeDirectory());
+
+    // Capture shutdown signals to stop the fuzzer gracefully
+    Runtime.getRuntime()
+        .addShutdownHook(
+            new Thread(
+                () -> {
+                  recoverLogging();
+                  log.warning("Shutdown signal received, stopping the fuzzer ...");
+                  stopEvent.set(true);
+                  log.info("Waiting for all workers to finish ...");
+                  workers.close(); // Stop accepting new tasks and finish existing ones
+                  log.info(Logger.AnsiColor.GREEN, "Fuzzer has been stopped");
+                },
+                "SHUTDOWN"));
 
     try {
       stats.setStartTimeMills(System.currentTimeMillis());
@@ -278,6 +295,11 @@ public class JavaFuzzer {
       // We create a separate directory for each generated test.
       String testNameFormat = createTestNameFormat();
       for (int i = 0; config.maxIterations == 0 || i < config.maxIterations; i++) {
+        if (stopEvent.get()) {
+          log.warning("Worker received stop event, stopping the fuzz loop ...");
+          break;
+        }
+
         log.info("Worker started fuzz iteration %d ...", i);
         stats.incTotalGenerations();
         // Maintain a separate directory for each tests
