@@ -27,7 +27,9 @@ package io.connglli.gorrect.gir.model;
 import static org.junit.jupiter.api.Assertions.*;
 
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
 
@@ -642,5 +644,677 @@ class GGraphTest {
     assertTrue(weaklyReachable.contains(nodes.get(11)), "Node 11 should be weak");
     assertTrue(weaklyReachable.contains(nodes.get(14)), "Node 14 should be weak");
     assertTrue(weaklyReachable.contains(nodes.get(15)), "Node 15 should be weak");
+  }
+
+  @Test
+  void testMarkShortestPathsSimpleLinearGraph() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID obj1 = new GID("obj1");
+    GID obj2 = new GID("obj2");
+    GID obj3 = new GID("obj3");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(obj1, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj2, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj3, GObject.Type.ORDINARY, 50);
+
+    GID ref1 = new GID("ref1");
+    GID ref2 = new GID("ref2");
+    GID ref3 = new GID("ref3");
+
+    graph.addReference(ref1, root, obj1, GReference.Type.STRONG);
+    graph.addReference(ref2, obj1, obj2, GReference.Type.STRONG);
+    graph.addReference(ref3, obj2, obj3, GReference.Type.STRONG);
+
+    // Create weights map: each reference has weight 1
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(ref1, 1L);
+    weights.put(ref2, 1L);
+    weights.put(ref3, 1L);
+
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // Root should have no path to itself (null)
+    assertNull(paths.get(root), "Root should have null path to itself");
+
+    // obj1 should have path [root, obj1] with weight 1
+    GGraph.WeightedPath pathToObj1 = paths.get(obj1);
+    assertNotNull(pathToObj1, "Path to obj1 should exist");
+    assertEquals(1L, pathToObj1.getWeight(), "Path to obj1 should have weight 1");
+    assertEquals(2, pathToObj1.length(), "Path to obj1 should have length 2");
+    assertEquals(root, pathToObj1.getRoot().getId(), "Path should start from root");
+    assertEquals(obj1, pathToObj1.getTarget().getId(), "Path should end at obj1");
+
+    // obj2 should have path [root, obj1, obj2] with weight 2
+    GGraph.WeightedPath pathToObj2 = paths.get(obj2);
+    assertNotNull(pathToObj2, "Path to obj2 should exist");
+    assertEquals(2L, pathToObj2.getWeight(), "Path to obj2 should have weight 2");
+    assertEquals(3, pathToObj2.length(), "Path to obj2 should have length 3");
+
+    // obj3 should have path [root, obj1, obj2, obj3] with weight 3
+    GGraph.WeightedPath pathToObj3 = paths.get(obj3);
+    assertNotNull(pathToObj3, "Path to obj3 should exist");
+    assertEquals(3L, pathToObj3.getWeight(), "Path to obj3 should have weight 3");
+    assertEquals(4, pathToObj3.length(), "Path to obj3 should have length 4");
+  }
+
+  @Test
+  void testMarkShortestPathsWithUnreachableObjects() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID reachable = new GID("reachable");
+    GID unreachable1 = new GID("unreachable1");
+    GID unreachable2 = new GID("unreachable2");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(reachable, GObject.Type.ORDINARY, 50);
+    graph.addObject(unreachable1, GObject.Type.ORDINARY, 50);
+    graph.addObject(unreachable2, GObject.Type.ORDINARY, 50);
+
+    GID ref1 = new GID("ref1");
+    GID ref2 = new GID("ref2");
+
+    graph.addReference(ref1, root, reachable, GReference.Type.STRONG);
+    graph.addReference(ref2, unreachable1, unreachable2, GReference.Type.STRONG);
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(ref1, 1L);
+    weights.put(ref2, 1L);
+
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // Root should have no path to itself
+    assertNull(paths.get(root), "Root should have null path to itself");
+
+    // Reachable object should have a path
+    assertNotNull(paths.get(reachable), "Reachable object should have a path");
+    assertEquals(1L, paths.get(reachable).getWeight(), "Path weight should be 1");
+
+    // Unreachable objects should have null paths
+    assertNull(paths.get(unreachable1), "Unreachable1 should have null path");
+    assertNull(paths.get(unreachable2), "Unreachable2 should have null path");
+  }
+
+  @Test
+  void testMarkShortestPathsComplexGraphWithMultiplePaths() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID objA = new GID("objA");
+    GID objB = new GID("objB");
+    GID objC = new GID("objC");
+    GID objD = new GID("objD");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(objA, GObject.Type.ORDINARY, 50);
+    graph.addObject(objB, GObject.Type.ORDINARY, 50);
+    graph.addObject(objC, GObject.Type.ORDINARY, 50);
+    graph.addObject(objD, GObject.Type.ORDINARY, 50);
+
+    // Create a diamond-shaped graph with different path weights
+    GID refRootA = new GID("refRootA");
+    GID refRootB = new GID("refRootB");
+    GID refAC = new GID("refAC");
+    GID refBC = new GID("refBC");
+    GID refCD = new GID("refCD");
+    GID refRootD = new GID("refRootD");
+
+    graph.addReference(refRootA, root, objA, GReference.Type.STRONG);
+    graph.addReference(refRootB, root, objB, GReference.Type.STRONG);
+    graph.addReference(refAC, objA, objC, GReference.Type.STRONG);
+    graph.addReference(refBC, objB, objC, GReference.Type.STRONG);
+    graph.addReference(refCD, objC, objD, GReference.Type.STRONG);
+    graph.addReference(refRootD, root, objD, GReference.Type.STRONG);
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(refRootA, 1L);
+    weights.put(refRootB, 2L);
+    weights.put(refAC, 1L);
+    weights.put(refBC, 1L);
+    weights.put(refCD, 1L);
+    weights.put(refRootD, 10L); // Make direct path to D expensive
+
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // objA should be reachable with weight 1 via [root, objA]
+    assertEquals(1L, paths.get(objA).getWeight(), "Path to objA should have weight 1");
+    assertEquals(2, paths.get(objA).length(), "Path to objA should have length 2");
+
+    // objB should be reachable with weight 2 via [root, objB]
+    assertEquals(2L, paths.get(objB).getWeight(), "Path to objB should have weight 2");
+
+    // objC should be reachable with weight 2 via [root, objA, objC] (not via objB which would be 3)
+    assertEquals(2L, paths.get(objC).getWeight(), "Path to objC should have weight 2");
+    assertEquals(3, paths.get(objC).length(), "Path to objC should have length 3");
+    assertEquals(
+        objA, paths.get(objC).getObjectAt(1).getId(), "Path to objC should go through objA");
+
+    // objD should be reachable with weight 3 via [root, objA, objC, objD] (not direct path with
+    // weight 10)
+    assertEquals(3L, paths.get(objD).getWeight(), "Path to objD should have weight 3");
+    assertEquals(4, paths.get(objD).length(), "Path to objD should have length 4");
+  }
+
+  @Test
+  void testMarkShortestPathsWithCyclesAndBackEdges() {
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID obj1 = new GID("obj1");
+    GID obj2 = new GID("obj2");
+    GID obj3 = new GID("obj3");
+    GID obj4 = new GID("obj4");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(obj1, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj2, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj3, GObject.Type.ORDINARY, 50);
+    graph.addObject(obj4, GObject.Type.ORDINARY, 50);
+
+    // Create a graph with cycles and multiple paths
+    GID refRoot1 = new GID("refRoot1");
+    GID ref12 = new GID("ref12");
+    GID ref23 = new GID("ref23");
+    GID ref34 = new GID("ref34");
+    GID ref41 = new GID("ref41"); // Back edge creating cycle
+    GID ref13 = new GID("ref13"); // Alternative path
+    GID refRoot4 = new GID("refRoot4"); // Alternative root path
+
+    graph.addReference(refRoot1, root, obj1, GReference.Type.STRONG);
+    graph.addReference(ref12, obj1, obj2, GReference.Type.STRONG);
+    graph.addReference(ref23, obj2, obj3, GReference.Type.STRONG);
+    graph.addReference(ref34, obj3, obj4, GReference.Type.STRONG);
+    graph.addReference(ref41, obj4, obj1, GReference.Type.STRONG); // Cycle
+    graph.addReference(ref13, obj1, obj3, GReference.Type.STRONG); // Shortcut
+    graph.addReference(refRoot4, root, obj4, GReference.Type.STRONG); // Direct path
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(refRoot1, 1L);
+    weights.put(ref12, 1L);
+    weights.put(ref23, 1L);
+    weights.put(ref34, 1L);
+    weights.put(ref41, 1L);
+    weights.put(ref13, 2L); // Make shortcut slightly more expensive
+    weights.put(refRoot4, 2L); // Direct path to obj4
+
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // obj1 should be reachable with weight 1
+    assertEquals(1L, paths.get(obj1).getWeight(), "Path to obj1 should have weight 1");
+
+    // obj2 should be reachable with weight 2 via [root, obj1, obj2]
+    assertEquals(2L, paths.get(obj2).getWeight(), "Path to obj2 should have weight 2");
+
+    // obj3 should be reachable with weight 3 via [root, obj1, obj2, obj3] (cheaper than shortcut)
+    assertEquals(3L, paths.get(obj3).getWeight(), "Path to obj3 should have weight 3");
+
+    // obj4 should be reachable with weight 2 via direct path [root, obj4]
+    assertEquals(2L, paths.get(obj4).getWeight(), "Path to obj4 should have weight 2");
+    assertEquals(2, paths.get(obj4).length(), "Direct path to obj4 should have length 2");
+  }
+
+  @Test
+  void testMarkShortestPathsMultipleRootsComplex() {
+    GGraph graph = new GGraph();
+    GID root1 = new GID("root1");
+    GID root2 = new GID("root2");
+    GID objA = new GID("objA");
+    GID objB = new GID("objB");
+    GID objC = new GID("objC");
+    GID objD = new GID("objD");
+
+    graph.addObject(root1, GObject.Type.GCROOT, 100);
+    graph.addObject(root2, GObject.Type.GCROOT, 100);
+    graph.addObject(objA, GObject.Type.ORDINARY, 50);
+    graph.addObject(objB, GObject.Type.ORDINARY, 50);
+    graph.addObject(objC, GObject.Type.ORDINARY, 50);
+    graph.addObject(objD, GObject.Type.ORDINARY, 50);
+
+    // Create overlapping trees from different roots
+    GID refRoot1A = new GID("refRoot1A");
+    GID refRoot2B = new GID("refRoot2B");
+    GID refAC = new GID("refAC");
+    GID refBC = new GID("refBC");
+    GID refCD = new GID("refCD");
+    GID refRoot1D = new GID("refRoot1D");
+    GID refRoot2C = new GID("refRoot2C");
+
+    graph.addReference(refRoot1A, root1, objA, GReference.Type.STRONG);
+    graph.addReference(refRoot2B, root2, objB, GReference.Type.STRONG);
+    graph.addReference(refAC, objA, objC, GReference.Type.STRONG);
+    graph.addReference(refBC, objB, objC, GReference.Type.STRONG);
+    graph.addReference(refCD, objC, objD, GReference.Type.STRONG);
+    graph.addReference(refRoot1D, root1, objD, GReference.Type.STRONG);
+    graph.addReference(refRoot2C, root2, objC, GReference.Type.STRONG);
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(refRoot1A, 1L);
+    weights.put(refRoot2B, 1L);
+    weights.put(refAC, 2L);
+    weights.put(refBC, 1L);
+    weights.put(refCD, 1L);
+    weights.put(refRoot1D, 5L); // Expensive direct path
+    weights.put(refRoot2C, 2L);
+
+    // Test markShortestPaths() with multiple roots (no specific root)
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(weights);
+
+    // objA should be reachable from root1 with weight 1
+    assertEquals(1L, paths.get(objA).getWeight(), "Path to objA should have weight 1");
+    assertEquals(root1, paths.get(objA).getRoot().getId(), "Path to objA should start from root1");
+
+    // objB should be reachable from root2 with weight 1
+    assertEquals(1L, paths.get(objB).getWeight(), "Path to objB should have weight 1");
+    assertEquals(root2, paths.get(objB).getRoot().getId(), "Path to objB should start from root2");
+
+    // objC should be reachable from root2 via objB with weight 2 (cheaper than other paths)
+    assertEquals(2L, paths.get(objC).getWeight(), "Path to objC should have weight 2");
+    assertEquals(root2, paths.get(objC).getRoot().getId(), "Path to objC should start from root2");
+
+    // objD should be reachable from root2 via objB->objC with weight 3 (cheaper than direct from
+    // root1)
+    assertEquals(3L, paths.get(objD).getWeight(), "Path to objD should have weight 3");
+    assertEquals(root2, paths.get(objD).getRoot().getId(), "Path to objD should start from root2");
+    assertEquals(3, paths.get(objD).length(), "Path to objD should have length 3");
+
+    // Test specific root paths for comparison
+    Map<GID, GGraph.WeightedPath> pathsFromRoot1 = graph.markShortestPaths(root1, weights);
+    Map<GID, GGraph.WeightedPath> pathsFromRoot2 = graph.markShortestPaths(root2, weights);
+
+    // Verify that the multi-root method chooses the best paths
+    assertTrue(
+        paths.get(objC).getWeight() <= pathsFromRoot1.get(objC).getWeight(),
+        "Multi-root should find better or equal path to objC than root1 alone");
+    assertTrue(
+        paths.get(objC).getWeight() <= pathsFromRoot2.get(objC).getWeight(),
+        "Multi-root should find better or equal path to objC than root2 alone");
+  }
+
+  @Test
+  void testMarkShortestPathsWithVeryComplexGraphAndBackEdges() {
+    // Use the same complex graph structure from testVeryComplexGraphWithMixedReferencesAndBackEdges
+    GGraph graph = new GGraph();
+    final int NODE_COUNT = 16;
+    List<GID> nodes = new ArrayList<>();
+    for (int i = 0; i < NODE_COUNT; i++) {
+      nodes.add(new GID("o" + i));
+    }
+
+    // Add root and objects
+    graph.addObject(nodes.getFirst(), GObject.Type.GCROOT, 100);
+    for (int i = 1; i < NODE_COUNT; i++) {
+      graph.addObject(nodes.get(i), GObject.Type.ORDINARY, 10);
+    }
+    GID root = nodes.get(0);
+
+    // Main chain (strong)
+    GID ref_0_1 = new GID("ref_0_1");
+    GID ref_1_2 = new GID("ref_1_2");
+    GID ref_2_3 = new GID("ref_2_3");
+    GID ref_3_4 = new GID("ref_3_4");
+    GID ref_4_5 = new GID("ref_4_5");
+
+    graph.addReference(ref_0_1, root, nodes.get(1), GReference.Type.STRONG);
+    graph.addReference(ref_1_2, nodes.get(1), nodes.get(2), GReference.Type.STRONG);
+    graph.addReference(ref_2_3, nodes.get(2), nodes.get(3), GReference.Type.STRONG);
+    graph.addReference(ref_3_4, nodes.get(3), nodes.get(4), GReference.Type.STRONG);
+    graph.addReference(ref_4_5, nodes.get(4), nodes.get(5), GReference.Type.STRONG);
+
+    // Branch 1 (soft)
+    GID ref_2_6 = new GID("ref_2_6");
+    GID ref_6_7 = new GID("ref_6_7");
+    graph.addReference(ref_2_6, nodes.get(2), nodes.get(6), GReference.Type.SOFT);
+    graph.addReference(ref_6_7, nodes.get(6), nodes.get(7), GReference.Type.STRONG);
+
+    // Branch 2 (weak)
+    GID ref_3_8 = new GID("ref_3_8");
+    GID ref_8_9 = new GID("ref_8_9");
+    graph.addReference(ref_3_8, nodes.get(3), nodes.get(8), GReference.Type.WEAK);
+    graph.addReference(ref_8_9, nodes.get(8), nodes.get(9), GReference.Type.STRONG);
+
+    // Branch 3 (mixed)
+    GID ref_5_10 = new GID("ref_5_10");
+    GID ref_10_11 = new GID("ref_10_11");
+    graph.addReference(ref_5_10, nodes.get(5), nodes.get(10), GReference.Type.SOFT);
+    graph.addReference(ref_10_11, nodes.get(10), nodes.get(11), GReference.Type.WEAK);
+
+    // Branch 4 (becomes strong)
+    GID ref_0_12 = new GID("ref_0_12");
+    GID ref_4_12 = new GID("ref_4_12");
+    graph.addReference(ref_0_12, root, nodes.get(12), GReference.Type.SOFT);
+    graph.addReference(ref_4_12, nodes.get(4), nodes.get(12), GReference.Type.STRONG);
+
+    // Branch 5 (becomes soft)
+    GID ref_0_13 = new GID("ref_0_13");
+    GID ref_6_13 = new GID("ref_6_13");
+    graph.addReference(ref_0_13, root, nodes.get(13), GReference.Type.WEAK);
+    graph.addReference(ref_6_13, nodes.get(6), nodes.get(13), GReference.Type.STRONG);
+
+    // More nodes
+    GID ref_11_14 = new GID("ref_11_14");
+    GID ref_13_15 = new GID("ref_13_15");
+    graph.addReference(ref_11_14, nodes.get(11), nodes.get(14), GReference.Type.STRONG);
+    graph.addReference(ref_13_15, nodes.get(13), nodes.get(15), GReference.Type.WEAK);
+
+    // Back-edges (5)
+    GID back_5_1 = new GID("back_5_1");
+    GID back_7_2 = new GID("back_7_2");
+    GID back_9_6 = new GID("back_9_6");
+    GID back_12_0 = new GID("back_12_0");
+    GID back_15_1 = new GID("back_15_1");
+
+    graph.addReference(back_5_1, nodes.get(5), nodes.get(1), GReference.Type.SOFT);
+    graph.addReference(back_7_2, nodes.get(7), nodes.get(2), GReference.Type.WEAK);
+    graph.addReference(back_9_6, nodes.get(9), nodes.get(6), GReference.Type.STRONG);
+    graph.addReference(back_12_0, nodes.get(12), root, GReference.Type.WEAK);
+    graph.addReference(back_15_1, nodes.get(15), nodes.get(1), GReference.Type.STRONG);
+
+    // Create weights map with varying costs to test shortest path algorithm
+    Map<GID, Long> weights = new HashMap<>();
+    // Main chain weights
+    weights.put(ref_0_1, 1L);
+    weights.put(ref_1_2, 1L);
+    weights.put(ref_2_3, 1L);
+    weights.put(ref_3_4, 1L);
+    weights.put(ref_4_5, 1L);
+
+    // Branch weights - make some paths more expensive
+    weights.put(ref_2_6, 3L); // Expensive soft branch
+    weights.put(ref_6_7, 1L);
+    weights.put(ref_3_8, 2L); // Moderate weak branch
+    weights.put(ref_8_9, 1L);
+    weights.put(ref_5_10, 2L); // Mixed branch
+    weights.put(ref_10_11, 1L);
+
+    // Alternative root paths
+    weights.put(ref_0_12, 10L); // Very expensive direct path
+    weights.put(ref_4_12, 1L); // Cheap via main chain
+    weights.put(ref_0_13, 8L); // Expensive direct path
+    weights.put(ref_6_13, 1L); // Cheap via branch
+
+    // Terminal references
+    weights.put(ref_11_14, 1L);
+    weights.put(ref_13_15, 1L);
+
+    // Back-edge weights - test cycle handling
+    weights.put(back_5_1, 2L);
+    weights.put(back_7_2, 3L);
+    weights.put(back_9_6, 1L);
+    weights.put(back_12_0, 5L);
+    weights.put(back_15_1, 2L);
+
+    // Test shortest paths from root
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // Verify main chain paths (should be optimal)
+    assertNull(paths.get(root), "Root should have null path to itself");
+    assertEquals(1L, paths.get(nodes.get(1)).getWeight(), "Path to node 1 should have weight 1");
+    assertEquals(2L, paths.get(nodes.get(2)).getWeight(), "Path to node 2 should have weight 2");
+    assertEquals(3L, paths.get(nodes.get(3)).getWeight(), "Path to node 3 should have weight 3");
+    assertEquals(4L, paths.get(nodes.get(4)).getWeight(), "Path to node 4 should have weight 4");
+    assertEquals(5L, paths.get(nodes.get(5)).getWeight(), "Path to node 5 should have weight 5");
+
+    // Verify branch paths consider weights
+    // Node 6: via main chain (2+3=5) vs direct expensive branch
+    assertEquals(5L, paths.get(nodes.get(6)).getWeight(), "Path to node 6 should use main chain");
+    assertEquals(4, paths.get(nodes.get(6)).length(), "Path to node 6 should have length 4");
+    assertEquals(
+        nodes.get(2),
+        paths.get(nodes.get(6)).getObjectAt(2).getId(),
+        "Path should go through node 2");
+
+    // Node 7: via node 6
+    assertEquals(6L, paths.get(nodes.get(7)).getWeight(), "Path to node 7 should have weight 6");
+
+    // Node 8: via main chain + weak branch
+    assertEquals(5L, paths.get(nodes.get(8)).getWeight(), "Path to node 8 should have weight 5");
+
+    // Node 9: via node 8
+    assertEquals(6L, paths.get(nodes.get(9)).getWeight(), "Path to node 9 should have weight 6");
+
+    // Node 12: via main chain (4+1=5) vs expensive direct (10)
+    assertEquals(5L, paths.get(nodes.get(12)).getWeight(), "Path to node 12 should use main chain");
+    assertEquals(6, paths.get(nodes.get(12)).length(), "Path to node 12 should have length 6");
+
+    // Node 13: via branch path (1+3+1+1=6) vs expensive direct (8)
+    assertEquals(
+        6L, paths.get(nodes.get(13)).getWeight(), "Path to node 13 should use branch path");
+
+    // Node 10: via main chain
+    assertEquals(7L, paths.get(nodes.get(10)).getWeight(), "Path to node 10 should have weight 7");
+
+    // Node 11: via node 10
+    assertEquals(8L, paths.get(nodes.get(11)).getWeight(), "Path to node 11 should have weight 8");
+
+    // Node 14: via node 11
+    assertEquals(9L, paths.get(nodes.get(14)).getWeight(), "Path to node 14 should have weight 9");
+
+    // Node 15: via node 13
+    assertEquals(7L, paths.get(nodes.get(15)).getWeight(), "Path to node 15 should have weight 8");
+
+    // Verify back-edges don't create shorter paths (cycles handled correctly)
+    // The algorithm should find optimal paths without infinite loops
+    assertTrue(
+        paths.get(nodes.get(1)).getWeight() <= 3L, "Back-edges shouldn't create infinite weight");
+
+    // Test path reconstruction for a complex path
+    GGraph.WeightedPath pathToNode12 = paths.get(nodes.get(12));
+    List<GObject> objectPath = pathToNode12.getObjectPaths();
+    assertEquals(root, objectPath.get(0).getId(), "Path should start from root");
+    assertEquals(nodes.get(4), objectPath.get(4).getId(), "Path should go through node 4");
+    assertEquals(nodes.get(12), objectPath.get(5).getId(), "Path should end at node 12");
+
+    // Test reference path reconstruction
+    List<GReference> refPath = pathToNode12.getReferencePaths();
+    assertEquals(5, refPath.size(), "Should have 5 references in path");
+    assertEquals(ref_4_12, refPath.get(4).getId(), "Last reference should be ref_4_12");
+  }
+
+  @Test
+  void testMarkShortestPathsMultipleRootsWithComplexGraph() {
+    // Create a variant of the complex graph with multiple roots to test the multi-root algorithm
+    GGraph graph = new GGraph();
+    GID root1 = new GID("root1");
+    GID root2 = new GID("root2");
+    GID nodeA = new GID("nodeA");
+    GID nodeB = new GID("nodeB");
+    GID nodeC = new GID("nodeC");
+    GID nodeD = new GID("nodeD");
+    GID nodeE = new GID("nodeE");
+    GID nodeF = new GID("nodeF");
+
+    // Add objects
+    graph.addObject(root1, GObject.Type.GCROOT, 100);
+    graph.addObject(root2, GObject.Type.GCROOT, 100);
+    graph.addObject(nodeA, GObject.Type.ORDINARY, 50);
+    graph.addObject(nodeB, GObject.Type.ORDINARY, 50);
+    graph.addObject(nodeC, GObject.Type.ORDINARY, 50);
+    graph.addObject(nodeD, GObject.Type.ORDINARY, 50);
+    graph.addObject(nodeE, GObject.Type.ORDINARY, 50);
+    graph.addObject(nodeF, GObject.Type.ORDINARY, 50);
+
+    // Create references with varying weights
+    GID ref_r1_A = new GID("ref_r1_A");
+    GID ref_r1_B = new GID("ref_r1_B");
+    GID ref_r2_C = new GID("ref_r2_C");
+    GID ref_r2_D = new GID("ref_r2_D");
+    GID ref_A_E = new GID("ref_A_E");
+    GID ref_B_E = new GID("ref_B_E");
+    GID ref_C_F = new GID("ref_C_F");
+    GID ref_D_F = new GID("ref_D_F");
+    GID ref_E_F = new GID("ref_E_F");
+    GID ref_B_C = new GID("ref_B_C"); // Cross-root connection
+    GID ref_F_A = new GID("ref_F_A"); // Back edge
+
+    graph.addReference(ref_r1_A, root1, nodeA, GReference.Type.STRONG);
+    graph.addReference(ref_r1_B, root1, nodeB, GReference.Type.STRONG);
+    graph.addReference(ref_r2_C, root2, nodeC, GReference.Type.STRONG);
+    graph.addReference(ref_r2_D, root2, nodeD, GReference.Type.STRONG);
+    graph.addReference(ref_A_E, nodeA, nodeE, GReference.Type.STRONG);
+    graph.addReference(ref_B_E, nodeB, nodeE, GReference.Type.STRONG);
+    graph.addReference(ref_C_F, nodeC, nodeF, GReference.Type.STRONG);
+    graph.addReference(ref_D_F, nodeD, nodeF, GReference.Type.STRONG);
+    graph.addReference(ref_E_F, nodeE, nodeF, GReference.Type.STRONG);
+    graph.addReference(ref_B_C, nodeB, nodeC, GReference.Type.STRONG);
+    graph.addReference(ref_F_A, nodeF, nodeA, GReference.Type.STRONG);
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(ref_r1_A, 1L);
+    weights.put(ref_r1_B, 3L); // More expensive path from root1
+    weights.put(ref_r2_C, 1L);
+    weights.put(ref_r2_D, 2L); // More expensive path from root2
+    weights.put(ref_A_E, 2L);
+    weights.put(ref_B_E, 1L);
+    weights.put(ref_C_F, 1L);
+    weights.put(ref_D_F, 3L); // Expensive path
+    weights.put(ref_E_F, 1L);
+    weights.put(ref_B_C, 2L); // Cross-connection
+    weights.put(ref_F_A, 1L); // Back edge
+
+    // Test multi-root shortest paths
+    Map<GID, GGraph.WeightedPath> multiRootPaths = graph.markShortestPaths(weights);
+
+    // Test individual root paths for comparison
+    Map<GID, GGraph.WeightedPath> root1Paths = graph.markShortestPaths(root1, weights);
+    Map<GID, GGraph.WeightedPath> root2Paths = graph.markShortestPaths(root2, weights);
+
+    // Verify multi-root algorithm chooses the globally optimal paths
+
+    // NodeA: should be from root1 (weight 1)
+    assertEquals(
+        1L, multiRootPaths.get(nodeA).getWeight(), "NodeA should have weight 1 from root1");
+    assertEquals(
+        root1, multiRootPaths.get(nodeA).getRoot().getId(), "NodeA should be reached from root1");
+
+    // NodeB: should be from root1 (weight 3)
+    assertEquals(
+        3L, multiRootPaths.get(nodeB).getWeight(), "NodeB should have weight 3 from root1");
+    assertEquals(
+        root1, multiRootPaths.get(nodeB).getRoot().getId(), "NodeB should be reached from root1");
+
+    // NodeC: could be from root2 (weight 1) or root1->B->C (weight 3+2=5) - should choose root2
+    assertEquals(
+        1L, multiRootPaths.get(nodeC).getWeight(), "NodeC should have weight 1 from root2");
+    assertEquals(
+        root2, multiRootPaths.get(nodeC).getRoot().getId(), "NodeC should be reached from root2");
+
+    // NodeD: should be from root2 (weight 2)
+    assertEquals(
+        2L, multiRootPaths.get(nodeD).getWeight(), "NodeD should have weight 2 from root2");
+    assertEquals(
+        root2, multiRootPaths.get(nodeD).getRoot().getId(), "NodeD should be reached from root2");
+
+    // NodeE: root1->A->E (weight 1+2=3) vs root1->B->E (weight 3+1=4) - should choose A path
+    assertEquals(
+        3L, multiRootPaths.get(nodeE).getWeight(), "NodeE should have weight 3 via root1->A->E");
+    assertEquals(
+        root1, multiRootPaths.get(nodeE).getRoot().getId(), "NodeE should be reached from root1");
+
+    // NodeF: multiple paths available - should choose optimal
+    // root2->C->F (1+1=2) vs root2->D->F (2+3=5) vs root1->A->E->F (1+2+1=4)
+    assertEquals(
+        2L, multiRootPaths.get(nodeF).getWeight(), "NodeF should have weight 2 via root2->C->F");
+    assertEquals(
+        root2, multiRootPaths.get(nodeF).getRoot().getId(), "NodeF should be reached from root2");
+
+    // Verify that multi-root paths are always better than or equal to single-root paths
+    for (GID nodeId : List.of(nodeA, nodeB, nodeC, nodeD, nodeE, nodeF)) {
+      Long multiWeight =
+          multiRootPaths.get(nodeId) != null
+              ? multiRootPaths.get(nodeId).getWeight()
+              : Long.MAX_VALUE;
+      Long root1Weight =
+          root1Paths.get(nodeId) != null ? root1Paths.get(nodeId).getWeight() : Long.MAX_VALUE;
+      Long root2Weight =
+          root2Paths.get(nodeId) != null ? root2Paths.get(nodeId).getWeight() : Long.MAX_VALUE;
+
+      assertTrue(
+          multiWeight <= Math.min(root1Weight, root2Weight),
+          "Multi-root path to "
+              + nodeId
+              + " should be optimal (weight: "
+              + multiWeight
+              + " vs root1: "
+              + root1Weight
+              + ", root2: "
+              + root2Weight
+              + ")");
+    }
+  }
+
+  @Test
+  void testMarkShortestPathsWithHeavyBackEdges() {
+    // Test shortest paths with complex cycles and back edges that could create shortcuts
+    GGraph graph = new GGraph();
+    GID root = new GID("root");
+    GID n1 = new GID("n1");
+    GID n2 = new GID("n2");
+    GID n3 = new GID("n3");
+    GID n4 = new GID("n4");
+    GID n5 = new GID("n5");
+
+    graph.addObject(root, GObject.Type.GCROOT, 100);
+    graph.addObject(n1, GObject.Type.ORDINARY, 50);
+    graph.addObject(n2, GObject.Type.ORDINARY, 50);
+    graph.addObject(n3, GObject.Type.ORDINARY, 50);
+    graph.addObject(n4, GObject.Type.ORDINARY, 50);
+    graph.addObject(n5, GObject.Type.ORDINARY, 50);
+
+    // Create a complex cycle structure
+    GID ref_root_1 = new GID("ref_root_1");
+    GID ref_1_2 = new GID("ref_1_2");
+    GID ref_2_3 = new GID("ref_2_3");
+    GID ref_3_4 = new GID("ref_3_4");
+    GID ref_4_5 = new GID("ref_4_5");
+    GID ref_5_1 = new GID("ref_5_1"); // Back to start of chain
+    GID ref_root_3 = new GID("ref_root_3"); // Direct to middle
+    GID ref_2_5 = new GID("ref_2_5"); // Shortcut
+    GID ref_4_2 = new GID("ref_4_2"); // Back edge creating smaller cycle
+
+    graph.addReference(ref_root_1, root, n1, GReference.Type.STRONG);
+    graph.addReference(ref_1_2, n1, n2, GReference.Type.STRONG);
+    graph.addReference(ref_2_3, n2, n3, GReference.Type.STRONG);
+    graph.addReference(ref_3_4, n3, n4, GReference.Type.STRONG);
+    graph.addReference(ref_4_5, n4, n5, GReference.Type.STRONG);
+    graph.addReference(ref_5_1, n5, n1, GReference.Type.STRONG);
+    graph.addReference(ref_root_3, root, n3, GReference.Type.STRONG);
+    graph.addReference(ref_2_5, n2, n5, GReference.Type.STRONG);
+    graph.addReference(ref_4_2, n4, n2, GReference.Type.STRONG);
+
+    Map<GID, Long> weights = new HashMap<>();
+    weights.put(ref_root_1, 2L);
+    weights.put(ref_1_2, 3L);
+    weights.put(ref_2_3, 1L);
+    weights.put(ref_3_4, 2L);
+    weights.put(ref_4_5, 1L);
+    weights.put(ref_5_1, 10L); // Heavy back edge
+    weights.put(ref_root_3, 4L); // Direct but more expensive than chain
+    weights.put(ref_2_5, 2L); // Moderate shortcut
+    weights.put(ref_4_2, 1L); // Light back edge
+
+    Map<GID, GGraph.WeightedPath> paths = graph.markShortestPaths(root, weights);
+
+    // Verify optimal paths despite complex cycles
+    assertNull(paths.get(root), "Root should have null path to itself");
+
+    // n1: direct from root (weight 2)
+    assertEquals(2L, paths.get(n1).getWeight(), "Path to n1 should have weight 2");
+
+    // n2: via n1 (2+3=5)
+    assertEquals(5L, paths.get(n2).getWeight(), "Path to n2 should have weight 5");
+
+    // n3: via n1->n2 (2+3+1=6) vs direct (4) - should choose direct
+    assertEquals(4L, paths.get(n3).getWeight(), "Path to n3 should use direct route");
+    assertEquals(2, paths.get(n3).length(), "Direct path to n3 should have length 2");
+
+    // n4: via direct to n3 (4+2=6) vs via n1->n2->n3 (2+3+1+2=8) - should choose via n3
+    assertEquals(6L, paths.get(n4).getWeight(), "Path to n4 should have weight 6");
+
+    // n5: multiple options - via n2 shortcut (5+2=7) vs via n4 (6+1=7) vs via n1->n2 shortcut
+    // (2+3+2=7)
+    assertEquals(7L, paths.get(n5).getWeight(), "Path to n5 should have weight 7");
+
+    // Verify that back edges are considered but don't create optimal paths due to weights
+    assertEquals(2L, paths.get(n1).getWeight(), "Back edge shouldn't create better path to n1");
+    assertTrue(paths.get(n2).getWeight() <= 5L, "Back edge from n4 shouldn't improve path to n2");
   }
 }

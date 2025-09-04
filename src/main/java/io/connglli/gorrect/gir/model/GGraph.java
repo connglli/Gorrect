@@ -30,7 +30,9 @@ import io.connglli.gorrect.gir.model.visitor.GReferenceVisitor;
 import io.connglli.gorrect.utility.Assert;
 import java.util.*;
 import java.util.stream.Collectors;
+import lombok.Getter;
 import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * GGraph represents a directed graph of objects. Where each node represents an object and an edge
@@ -272,6 +274,186 @@ public class GGraph {
   /// Visit all references in the object graph in a specific order
   public void accept(GReferenceVisitor visitor) {
     visitor.visit(this);
+  }
+
+  /*
+   * Path finding algorithms. Path finding in GGraph involves finding a path from a root object to
+   * another object in the graph. The path is represented as WeightedPath, starting from
+   * the root object and ending with the target object. If no such path exists, the WeightedPath is null.
+   */
+
+  public static final Long INFINITY = Long.MAX_VALUE;
+
+  @RequiredArgsConstructor
+  public class WeightedPath {
+    @NonNull private final List<GID> objIdPaths;
+    @Getter @NonNull private final Long weight;
+
+    /// Get the length of the path, that said, the number of objects in the path including the root
+    /// object and the target object.
+    public int length() {
+      return objIdPaths.size();
+    }
+
+    /// Get the root object of the path.
+    public GObject getRoot() {
+      return getObject(objIdPaths.getFirst());
+    }
+
+    /// Get the target object of the path.
+    public GObject getTarget() {
+      return getObject(objIdPaths.getLast());
+    }
+
+    /// Get the i-th object in the path.
+    public GObject getObjectAt(int i) {
+      Assert.set(i >= 0 && i < objIdPaths.size(), "Index %d is out of bounds", i);
+      return getObject(objIdPaths.get(i));
+    }
+
+    /// Represent the path as a list of objects.
+    public List<GObject> getObjectPaths() {
+      return objIdPaths.stream().map(GGraph.this::getObject).collect(Collectors.toList());
+    }
+
+    /// Represent the path as a list of references.
+    public List<GReference> getReferencePaths() {
+      List<GReference> refPaths = new ArrayList<>();
+      for (int i = 0; i < objIdPaths.size() - 1; i++) {
+        GID refererId = objIdPaths.get(i);
+        GID referentId = objIdPaths.get(i + 1);
+        refPaths.add(getReference(refererId, referentId));
+      }
+      return refPaths;
+    }
+  }
+
+  /// Find the shortest path from a root object root to all other objects using Dijkstra's
+  /// algorithm. The weights of each reference is given by weights. Return a map from object ID to
+  /// the list of object IDs (i.e., WeightedPath) representing the shortest path from the root to
+  /// that object. For reachable objects, the list starts with root and ends with that object. If an
+  /// object is unreachable, the corresponding list is null.
+  public Map<GID, WeightedPath> markShortestPaths(@NonNull GID root, Map<GID, Long> weights) {
+    Assert.set(hasObject(root), "Object with id %s does not exist", root);
+    Assert.set(getObject(root).isRoot(), "Object with id %s is not a root", root);
+
+    // Mark shortest paths using Dijkstra's algorithm
+
+    Map<GID, Long> minDist = new HashMap<>();
+    Map<GID, GID> prevObj = new HashMap<>();
+    PriorityQueue<GID> queue =
+        new PriorityQueue<>(
+            (objX, objY) -> {
+              Long distX = minDist.get(objX);
+              Long distY = minDist.get(objY);
+              if (distX.equals(INFINITY) && distY.equals(INFINITY)) return 0;
+              if (distX.equals(INFINITY)) return 1;
+              if (distY.equals(INFINITY)) return -1;
+              return Long.compare(distX, distY);
+            });
+
+    for (GID id : objects.keySet()) {
+      minDist.put(id, INFINITY);
+      prevObj.put(id, null);
+      queue.offer(id);
+    }
+    minDist.put(root, 0L);
+    prevObj.put(root, null);
+
+    while (!queue.isEmpty()) {
+      GID referer = queue.poll();
+      Long refererDist = minDist.get(referer);
+      if (refererDist.equals(INFINITY)) {
+        continue; // All remaining objects are unreachable
+      }
+      for (GID referent : refTo.get(referer)) {
+        GID reference = getReference(referer, referent).getId();
+        Long referenceWeight = weights.getOrDefault(reference, null);
+        Assert.set(
+            referenceWeight != null,
+            "Weight for reference %s is not provided or is null",
+            reference);
+        Assert.set(referenceWeight >= 0, "Weight for reference %s must be non-negative", reference);
+        Assert.set(
+            referenceWeight < INFINITY,
+            "Weight for reference %s cannot be INFINITY (i.e., %d)",
+            reference,
+            INFINITY);
+        long referentDist = refererDist + referenceWeight;
+        if (referentDist < minDist.get(referent)) {
+          minDist.put(referent, referentDist);
+          prevObj.put(referent, referer);
+          if (!queue.contains(referent)) {
+            queue.offer(referent);
+          }
+        }
+      }
+    }
+
+    // Compute the shortest paths using minDist and prevObj
+
+    Map<GID, WeightedPath> shortestPaths = new HashMap<>();
+    for (GID object : objects.keySet()) {
+      List<GID> path = new ArrayList<>();
+      for (GID referer = object; referer != null; referer = prevObj.get(referer)) {
+        path.add(referer);
+      }
+      Collections.reverse(path);
+      Assert.set(
+          path.getLast().equals(object),
+          "Path reconstruction failure; the last object is not %s, but %s",
+          object,
+          path.getLast());
+      if (path.size() == 1) {
+        path.clear(); // No path found
+        shortestPaths.put(object, null);
+      } else {
+        Assert.set(
+            path.getFirst().equals(root),
+            "Path reconstruction failure; the first object is not %s, but %s",
+            root,
+            path.getFirst());
+        shortestPaths.put(object, new WeightedPath(path, minDist.get(object)));
+      }
+    }
+
+    return shortestPaths;
+  }
+
+  /// Find the shortest path from any root object root to all other objects using Dijkstra's
+  /// algorithm. The weights of each reference is given by weights. Return a map from object ID to
+  /// the list of object IDs representing the shortest path (i.e., WeightedPath) from any root to
+  ///  that object. For reachable objects, the list starts with root and ends with that object. If
+  /// an object is unreachable, the corresponding list is non-null but empty.
+  public Map<GID, WeightedPath> markShortestPaths(Map<GID, Long> weights) {
+    Map<GID, WeightedPath> shortestPaths = null;
+    for (GObject root : getRoots()) {
+      Map<GID, WeightedPath> rootShortestPaths = markShortestPaths(root.getId(), weights);
+      if (shortestPaths == null) {
+        shortestPaths = rootShortestPaths;
+        continue;
+      }
+      for (GID objId : rootShortestPaths.keySet()) {
+        WeightedPath rootPath = rootShortestPaths.get(objId);
+        if (rootPath == null) {
+          continue; // The object is unreachable from this root
+        } else if (shortestPaths.get(objId) == null) {
+          shortestPaths.put(
+              objId,
+              rootPath); // The object is reachable from this root but not from previous roots
+        } else {
+          // The object is reachable from both this root and previous roots, take the shorter one
+          WeightedPath shortest = shortestPaths.get(objId);
+          if (shortest.getWeight() > rootPath.getWeight()) {
+            shortestPaths.put(objId, rootPath);
+          } else if (shortest.getWeight().equals(rootPath.getWeight())
+              && shortest.length() > rootPath.length()) {
+            shortestPaths.put(objId, rootPath);
+          }
+        }
+      }
+    }
+    return shortestPaths;
   }
 
   /*
