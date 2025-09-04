@@ -38,7 +38,7 @@ import lombok.NonNull;
  * GeneratedMainClass is the main class that contains the main method for the generation Java code.
  */
 final class GeneratedMainClass extends GeneratedClass {
-  static final ClassName clazzName = ClassName.get("", "GGeneratedMain");
+  static final ClassName clazzName = ClassName.get("", "Main");
   static final String UUID_FIELD_NAME = "uuid";
   static final String ROOT_REF_FIELD_NAME_PREFIX = "root_ref_to_";
 

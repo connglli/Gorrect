@@ -38,7 +38,7 @@ public class IdSmith {
   private long nextId = 0;
 
   public GID next() {
-    return new GID(prefix + "_" + (nextId++));
+    return new GID(prefix + (nextId++));
   }
 
   public GID next(Object... args) {

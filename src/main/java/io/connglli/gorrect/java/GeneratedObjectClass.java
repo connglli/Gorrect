@@ -42,7 +42,7 @@ import lombok.NonNull;
  */
 final class GeneratedObjectClass extends GeneratedClass {
 
-  static final String CLAZZ_NAME_PREFIX = "GGeneratedObject";
+  static final String CLAZZ_NAME_PREFIX = "Obj";
   static final String STRONG_REF_FIELD_NAME_PREFIX = "strong_ref_to_";
   static final String SOFT_REF_FIELD_NAME_PREFIX = "soft_ref_to_";
   static final String WEAK_REF_FIELD_NAME_PREFIX = "weak_ref_to_";

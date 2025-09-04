@@ -38,7 +38,7 @@ import lombok.NonNull;
  * another object in its own class.
  */
 final class GeneratedObjectBaseClass extends GeneratedClass {
-  static final ClassName clazzName = ClassName.get("", "GGeneratedBase");
+  static final ClassName clazzName = ClassName.get("", "Base");
   static final int MAX_ARRAY_SIZE = Integer.MAX_VALUE - 8; // 1MB
 
   static final FieldSpec objectId =

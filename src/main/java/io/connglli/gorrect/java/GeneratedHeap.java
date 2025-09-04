@@ -180,6 +180,7 @@ class GeneratedHeap {
         fout.write(obj.getClazz().toJavaCode().getBytes());
       }
       // Export the ForceGC class
+      fout.write('\n');
       fout.write(getForceGCCode().getBytes());
       return relativePath;
     } catch (IOException e) {

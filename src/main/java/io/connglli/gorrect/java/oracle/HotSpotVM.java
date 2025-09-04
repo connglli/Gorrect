@@ -281,7 +281,7 @@ public class HotSpotVM extends JavaVM {
     }
   }
 
-  private static final String generatedObjectBaseClassChecksum = "0125df9f6f9dd1df015e39ef78fae78b";
+  private static final String generatedObjectBaseClassChecksum = "64dfaa6962a2ea1bbb9d52bce2783da7";
   private static volatile Class<?> generatedObjectBaseClass = null;
 
   private Class<?> loadGeneratedObjectBaseClass() {
