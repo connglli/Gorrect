@@ -30,7 +30,7 @@ import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
-import io.connglli.gorrect.gir.model.visitor.GObjectReversePostorderVisitor;
+import io.connglli.gorrect.gir.model.visitor.GObjectBreadthFirstVisitor;
 import io.connglli.gorrect.gir.utility.UnmodifiableGraph;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
@@ -315,8 +315,12 @@ class GeneratedHeap {
   class NonRootInPoolAllocator implements AutoCloseable {
     private final List<GID> allocatedObjects = new ArrayList<>();
 
+    boolean isAllocated(@NonNull GID objectId) {
+      return allocatedObjects.contains(objectId);
+    }
+
     @SuppressWarnings("UnusedReturnValue")
-    public GeneratedObject alloc(@NonNull GID objectId, @NonNull Long objectSize) {
+    GeneratedObject alloc(@NonNull GID objectId, @NonNull Long objectSize) {
       Assert.set(!hasObject(objectId), "The object with id %s already exists", objectId);
       GeneratedObjectClass objectClazz =
           new GeneratedObjectClass(GeneratedHeap.this, objectId, objectSize);
@@ -326,7 +330,7 @@ class GeneratedHeap {
               GeneratedHeap.this,
               objectClazz,
               GObject.Type.ORDINARY,
-              "((%s) %s.get(\"%s\"))"
+              "(%s) %s.get(\"%s\")"
                   .formatted(objectClazz.clazzName, OBJECT_POOL_NAME, objectClazz.getId()),
               GReference.Type.STRONG, // It is strongly reachable as it is in the pool
               null);
@@ -604,7 +608,7 @@ class GeneratedHeap {
   List<GeneratedReference> getReferences(@NonNull GeneratedObject referer) {
     Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
-    return referents.get(referer.getId()).stream().collect(Collectors.toList());
+    return new ArrayList<>(referents.get(referer.getId()));
   }
 
   boolean hasReference(@NonNull GeneratedObject referer, @NonNull GeneratedObject referent) {
@@ -1013,81 +1017,141 @@ class GeneratedHeap {
     deadReferences.add(reference);
   }
 
+  private class HeapUpdater extends GObjectBreadthFirstVisitor {
+
+    @NonNull private final GGraph state;
+    @NonNull private final Set<GID> updated;
+    private GReference.Type step;
+    private final NonRootInPoolAllocator allocator;
+
+    HeapUpdater(NonRootInPoolAllocator alloc) {
+      state = getState(/* clean= */ false);
+      updated = new HashSet<>();
+      step = null;
+      allocator = alloc;
+    }
+
+    // Update the heap state
+    void update() {
+      // Mark the reachability of all objects
+      markReachability();
+      // Update strongly reachable objects
+      step = GReference.Type.STRONG;
+      state.accept(this);
+      // Update softly reachable objects
+      step = GReference.Type.SOFT;
+      state.accept(this);
+      // Update weakly reachable objects
+      step = GReference.Type.WEAK;
+      state.accept(this);
+      // Finish
+      step = null;
+    }
+
+    // Mark the reachability of all objects in the current state
+    private void markReachability() {
+      // When there's an allocator, objects in the pool should be treated as roots
+      if (allocator != null) {
+        for (GID objId : allocator.allocatedObjects) {
+          GObject obj = state.getObject(objId);
+          obj.setType(GObject.Type.GCROOT);
+        }
+      }
+      state.removeUnreachableObjects();
+      // Update the reachability of all objects based on the current state
+      Map<GID, GReference.Type> reachableObjects = state.markReachability();
+      for (GID objId : objects.keySet()) {
+        GeneratedObject obj = objects.get(objId);
+        obj.setReachability(reachableObjects.getOrDefault(objId, null));
+      }
+      // Revert the temporary roots back to ordinary objects
+      if (allocator != null) {
+        for (GID objId : allocator.allocatedObjects) {
+          GObject obj = state.getObject(objId);
+          obj.setType(GObject.Type.ORDINARY);
+        }
+      }
+    }
+
+    @Override
+    public @NonNull GReference.Type[] allowReferenceTypes() {
+      return switch (step) {
+        case STRONG -> new GReference.Type[] {GReference.Type.STRONG};
+        case SOFT -> new GReference.Type[] {GReference.Type.STRONG, GReference.Type.SOFT};
+        case WEAK ->
+            new GReference.Type[] {
+              GReference.Type.STRONG, GReference.Type.SOFT, GReference.Type.WEAK
+            };
+        default -> {
+          Assert.panic("Cannot reach here");
+          yield new GReference.Type[] {}; // Unreachable, but required by the compiler
+        }
+      };
+    }
+
+    // Update the identifiers of new reachable objects according to previously updated objects
+    // NOTICE: This method should be called independently for each reachability type starting from
+    // STRONG, to SOFT, and to WEAK.
+    @Override
+    public void visit(@NonNull GGraph graph, @NonNull GObject obj) {
+      GID objId = obj.getId();
+
+      // The object has already been updated
+      if (updated.contains(objId)) {
+        return;
+      }
+
+      // Objects in the pool should keep their original identifiers and reachability
+      if (allocator != null && allocator.isAllocated(objId)) {
+        updated.add(objId);
+        return;
+      }
+
+      GeneratedObject genObj = getObject(objId);
+
+      // Root objects are always referenced by a static field in the main class.
+      if (obj.isRoot()) {
+        genObj.setJavaRefId(GeneratedMainClass.computeFieldName(objId));
+        genObj.setRefToStrongestReferer(null);
+        updated.add(objId);
+        return;
+      }
+
+      // This object is reachable, we find the strongest reference
+      // from any of its updated referers
+      GReference strongestRef = null;
+
+      for (GObject referer : graph.getReferers(obj.getId())) {
+        if (!updated.contains(referer.getId())) {
+          continue;
+        }
+        GReference reference = graph.getReference(referer.getId(), obj.getId());
+        if (strongestRef == null || reference.getType().strongerThan(strongestRef.getType())) {
+          strongestRef = reference;
+        }
+      }
+
+      Assert.set(
+          strongestRef != null,
+          "The object %s has no referers, which should not happen",
+          obj.getId());
+
+      // We update the reference according to the strongest reference.
+      GeneratedObject strongestGenReferer = getObject(strongestRef.getReferer());
+      GeneratedReference strongestGenRef = getReference(strongestRef.getId());
+      genObj.setJavaRefId(strongestGenReferer.getJavaDerefId() + "." + strongestGenRef.getField());
+      genObj.setRefToStrongestReferer(strongestGenRef.getType());
+
+      updated.add(obj.getId());
+    }
+  }
+
   private void updateHeap() {
     updateHeap(/*allocator*/ null);
   }
 
   private void updateHeap(NonRootInPoolAllocator allocator) {
-    // Update the state of the heap based on the current objects and references
-    GGraph graph = getState(/* clean= */ false);
-    if (allocator != null) {
-      for (GID objId : allocator.allocatedObjects) {
-        GObject obj = graph.getObject(objId);
-        obj.setType(GObject.Type.GCROOT); // Object in the pool should be treated as root
-      }
-    }
-    graph.removeUnreachableObjects();
-    // Update the reachability of all objects based on the current state
-    Map<GID, GReference.Type> reachableObjects = graph.markReachability();
-    for (GID objId : objects.keySet()) {
-      GeneratedObject obj = objects.get(objId);
-      obj.setReachability(reachableObjects.getOrDefault(objId, null));
-    }
-    if (allocator != null) {
-      for (GID objId : allocator.allocatedObjects) {
-        GObject obj = graph.getObject(objId);
-        obj.setType(GObject.Type.ORDINARY); // Revert it back to avoid smashing the identifiers
-      }
-    }
-    // Update the identifiers of all objects based on the strongest reference
-    graph.accept(
-        new GObjectReversePostorderVisitor() {
-          private final Set<GID> visited = new HashSet<>();
-
-          @Override
-          public void visit(@NonNull GGraph graph, @NonNull GObject obj) {
-            GeneratedObject genObj = getObject(obj.getId());
-
-            if (obj.isRoot()) {
-              // Root objects are always referenced by a static field in the main class.
-              genObj.setJavaRefId(GeneratedMainClass.computeFieldName(obj.getId()));
-              genObj.setRefToStrongestReferer(null);
-              visited.add(obj.getId());
-              return;
-            }
-
-            // For other objects, we need to find the strongest reference
-            GReference strongestRef = null;
-
-            // When obj is visited, all its referers have been visited except for
-            // cycles/backedges which are always relying on us. We exclude them.
-            for (GObject referer : graph.getReferers(obj.getId())) {
-              if (!visited.contains(referer.getId())) {
-                // This is a cycle/backedge, we skip it
-                continue;
-              }
-              GReference reference = graph.getReference(referer.getId(), obj.getId());
-              if (strongestRef == null
-                  || reference.getType().strongerThan(strongestRef.getType())) {
-                strongestRef = reference;
-              }
-            }
-
-            Assert.set(
-                strongestRef != null,
-                "The object %s has no referers, which should not happen",
-                obj.getId());
-
-            // We update the reference according to the strongest reference.
-            GeneratedObject strongestGenReferer = getObject(strongestRef.getReferer());
-            GeneratedReference strongestGenRef = getReference(strongestRef.getId());
-            genObj.setJavaRefId(
-                strongestGenReferer.getJavaDerefId() + "." + strongestGenRef.getField());
-            genObj.setRefToStrongestReferer(strongestGenRef.getType());
-
-            visited.add(obj.getId());
-          }
-        });
+    new HeapUpdater(allocator).update();
   }
 
   // Ensure the object is reachable with any reachability type
