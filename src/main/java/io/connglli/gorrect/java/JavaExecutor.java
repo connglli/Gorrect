@@ -103,6 +103,7 @@ public class JavaExecutor {
     // Prepare arguments for executing the generated Java code
     List<String> command = new ArrayList<>();
     command.add(jvm.getJavaExecutablePath());
+    command.add("-ea"); // Enable assertion checks
     command.add("-cp");
     command.add(workdir);
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
