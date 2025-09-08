@@ -689,6 +689,7 @@ class StateCompareCommand implements GorrectSubCommand {
     JavaVM jvm = HostJVM.getInstance(MemorySize.parse(argHeapCapacity));
     JavaExecutor executor = new JavaExecutor(jvm);
 
+    // TODO: In case no heap-dump option is specified in the Java program
     String progName = argJavaProg.getName();
 
     // Copy the Java program to the working directory

@@ -31,9 +31,7 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
-import org.zeroturnaround.exec.ProcessExecutor;
 
 /**
  * Abstract class representing a Java Virtual Machine (JVM) for the OracleInterpreter. This class
@@ -50,15 +48,8 @@ public abstract class JavaVM extends LangVM {
   public JavaVM(File home, long heapCapacity) {
     super(heapCapacity);
     homeDirectory = home;
-    Assert.set(
-        Files.exists(Path.of(getJavaCompilerPath())),
-        "Java compiler (javac) not found at " + getJavaCompilerPath());
-    Assert.set(
-        Files.exists(Path.of(getJavaExecutablePath())),
-        "Java executable (java) not found at " + getJavaExecutablePath());
-    Assert.set(
-        Files.exists(Path.of(getJcmdExecutablePath())),
-        "Jcmd executable (jcmd) not found at " + getJcmdExecutablePath());
+    assertToolExists("javac");
+    assertToolExists("java");
   }
 
   public String getHomeDirectory() {
@@ -66,15 +57,11 @@ public abstract class JavaVM extends LangVM {
   }
 
   public String getJavaCompilerPath() {
-    return homeDirectory.toString() + File.separator + "bin" + File.separator + "javac";
+    return getToolExecutablePath("javac");
   }
 
   public String getJavaExecutablePath() {
-    return homeDirectory.toString() + File.separator + "bin" + File.separator + "java";
-  }
-
-  public String getJcmdExecutablePath() {
-    return homeDirectory.toString() + File.separator + "bin" + File.separator + "jcmd";
+    return getToolExecutablePath("java");
   }
 
   /*
@@ -145,14 +132,23 @@ public abstract class JavaVM extends LangVM {
     return size + (unit - (size % unit)) % unit;
   }
 
+  /*
+   * Tools and utilities
+   */
+
   public void dumpHeap(long pid, String hprof, boolean dead)
       throws IOException, InterruptedException, TimeoutException {
-    new ProcessExecutor(
-            getJcmdExecutablePath(), String.valueOf(pid), "GC.heap_dump", dead ? "-all" : "", hprof)
-        .timeout(5, TimeUnit.MINUTES)
-        .exitValue(0)
-        .execute();
+    Assert.panic("Not implemented");
   }
 
   public void printInfo(PrintStream ps) {}
+
+  protected String getToolExecutablePath(String toolName) {
+    return homeDirectory.toString() + File.separator + "bin" + File.separator + toolName;
+  }
+
+  protected void assertToolExists(String toolName) {
+    String toolPath = getToolExecutablePath(toolName);
+    Assert.set(Files.exists(Path.of(toolPath)), "Required tool not found at " + toolPath);
+  }
 }

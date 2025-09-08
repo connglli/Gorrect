@@ -34,6 +34,7 @@ import io.connglli.gorrect.utility.Checksums;
 import io.connglli.gorrect.utility.Formats;
 import io.connglli.gorrect.utility.Reflections;
 import java.io.File;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.lang.ref.Reference;
 import java.lang.ref.SoftReference;
@@ -47,6 +48,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.*;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.TimeoutException;
 import lombok.NonNull;
 import org.openjdk.jol.datamodel.DataModelExt;
 import org.zeroturnaround.exec.ProcessExecutor;
@@ -102,20 +104,30 @@ public class HotSpotVM extends JavaVM {
       boolean enableCompressedOops,
       boolean enableCompressedClassPointers,
       int alignment) {
-    super(home, heapCapacity);
-    this.model =
+    this(
+        home,
+        heapCapacity,
         new HotSpotObjects(
-            version, mode64, enableCompressedOops, enableCompressedClassPointers, alignment);
+            version, mode64, enableCompressedOops, enableCompressedClassPointers, alignment));
   }
 
   /*package*/ HotSpotVM(File home, long heapCapacity, int version, DataModelExt model) {
-    super(home, heapCapacity);
-    this.model = new HotSpotObjects(version, model);
+    this(home, heapCapacity, new HotSpotObjects(version, model));
   }
 
   /*package*/ HotSpotVM(File home, long heapCapacity, HotSpotObjects model) {
     super(home, heapCapacity);
+    assertToolExists("jcmd");
+    assertToolExists("jmap");
     this.model = model;
+  }
+
+  public String getJcmdExecutablePath() {
+    return getToolExecutablePath("jcmd");
+  }
+
+  public String getJmapExecutablePath() {
+    return getToolExecutablePath("jmap");
   }
 
   @Override
@@ -233,6 +245,30 @@ public class HotSpotVM extends JavaVM {
         (long) object.getWeakReferents().size()
             * (getReferenceSize() + computeReferenceObjectSize(WeakReference.class));
     return model.align(initSize + strongRefsSize + softRefsSize + weakRefsSize);
+  }
+
+  /*
+   * Tools and utilities including:
+   * + jhsdb: attach to a Java process or launch a postmortem debugger for analysis
+   * + jmap: obtain heap information
+   * + jstack: obtain stack information
+   * + jcmd: send diagnostic command requests to a running Java process
+   * + ...
+   *
+   * More tools can be found in: https://docs.oracle.com/en/java/javase/21/docs/specs/man/index.html.
+   * Or through the ToolProvider API: https://docs.oracle.com/en/java/javase/21/docs/api/java.compiler/javax/tools/ToolProvider.html
+   */
+
+  @Override
+  public void dumpHeap(long pid, String hprof, boolean dead)
+      throws IOException, InterruptedException, TimeoutException {
+    new ProcessExecutor(
+            getJmapExecutablePath(),
+            "-dump:format=b,file=%s,%s".formatted(hprof, dead ? "all" : "live"),
+            String.valueOf(pid))
+        .timeout(5, TimeUnit.MINUTES)
+        .exitValue(0)
+        .execute();
   }
 
   @Override
