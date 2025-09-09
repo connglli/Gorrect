@@ -250,9 +250,9 @@ public class HotSpotVM extends JavaVM {
   /*
    * Tools and utilities including:
    * + jhsdb: attach to a Java process or launch a postmortem debugger for analysis
-   * + jmap: obtain heap information
-   * + jstack: obtain stack information
    * + jcmd: send diagnostic command requests to a running Java process
+   * + jmap: obtain heap information, might be deprecated in future
+   * + jstack: obtain stack information, might be deprecated in future
    * + ...
    *
    * More tools can be found in: https://docs.oracle.com/en/java/javase/21/docs/specs/man/index.html.
@@ -262,13 +262,15 @@ public class HotSpotVM extends JavaVM {
   @Override
   public void dumpHeap(long pid, String hprof, boolean dead)
       throws IOException, InterruptedException, TimeoutException {
-    new ProcessExecutor(
-            getJmapExecutablePath(),
-            "-dump:format=b,file=%s,%s".formatted(hprof, dead ? "all" : "live"),
-            String.valueOf(pid))
-        .timeout(5, TimeUnit.MINUTES)
-        .exitValue(0)
-        .execute();
+    List<String> commands = new ArrayList<>();
+    commands.add(getJcmdExecutablePath());
+    commands.add(String.valueOf(pid));
+    commands.add("GC.heap_dump");
+    if (dead) {
+      commands.add("-all");
+    }
+    commands.add(hprof);
+    new ProcessExecutor(commands).timeout(5, TimeUnit.MINUTES).exitValue(0).execute();
   }
 
   @Override

@@ -107,6 +107,7 @@ public class JavaExecutor {
     command.add("-cp");
     command.add(workdir);
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
     for (String opt : extraExecOptions) {
       if (opt != null && !opt.isEmpty()) {
         command.add(opt);
