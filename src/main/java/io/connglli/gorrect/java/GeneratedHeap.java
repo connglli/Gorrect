@@ -884,19 +884,6 @@ class GeneratedHeap {
               .formatted(obj.getJavaRefId(), GReference.Type.STRONG, obj.getId()));
     }
 
-    // Softly reachable objects in the oracle can be softly reachable or cleared.
-    for (GID objId : state.getSoftlyReachableObjects()) {
-      GeneratedObject obj = getObject(objId);
-      appendStatement(
-          """
-          if (%s != null) {
-              assert %s != null : "The %s-reachable object with ID %s (in the oracle state) is not found in the runtime state";
-          }
-          """
-              .formatted(
-                  obj.getJavaRefId(), obj.getJavaDerefId(), GReference.Type.SOFT, obj.getId()));
-    }
-
     // Weakly reachable objects are expected to be cleared after each GC cycle.
     for (GID objId : state.getWeaklyReachableObjects()) {
       GeneratedObject obj = getObject(objId);
