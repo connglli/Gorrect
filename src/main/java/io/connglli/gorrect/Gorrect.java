@@ -43,6 +43,8 @@ import io.connglli.gorrect.utility.Rand;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
+import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
@@ -134,8 +136,11 @@ interface GorrectSubCommand extends Callable<Integer> {
     }
   }
 
+  // Override this method to check the validity of the options and throw
+  // CommandLine.ParameterException if the options are invalid.
   default void checkOptions() throws CommandLine.ParameterException {}
 
+  // Override this method to implement the command logic.
   Integer runCommand() throws Exception;
 
   @Override
@@ -746,7 +751,23 @@ class StateCompareCommand implements GorrectSubCommand {
 
   private GGraph execute(
       JavaExecutor executor, String javaFile, String dumpFile, String workdir, String[] useGc) {
-    JavaExecutor.Result res = executor.execute(javaFile, dumpFile, workdir, useGc);
+    List<String> options = new ArrayList<>(List.of(useGc));
+    if (parent.optVerbose) {
+      options.add(
+          // Call `java -Xlog:help` to see the options
+          ("-Xlog:"
+                  // GC options
+                  + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+safepoint=debug,gc+stats=debug,"
+                  // Safepoint options
+                  + "safepoint=debug,safepoint+stats=debug:"
+                  // Log to file
+                  + "%s:"
+                  // Format of each log entry
+                  + "time,tags,level")
+              .formatted(workdir + File.separator + dumpFile + ".log"));
+    }
+    JavaExecutor.Result res =
+        executor.execute(javaFile, dumpFile, workdir, options.toArray(new String[0]));
     if (res.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
       System.out.println("Error: Unable to executed the given Java program: " + res.errorMessage());
       System.exit(1);
