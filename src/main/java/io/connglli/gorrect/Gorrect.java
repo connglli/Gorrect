@@ -111,31 +111,6 @@ public class Gorrect {
 
 interface GorrectSubCommand extends Callable<Integer> {
 
-  enum SupportedGCs {
-    SERIAL(HotSpotVM.BRAND_NAME, "-XX:+UseSerialGC"), // HotSpot's Serial Garbage Collector
-    PARALLEL(HotSpotVM.BRAND_NAME, "-XX:+UseParallelGC"), // HotSpot's Parallel Garbage Collector
-    G1(HotSpotVM.BRAND_NAME, "-XX:+UseG1GC"), // HotSpot's Garbage-First Garbage Collector
-    Z(HotSpotVM.BRAND_NAME, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
-    X(
-        HotSpotVM.BRAND_NAME,
-        "-XX:+UseZGC",
-        "-XX:+ZGenerational"), // HotSpot's Z Garbage Collector with Generation Support
-    SHENANDOAH(
-        HotSpotVM.BRAND_NAME, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
-    C4(ZingVM.BRAND_NAME, "-XX:+UseGenPauselessGC"), // Zing's C4 Garbage Collector
-    DEFAULT("", ""); // Use the default garbage collector
-
-    // Which VM this GC is supported on
-    @NonNull final String vmBrand;
-    // The command line option to enable the GC
-    @NonNull final String[] enableOptions;
-
-    SupportedGCs(@NonNull String vmBrand, @NonNull String... enable) {
-      this.vmBrand = vmBrand;
-      this.enableOptions = enable;
-    }
-  }
-
   // Override this method to check the validity of the options and throw
   // CommandLine.ParameterException if the options are invalid.
   default void checkOptions() throws CommandLine.ParameterException {}
