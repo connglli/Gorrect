@@ -488,6 +488,7 @@ class GeneratedHeap {
     moveObjectToDead(object);
   }
 
+  // Remove all unreachable objects from the heap
   public void clean() {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getReachableObjects();
@@ -504,6 +505,7 @@ class GeneratedHeap {
     appendStatement("ForceGC.tryGC()");
   }
 
+  // Remove all unreachable and weakly reachable objects from the heap
   public void compact() {
     GGraph state = getState();
     Map<GID, GReference.Type> reachability = state.markReachability();
@@ -521,6 +523,7 @@ class GeneratedHeap {
     appendStatement("ForceGC.forceGC()");
   }
 
+  // Remove all unreachable and weakly reachable and softly reachable objects from the heap
   public void stressCompact() {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getStronglyReachableObjects();

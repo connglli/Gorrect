@@ -30,7 +30,10 @@ import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
 import lombok.experimental.FieldDefaults;
 
-/** Force any GC cycle in the garbage collection to happen at this point in the program. */
+/**
+ * Force any GC cycle in the garbage collection to happen at this point in the program. Executing
+ * this instruction ensures all unreachable and weakly-reachable objects are collected.
+ */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @EqualsAndHashCode(callSuper = true)

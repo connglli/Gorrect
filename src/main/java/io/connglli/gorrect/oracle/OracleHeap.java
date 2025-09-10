@@ -115,6 +115,7 @@ public class OracleHeap {
     return allocateObject(objectId, size, GObject.Type.ORDINARY);
   }
 
+  // Remove all unreachable objects from the heap
   public void clean() {
     GGraph copy = new GGraph(graph);
     Set<GID> removedObjects = copy.removeUnreachableObjects();
@@ -122,6 +123,7 @@ public class OracleHeap {
     graph.removeUnreachableObjects();
   }
 
+  // Remove all unreachable and weakly reachable objects from the heap
   public void compact() {
     GGraph copy = new GGraph(graph);
     Set<GID> removedObjects = copy.removeWeaklyReachableObjects();
@@ -129,6 +131,7 @@ public class OracleHeap {
     graph.removeWeaklyReachableObjects();
   }
 
+  // Remove all unreachable and weakly reachable and softly reachable objects from the heap
   public void stressCompact() {
     GGraph copy = new GGraph(graph);
     Set<GID> removedObjects = copy.removeSoftlyReachableObjects();
