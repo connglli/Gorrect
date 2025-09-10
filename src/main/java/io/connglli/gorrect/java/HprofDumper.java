@@ -25,7 +25,9 @@
 package io.connglli.gorrect.java;
 
 import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
+import java.io.ByteArrayOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.util.concurrent.atomic.AtomicLong;
@@ -41,6 +43,7 @@ public class HprofDumper extends InputStream {
   @NonNull private final String file;
   @NonNull private final AtomicLong pid;
 
+  @Getter private final ByteArrayOutputStream out = new ByteArrayOutputStream();
   @Getter private boolean succeeded = false;
   @Getter private volatile boolean closed = false;
   @Getter private Exception exception = null;
@@ -65,8 +68,8 @@ public class HprofDumper extends InputStream {
     if (closed) {
       return -1; // EOF
     }
-    // Wait until the process is started
-    while (pid.get() == -1L) {
+    // Wait until the process signaled us to dump the heap (1 for the newline character)
+    while (pid.get() == -1L || this.out.size() != JavaTranslator.HEAP_DUMP_SIGNAL.length() + 1) {
       try {
         Thread.sleep(5L);
       } catch (InterruptedException e) {
@@ -76,6 +79,12 @@ public class HprofDumper extends InputStream {
         return -1; // EOF if interrupted
       }
     }
+    String actual = this.out.toString().strip();
+    Assert.set(
+        JavaTranslator.HEAP_DUMP_SIGNAL.equals(actual),
+        "Output mismatch, perhaps we're dumping the heap of a wrong process: expected: %s, actual: %s",
+        JavaTranslator.HEAP_DUMP_SIGNAL,
+        actual);
     try {
       jvm.dumpHeap(pid.get(), file, /* dead= */ false);
       succeeded = true;

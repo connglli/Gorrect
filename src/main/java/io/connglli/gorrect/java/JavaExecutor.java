@@ -120,14 +120,13 @@ public class JavaExecutor {
 
     // Execute the Java code
     log.debug("Executing the Java class by command: %s", String.join(" ", command));
-    oss = new ByteArrayOutputStream();
     ProcessExecutor executor =
         new ProcessExecutor(command)
             .timeout(1, TimeUnit.MINUTES)
-            .redirectOutput(oss)
             .redirectErrorStream(true) // Redirect stderr to stdout
             .exitValue(0); // Throw an exception if the exit value is not 0
     if (dumper != null) {
+      oss = dumper.getOut();
       executor
           .listener(
               new ProcessListener() {
@@ -137,7 +136,10 @@ public class JavaExecutor {
                 }
               })
           .redirectInput(dumper);
+    } else {
+      oss = new ByteArrayOutputStream();
     }
+    executor.redirectOutput(oss);
     try {
       executor.execute();
     } catch (InvalidExitValueException e) {

@@ -38,6 +38,8 @@ import lombok.NonNull;
 public class JavaTranslator {
   private final Logger log = Logger.getLogger(JavaTranslator.class);
 
+  public static final String HEAP_DUMP_SIGNAL = "<dump>";
+
   @Getter @NonNull private final GProgram program;
   @NonNull private final GeneratedHeap heap;
   @NonNull private final Impl impl;
@@ -78,7 +80,10 @@ public class JavaTranslator {
     if (heapDump) {
       // Insert a dump heap instruction at the end of the main method
       heap.appendComment("Wait until the heap state is dumped");
-      heap.appendStatement("System.in.read()"); // See HprofDumper
+      // HprofDumper will wait until the process starts to read from its, so we print
+      // something to let it know. See HprofDumper.java for more details.
+      heap.appendStatement("System.out.println($S)", HEAP_DUMP_SIGNAL);
+      heap.appendStatement("System.in.read()");
     }
     String file = heap.exportToJava(workdir);
     log.info("Java code generated into " + file);
