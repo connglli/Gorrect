@@ -65,7 +65,6 @@ class ForceGC {
 
   public static boolean forceGCInMemoryPressure() {
     // TODO: Allocate a large amount of memory to create memory pressure
-    System.gc();
-    return false;
+    return forceGC();
   }
 }
