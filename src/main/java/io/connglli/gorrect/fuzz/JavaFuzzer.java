@@ -76,7 +76,7 @@ public class JavaFuzzer {
     private final JavaVM javaVM;
 
     /// The options to enable a specific garbage collector (GC) for the Java VM.
-    private final String useGcOptions;
+    private final String[] useGcOptions;
   }
 
   // Statistics for tracking the fuzzer's performance and results.

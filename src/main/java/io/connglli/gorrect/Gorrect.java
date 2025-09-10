@@ -110,19 +110,25 @@ public class Gorrect {
 interface GorrectSubCommand extends Callable<Integer> {
 
   enum SupportedGCs {
-    G1(HotSpotVM.BRAND_NAME, "-XX:+UseG1GC"), // HotSpot's G1 Garbage Collector
-    ZGC(HotSpotVM.BRAND_NAME, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
+    SERIAL(HotSpotVM.BRAND_NAME, "-XX:+UseSerialGC"), // HotSpot's Serial Garbage Collector
+    PARALLEL(HotSpotVM.BRAND_NAME, "-XX:+UseParallelGC"), // HotSpot's Parallel Garbage Collector
+    G1(HotSpotVM.BRAND_NAME, "-XX:+UseG1GC"), // HotSpot's Garbage-First Garbage Collector
+    Z(HotSpotVM.BRAND_NAME, "-XX:+UseZGC"), // HotSpot's Z Garbage Collector
+    X(
+        HotSpotVM.BRAND_NAME,
+        "-XX:+UseZGC",
+        "-XX:+ZGenerational"), // HotSpot's Z Garbage Collector with Generation Support
     SHENANDOAH(
         HotSpotVM.BRAND_NAME, "-XX:+UseShenandoahGC"), // HotSpot's Shenandoah Garbage Collector
-    // C4(ZingVM.BRAND_NAME, "-XX:+UseC4"), // Zing's C4 Garbage Collector
+    C4(ZingVM.BRAND_NAME, "-XX:+UseGenPauselessGC"), // Zing's C4 Garbage Collector
     DEFAULT("", ""); // Use the default garbage collector
 
     // Which VM this GC is supported on
-    final String vmBrand;
+    @NonNull final String vmBrand;
     // The command line option to enable the GC
-    final String enableOptions;
+    @NonNull final String[] enableOptions;
 
-    SupportedGCs(String vmBrand, String enable) {
+    SupportedGCs(@NonNull String vmBrand, @NonNull String... enable) {
       this.vmBrand = vmBrand;
       this.enableOptions = enable;
     }
@@ -133,7 +139,7 @@ interface GorrectSubCommand extends Callable<Integer> {
   Integer runCommand() throws Exception;
 
   @Override
-  public default Integer call() throws Exception {
+  default Integer call() throws Exception {
     checkOptions();
     return runCommand();
   }
@@ -739,7 +745,7 @@ class StateCompareCommand implements GorrectSubCommand {
   }
 
   private GGraph execute(
-      JavaExecutor executor, String javaFile, String dumpFile, String workdir, String useGc) {
+      JavaExecutor executor, String javaFile, String dumpFile, String workdir, String[] useGc) {
     JavaExecutor.Result res = executor.execute(javaFile, dumpFile, workdir, useGc);
     if (res.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
       System.out.println("Error: Unable to executed the given Java program: " + res.errorMessage());
