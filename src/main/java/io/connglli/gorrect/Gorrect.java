@@ -317,13 +317,6 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.ParentCommand protected Gorrect parent;
 
   @CommandLine.Option(
-      names = {"-c", "--collector"},
-      paramLabel = "name",
-      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected SupportedGCs optUseGC = SupportedGCs.DEFAULT;
-
-  @CommandLine.Option(
       names = {"-H", "--heap-capacity"},
       paramLabel = "size",
       description = "The heap capacity of the Java virtual machine under validation",
@@ -345,14 +338,19 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected boolean optValidate = false;
 
+  @CommandLine.Parameters(
+      paramLabel = "collector",
+      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
+  protected SupportedGCs argUseGC;
+
   @Override
   public void checkOptions() throws CommandLine.ParameterException {
-    if (optUseGC != SupportedGCs.DEFAULT) {
-      if (!optUseGC.vmBrand.equals(HostJVM.getBrandName())) {
+    if (argUseGC != SupportedGCs.DEFAULT) {
+      if (!argUseGC.vmBrand.equals(HostJVM.getBrandName())) {
         throw new CommandLine.ParameterException(
             parent.getCommandLine(),
             "The garbage collector must be compatible with the language VM: "
-                + optUseGC
+                + argUseGC
                 + " is not compatible with "
                 + HostJVM.getBrandName());
       }
@@ -454,7 +452,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
           String hprofFilePath = javaFilePath + ".hprof";
           JavaExecutor.Result execResult =
               executor.execute(
-                  javaFilePath, hprofFilePath, optOutputDir.toString(), optUseGC.enableOptions);
+                  javaFilePath, hprofFilePath, optOutputDir.toString(), argUseGC.enableOptions);
           if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {
             System.out.println("FOUND A GC BUG");
             System.out.println(execResult.errorMessage());
