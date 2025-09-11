@@ -569,7 +569,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
 
     log.info("Testing if the JVM can be launched ...");
     try {
-      String testLog = testJVM(jvm, argUseGc.enableOptions);
+      String testLog = testJVM(jvm, argUseGc);
       log.info("Success\n" + testLog);
     } catch (Exception e) {
       log.error(
@@ -594,18 +594,21 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     return 0;
   }
 
-  private String testJVM(JavaVM jvm, String... extraOpts) {
+  private String testJVM(JavaVM jvm, SupportedGCs useGC) {
     ByteArrayOutputStream oss = new ByteArrayOutputStream();
     List<String> command = new ArrayList<>();
     command.add(jvm.getJavaExecutablePath());
-    for (String opt : extraOpts) {
+    for (String opt : useGC.enableOptions) {
       if (!opt.isEmpty()) {
         command.add(opt);
       }
     }
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
     command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
-    command.add("-Xlog:gc+init=info::tags");
+    if (jvm instanceof HotSpotVM) {
+      // TODO: Move this to SupportedGCs as for example .logOptions
+      command.add("-Xlog:gc+init=info::tags");
+    }
     command.add("--version");
     try {
       new ProcessExecutor()
@@ -698,20 +701,10 @@ class StateCompareCommand implements GorrectSubCommand {
 
     // Execute the Java program with both garbage collectors
     GGraph stateA =
-        execute(
-            executor,
-            progName,
-            argJavaProg.getName() + ".a.hprof",
-            workdir,
-            argUseGcA.enableOptions);
+        execute(executor, progName, argJavaProg.getName() + ".a.hprof", workdir, argUseGcA);
     Files.writeString(Path.of(workdir, "state-a.txt"), stateA.formatToText());
     GGraph stateB =
-        execute(
-            executor,
-            progName,
-            argJavaProg.getName() + ".b.hprof",
-            workdir,
-            argUseGcB.enableOptions);
+        execute(executor, progName, argJavaProg.getName() + ".b.hprof", workdir, argUseGcB);
     Files.writeString(Path.of(workdir, "state-b.txt"), stateB.formatToText());
 
     JavaOracle oracle = new JavaOracle(stateA);
@@ -739,21 +732,24 @@ class StateCompareCommand implements GorrectSubCommand {
   }
 
   private GGraph execute(
-      JavaExecutor executor, String javaFile, String dumpFile, String workdir, String[] useGc) {
-    List<String> options = new ArrayList<>(List.of(useGc));
+      JavaExecutor executor, String javaFile, String dumpFile, String workdir, SupportedGCs useGc) {
+    List<String> options = new ArrayList<>(List.of(useGc.enableOptions));
     if (parent.optVerbose) {
-      options.add(
-          // Call `java -Xlog:help` to see the options
-          ("-Xlog:"
-                  // GC options
-                  + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+safepoint=debug,gc+stats=debug,"
-                  // Safepoint options
-                  + "safepoint=debug,safepoint+stats=debug:"
-                  // Log to file
-                  + "%s:"
-                  // Format of each log entry
-                  + "time,tags,level")
-              .formatted(workdir + File.separator + dumpFile + ".log"));
+      if (executor.getJvm() instanceof HotSpotVM) {
+        // TODO: Move this to SupportedGCs as for example .logOptions
+        options.add(
+            // Call `java -Xlog:help` to see the options
+            ("-Xlog:"
+                    // GC options
+                    + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+safepoint=debug,gc+stats=debug,"
+                    // Safepoint options
+                    + "safepoint=debug,safepoint+stats=debug:"
+                    // Log to file
+                    + "%s:"
+                    // Format of each log entry
+                    + "time,tags,level")
+                .formatted(workdir + File.separator + dumpFile + ".log"));
+      }
     }
     JavaExecutor.Result res =
         executor.execute(javaFile, dumpFile, workdir, options.toArray(new String[0]));

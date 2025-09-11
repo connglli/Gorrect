@@ -33,6 +33,7 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
+import lombok.Getter;
 import lombok.NonNull;
 import lombok.RequiredArgsConstructor;
 import org.zeroturnaround.exec.InvalidExitValueException;
@@ -44,6 +45,7 @@ import org.zeroturnaround.exec.listener.ProcessListener;
 public class JavaExecutor {
   private final Logger log = Logger.getLogger(JavaExecutor.class);
 
+  @Getter
   @NonNull private final JavaVM jvm;
 
   public enum ExitCode {
