@@ -45,8 +45,7 @@ import org.zeroturnaround.exec.listener.ProcessListener;
 public class JavaExecutor {
   private final Logger log = Logger.getLogger(JavaExecutor.class);
 
-  @Getter
-  @NonNull private final JavaVM jvm;
+  @Getter @NonNull private final JavaVM jvm;
 
   public enum ExitCode {
     SUCCESS,

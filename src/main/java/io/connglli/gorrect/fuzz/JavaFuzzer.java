@@ -32,6 +32,7 @@ import io.connglli.gorrect.java.JavaTranslator;
 import io.connglli.gorrect.java.oracle.EpsilonVM;
 import io.connglli.gorrect.java.oracle.JavaOracle;
 import io.connglli.gorrect.java.oracle.JavaVM;
+import io.connglli.gorrect.java.oracle.SupportedGCs;
 import io.connglli.gorrect.oracle.Oracle;
 import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.utility.*;
@@ -48,7 +49,7 @@ import lombok.*;
 public class JavaFuzzer {
   private final Logger log = Logger.getLogger(JavaFuzzer.class);
 
-  @Builder
+  @Builder(toBuilder = true, buildMethodName = "buildUnchecked")
   public static class Config {
     /// Strict validation mode. If true, the fuzzer will perform strict validation of the
     /// Java execution state against the oracle state. This includes dumping the runtime heap
@@ -59,24 +60,41 @@ public class JavaFuzzer {
     /// The maximum number of worker threads to use for fuzzing.
     private final int maxWorkers;
 
-    /// The directory where the output files will be stored.
-    private final String outputDir;
-
     /// The maximum number of iterations to perform in the fuzzing process.
     /// If set to 0, it will run indefinitely until manually stopped.
     private final int maxIterations;
 
-    /// The config builder for GraphSmith, which is used to generate init states.
-    private final GraphSmith.Config graphSmithConfig;
+    /// The directory where the output files will be stored.
+    private final @NonNull String outputDir;
 
-    /// The config builder for ProgramSmith, which is used to generate programs.
-    private final ProgramSmith.Config programSmithConfig;
+    /// The config for GraphSmith, which is used to generate init states.
+    private final @NonNull GraphSmith.Config graphSmithConfig;
+
+    /// The config for ProgramSmith, which is used to generate programs.
+    private final @NonNull ProgramSmith.Config programSmithConfig;
 
     /// The Java virtual machine (JVM) under testing
-    private final JavaVM javaVM;
+    private final @NonNull JavaVM javaVM;
 
     /// The options to enable a specific garbage collector (GC) for the Java VM.
-    private final String[] useGcOptions;
+    private final @NonNull SupportedGCs useGC;
+
+    public Config check() {
+      if (maxWorkers < 0) {
+        throw new IllegalArgumentException(
+            "maxWorkers must be non-negative, got %d".formatted(maxWorkers));
+      }
+      if (maxIterations < 0) {
+        throw new IllegalArgumentException(
+            "maxIterations must be non-negative, got %d".formatted(maxIterations));
+      }
+      if (outputDir.isEmpty()) {
+        throw new IllegalArgumentException("outputDir must be non-empty");
+      }
+      graphSmithConfig.check();
+      programSmithConfig.check();
+      return this;
+    }
   }
 
   // Statistics for tracking the fuzzer's performance and results.
@@ -156,13 +174,31 @@ public class JavaFuzzer {
   }
 
   @NonNull private final Config config; // Configuration for the fuzzer
+  @NonNull private final GraphSmith.Config graphSmithConfig; // Configuration for GraphSmith
+  @NonNull private final ProgramSmith.Config programSmithConfig; // Configuration for ProgramSmith
   @NonNull private final Stats stats; // Statistics for tracking fuzzer performance
   @NonNull private final AtomicBoolean stopEvent; // Flag to signal stopping the fuzzer
 
   public JavaFuzzer(@NonNull Config config) {
     this.config = config;
+    // When the GC is region-based, we parse their humongous object sizes
+    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = config.graphSmithConfig.toBuilder();
+    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder =
+        config.programSmithConfig.toBuilder();
+    if (config.useGC.isRegionBased) {
+      Long[] humongousLimits =
+          config.useGC.computeHumongousObjectMinSizes(config.javaVM.getHeapCapacity());
+      graphSmithConfigBuilder.humongousProba(.30);
+      graphSmithConfigBuilder.humongousObjSizeBytes(humongousLimits);
+      programSmithConfigBuilder.humongousProba(.30);
+      programSmithConfigBuilder.humongousObjSizeBytes(humongousLimits);
+    } else {
+      graphSmithConfigBuilder.humongousProba(0);
+    }
+    this.graphSmithConfig = graphSmithConfigBuilder.buildUnchecked().check();
+    this.programSmithConfig = programSmithConfigBuilder.buildUnchecked().check();
     this.stats = new Stats();
-    stopEvent = new AtomicBoolean(false);
+    this.stopEvent = new AtomicBoolean(false);
   }
 
   public void start() {
@@ -172,12 +208,13 @@ public class JavaFuzzer {
     recoverLogging();
     log.info(
         Logger.AnsiColor.GREEN,
-        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, strictValidation=%s, gcOptions='%s', jvm=%s",
+        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, strictValidation=%s, gcOptions='%s' (regions=%s), javaVM=%s",
         config.maxWorkers,
         config.outputDir,
         config.maxIterations == 0 ? "infinite" : Integer.toString(config.maxIterations),
         config.strictValidation ? "enabled" : "disabled",
-        config.useGcOptions,
+        String.join(" ", config.useGC.enableOptions),
+        config.useGC.isRegionBased ? "true" : "false",
         config.javaVM.getHomeDirectory());
 
     // Capture shutdown signals to stop the fuzzer gracefully
@@ -354,15 +391,14 @@ public class JavaFuzzer {
       IdSmith referenceIdSmith = new IdSmith("l");
 
       log.info("Generating the initial state ...");
-      GraphSmith graphSmith =
-          new GraphSmith(config.graphSmithConfig, objectIdSmith, referenceIdSmith);
+      GraphSmith graphSmith = new GraphSmith(graphSmithConfig, objectIdSmith, referenceIdSmith);
       GGraph initState = graphSmith.craft(jvm);
       log.info("Succeeded, the initial state is:");
       log.info(initState.formatToText());
 
       log.info("Generating the GIR program ...");
       ProgramSmith programSmith =
-          new ProgramSmith(config.programSmithConfig, objectIdSmith, referenceIdSmith);
+          new ProgramSmith(programSmithConfig, objectIdSmith, referenceIdSmith);
       GProgram program = programSmith.craft(jvm, initState);
       String progFullPath = testdir + File.separator + "program.gir";
       try (PrintStream ps = new PrintStream(new FileOutputStream(progFullPath))) {
@@ -412,7 +448,7 @@ public class JavaFuzzer {
       String dumpFilePath = config.strictValidation ? javaFilePath + ".hprof" : null;
       JavaExecutor executor = new JavaExecutor(jvm);
       JavaExecutor.Result execResult =
-          executor.execute(javaFilePath, dumpFilePath, testdir, config.useGcOptions);
+          executor.execute(javaFilePath, dumpFilePath, testdir, config.useGC.enableOptions);
 
       // The embedded oracle validation reports us a bug
       if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {

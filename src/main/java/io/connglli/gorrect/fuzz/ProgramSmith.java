@@ -44,7 +44,7 @@ import lombok.*;
 public class ProgramSmith {
   private final Logger log = Logger.getLogger(ProgramSmith.class);
 
-  @Builder
+  @Builder(toBuilder = true, buildMethodName = "buildUnchecked")
   @Getter
   public static class Config {
     /// The minimum number of instructions (including).
@@ -60,6 +60,63 @@ public class ProgramSmith {
 
     /// The maximum size (inclusive) of an object's padding in bytes.
     @Builder.Default private final long maxObjSizeBytes = 128_000; // 128KB
+
+    /// The probability of turning an object into a humongous object.
+    @Builder.Default private final double humongousProba = 0;
+
+    /// The size of treating an object as a humongous object in bytes. Humongous objects are
+    /// usually treated specially in a VM. Each object occupy exclusively one or more heap
+    /// region for region-based garbage collectors. This should be smaller than or equal to
+    /// maxObjSizeBytes and larger than or equal to minObjSizeBytes.
+    @Builder.Default private final Long[] humongousObjSizeBytes = new Long[] {128_000L}; // 128KB
+
+    public Config check() {
+      if (minInstructions < 1) {
+        throw new IllegalArgumentException(
+            "minInstructions must be at least 1, got " + minInstructions);
+      }
+      if (maxInstructions < minInstructions) {
+        throw new IllegalArgumentException(
+            "maxInstructions must be greater than or equal to minInstructions, got minInstructions=%d, maxInstructions=%d"
+                .formatted(minInstructions, maxInstructions));
+      }
+      if (minObjSizeBytes < 0) {
+        throw new IllegalArgumentException(
+            "minObjSizeBytes must be non-negative, got " + minObjSizeBytes);
+      }
+      if (maxObjSizeBytes < minObjSizeBytes) {
+        throw new IllegalArgumentException(
+            "maxObjSizeBytes must be greater than or equal to minObjSizeBytes, got minObjSizeBytes=%d, maxObjSizeBytes=%d"
+                .formatted(minObjSizeBytes, maxObjSizeBytes));
+      }
+      if (humongousProba < 0 || humongousProba > 1) {
+        throw new IllegalArgumentException(
+            "humongousProba must be between 0 and 1, got %.2f".formatted(humongousProba));
+      }
+      if (humongousProba > 0) {
+        if (humongousObjSizeBytes.length == 0) {
+          throw new IllegalArgumentException("humongousObjSizeBytes cannot be an empty array");
+        }
+        for (int index = 0; index < humongousObjSizeBytes.length; index++) {
+          long size = humongousObjSizeBytes[index];
+          if (size < 0) {
+            throw new IllegalArgumentException(
+                "humongousObjSizeBytes[%d] must be greater than 0, got %d".formatted(index, size));
+          }
+          if (size < minObjSizeBytes) {
+            throw new IllegalArgumentException(
+                "humongousObjSizeBytes[%d] must be greater than or equal to minObjSizeBytes, got humongousObjSizeBytes[%d]=%d, minObjSizeBytes=%d"
+                    .formatted(index, index, size, minObjSizeBytes));
+          }
+          if (size > maxObjSizeBytes) {
+            throw new IllegalArgumentException(
+                "humongousObjSizeBytes[%d] must be smaller than or equal to maxObjSizeBytes, got humongousObjSizeBytes[%d]=%d, maxObjSizeBytes=%d"
+                    .formatted(index, index, size, maxObjSizeBytes));
+          }
+        }
+      }
+      return this;
+    }
   }
 
   @ToString
@@ -591,7 +648,12 @@ public class ProgramSmith {
     }
 
     private long randomPadding(@NonNull GID id) {
-      long paddingSize = random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
+      boolean humongous = random.nextDouble() < config.humongousProba;
+      long paddingSize =
+          humongous
+              ? random.nextLong(
+                  random.nextItem(config.humongousObjSizeBytes), config.maxObjSizeBytes + 1)
+              : random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
       long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
       while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {
         paddingSize /= 2;

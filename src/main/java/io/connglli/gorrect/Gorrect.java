@@ -48,7 +48,6 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
-import java.util.stream.Collectors;
 import lombok.NonNull;
 import org.zeroturnaround.exec.ProcessExecutor;
 import picocli.CommandLine;
@@ -222,10 +221,6 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
         .softRefWeight(optSoftRefWeight)
         .weakRefWeight(optWeakRefWeight);
   }
-
-  protected GraphSmith buildGraphSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new GraphSmith(getGraphSmithConfigBuilder().build(), objectIdSmith, referenceIdSmith);
-  }
 }
 
 @CommandLine.Command(
@@ -243,7 +238,9 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
     NoOpVM vm = new NoOpVM(); // Do nothing
-    GraphSmith smith = buildGraphSmith(objectIdSmith, referenceIdSmith);
+    GraphSmith smith =
+        new GraphSmith(
+            getGraphSmithConfigBuilder().buildUnchecked().check(), objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
     // TODO: Export the graph in other formats (e.g., JSON) that can be parsed.
     System.out.println(graph.formatToText());
@@ -267,16 +264,12 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
 
-  protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfig() {
+  protected ProgramSmith.Config.ConfigBuilder getProgramSmithConfigBuilder() {
     return ProgramSmith.Config.builder()
         .minInstructions(optMinInstructions)
         .maxInstructions(optMaxInstructions)
         .minObjSizeBytes(MemorySize.parse(optMinObjectSize))
         .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize));
-  }
-
-  protected ProgramSmith buildProgramSmith(IdSmith objectIdSmith, IdSmith referenceIdSmith) {
-    return new ProgramSmith(getProgramSmithConfig().build(), objectIdSmith, referenceIdSmith);
   }
 }
 
@@ -303,17 +296,9 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.Option(
       names = {"-o", "--output-dir"},
       paramLabel = "dir",
-      description = "The output directory for the generated files (if any)",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+      required = true,
+      description = "The output directory for the generated files")
   protected File optOutputDir = null;
-
-  @CommandLine.Option(
-      names = {"--validate"},
-      negatable = true,
-      description =
-          "Validate the generated Java program against the host JVM and the oracle interpreter",
-      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected boolean optValidate = false;
 
   @CommandLine.Parameters(
       paramLabel = "collector",
@@ -330,139 +315,72 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
           "The heap capacity must be a valid memory size (e.g., 1GB, 512MB): " + optHeapCapacity,
           e);
     }
-
-    if (optOutputDir != null) {
-      if (optOutputDir.exists()) {
-        throw new CommandLine.ParameterException(
-            parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
-      }
-      if (!optOutputDir.mkdir()) {
-        throw new CommandLine.ParameterException(
-            parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
-      }
-    }
-
-    if (optValidate && optOutputDir == null) {
+    if (optOutputDir == null) {
       throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
-          "Validation requires an output directory to store the generated Java program.");
+          parent.getCommandLine(), "The output directory is not given");
+    }
+    if (optOutputDir.exists()) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
+    }
+    if (!optOutputDir.mkdir()) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
     }
   }
 
   @Override
   public Integer runCommand() throws Exception {
     // The JVM exists here to ensure our generated programs are not ouf of memory.
-    JavaVM jvm = HostJVM.getInstance(MemorySize.parse(optHeapCapacity));
+    long heapCapacity = MemorySize.parse(optHeapCapacity);
+    JavaVM jvm = HostJVM.getInstance(heapCapacity);
     IdSmith objectIdSmith = new IdSmith("o");
     IdSmith referenceIdSmith = new IdSmith("l");
 
-    GraphSmith graphSmith = buildGraphSmith(objectIdSmith, referenceIdSmith);
+    GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = getGraphSmithConfigBuilder();
+    if (argUseGC.isRegionBased) {
+      graphSmithConfigBuilder
+          .humongousProba(.20)
+          .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
+    }
+
+    GraphSmith graphSmith =
+        new GraphSmith(
+            graphSmithConfigBuilder.buildUnchecked().check(), objectIdSmith, referenceIdSmith);
     GGraph initState = graphSmith.craft(jvm);
-    System.out.println("Initial State");
-    System.out.println("-------------");
-    System.out.println(initState.formatToText());
 
-    ProgramSmith programSmith = buildProgramSmith(objectIdSmith, referenceIdSmith);
+    ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder = getProgramSmithConfigBuilder();
+    if (argUseGC.isRegionBased) {
+      programSmithConfigBuilder
+          .humongousProba(.20)
+          .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
+    }
 
+    ProgramSmith programSmith =
+        new ProgramSmith(
+            programSmithConfigBuilder.buildUnchecked().check(), objectIdSmith, referenceIdSmith);
     GProgram program = programSmith.craft(jvm, initState);
-    System.out.println("Gorrect IR Program");
-    System.out.println("------------------");
-    System.out.println(program.toString());
-
-    ProgramSmith.Stats progamGenStats = programSmith.getStats();
-    System.out.println("Smith Stats");
-    System.out.println("-----------");
-    System.out.println(progamGenStats.formatToText());
 
     // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
     JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
     OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm, program);
     interpreter.interpret();
     GGraph oracleState = interpreter.getState();
-    System.out.println("Oracle Interpreter State");
-    System.out.println("------------------------");
-    System.out.println(oracleState.formatToText());
 
     // Translate the Gorrect IR program to Java code and obtain the translator state.
     JavaTranslator translator = new JavaTranslator(program);
     translator.translate();
     GGraph transState = translator.getState();
-    System.out.println("Java Translator State");
-    System.out.println("----------------------");
-    System.out.println(transState.formatToText());
 
-    System.out.println("State Comparison");
-    System.out.println("----------------");
-    if (oracleState.equals(transState)) {
-      System.out.println("Equals\n");
-    } else {
-      System.out.println("Not equals; there must be a bug in the Java translator!\n");
-      return 1;
-    }
+    Assert.set(
+        oracleState.equals(transState),
+        "The oracle state and the translator state is not equal. There should be bugs in the Java translator!");
 
-    if (optOutputDir != null) {
-      // Export the Java program to a file and execute it
-      System.out.println("Java Program");
-      System.out.println("------------");
-      String javaFilePath =
-          translator.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
-      String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
-      System.out.println(Files.readString(Path.of(javaFileFullPath)));
+    String javaFilePath =
+        translator.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
+    String javaFileFullPath = optOutputDir + File.separator + javaFilePath;
 
-      if (optValidate) {
-        // Validate if the Java program after execution matches the oracle state.
-        System.out.println("Java Execution State");
-        System.out.println("--------------------");
-        JavaExecutor executor = new JavaExecutor(jvm);
-        try {
-          String hprofFilePath = javaFilePath + ".hprof";
-          JavaExecutor.Result execResult =
-              executor.execute(
-                  javaFilePath, hprofFilePath, optOutputDir.toString(), argUseGC.enableOptions);
-          if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {
-            System.out.println("FOUND A GC BUG");
-            System.out.println(execResult.errorMessage());
-            return 0;
-          } else if (execResult.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
-            System.out.println("Java program execution failed: " + execResult.errorMessage());
-            return 1;
-          }
-
-          String hprofFileFullPath = optOutputDir + File.separator + hprofFilePath;
-          GGraph execState = HprofParser.parse(hprofFileFullPath);
-          System.out.println(execState.formatToText());
-
-          System.out.println("Oracle Check");
-          System.out.println("------------");
-          // Validate the Java execution state against the oracle interpreter state.
-          JavaOracle validator = new JavaOracle(oracleState);
-          JavaOracle.ValidationResult valiResult = validator.validate(execState);
-          if (valiResult.isValid()) {
-            System.out.println(
-                "SUCCESS: The Java execution state matches the oracle interpreter state.");
-          } else {
-            System.out.println("FAILURE: " + valiResult.getFailureMessage());
-            System.out.println(
-                "Object Violations: "
-                    + valiResult.getObjectViolations().entrySet().stream()
-                        .map(s -> " - %s: %s".formatted(s.getKey(), s.getValue()))
-                        .collect(Collectors.joining("\n")));
-            System.out.println(
-                "Reference Violations: "
-                    + valiResult.getReferenceViolations().entrySet().stream()
-                        .map(
-                            s ->
-                                " - (%s -> %s): %s"
-                                    .formatted(s.getKey().a(), s.getKey().b(), s.getValue()))
-                        .collect(Collectors.joining("\n")));
-            return 0;
-          }
-        } catch (Exception e) {
-          System.out.println("FAILED to execute Java code: " + e.getMessage());
-          return 1;
-        }
-      }
-    }
+    System.out.println(Files.readString(Path.of(javaFileFullPath)));
 
     return 0;
   }
@@ -584,11 +502,12 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
                 .maxIterations(optMaxIterations)
-                .graphSmithConfig(getGraphSmithConfigBuilder().build())
-                .programSmithConfig(getProgramSmithConfig().build())
+                .graphSmithConfig(getGraphSmithConfigBuilder().buildUnchecked())
+                .programSmithConfig(getProgramSmithConfigBuilder().buildUnchecked())
                 .javaVM(jvm)
-                .useGcOptions(argUseGc.enableOptions)
-                .build())
+                .useGC(argUseGc)
+                .buildUnchecked()
+                .check())
         .start();
 
     return 0;
@@ -741,7 +660,7 @@ class StateCompareCommand implements GorrectSubCommand {
             // Call `java -Xlog:help` to see the options
             ("-Xlog:"
                     // GC options
-                    + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+safepoint=debug,gc+stats=debug,"
+                    + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+stats=debug,"
                     // Safepoint options
                     + "safepoint=debug,safepoint+stats=debug:"
                     // Log to file

@@ -327,9 +327,27 @@ public enum SupportedGCs {
    */
   public double getHumongousThreshold() {
     if (isRegionBased) {
-      return 1.0; // Default to 100% of region size
+      Assert.panic("Not implemented: Region-based garbage collectors should override this method");
+      return 1.0; // Unreachable but required by the compiler
     } else {
       return 0.75; // Default to 75% of small page size
     }
+  }
+
+  /**
+   * Compute the minimum sizes of humongous objects for this garbage collector, or return null if
+   * this garbage collector is not region-based.
+   */
+  public Long[] computeHumongousObjectMinSizes(long heapCapacity) {
+    if (!isRegionBased) {
+      return null;
+    }
+    long[] regionSizes = getRegionSizes(heapCapacity);
+    Long[] humongousSizes = new Long[regionSizes.length];
+    double humongousThreshold = getHumongousThreshold();
+    for (int idx = 0; idx < regionSizes.length; idx++) {
+      humongousSizes[idx] = (long) (regionSizes[idx] * humongousThreshold);
+    }
+    return humongousSizes;
   }
 }
