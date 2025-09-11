@@ -569,8 +569,8 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
 
     log.info("Testing if the JVM can be launched ...");
     try {
-      testJVM(jvm, argUseGc.enableOptions);
-      log.info("Success");
+      String testLog = testJVM(jvm, argUseGc.enableOptions);
+      log.info("Success\n" + testLog);
     } catch (Exception e) {
       log.error(
           "Error: The specified JVM configuration is invalid. See below message:\n"
@@ -594,7 +594,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     return 0;
   }
 
-  private void testJVM(JavaVM jvm, String... extraOpts) {
+  private String testJVM(JavaVM jvm, String... extraOpts) {
     ByteArrayOutputStream oss = new ByteArrayOutputStream();
     List<String> command = new ArrayList<>();
     command.add(jvm.getJavaExecutablePath());
@@ -605,6 +605,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     }
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
     command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.add("-Xlog:gc+init=info::tags");
     command.add("--version");
     try {
       new ProcessExecutor()
@@ -616,6 +617,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     } catch (Exception e) {
       throw new IllegalArgumentException(oss.toString());
     }
+    return oss.toString();
   }
 }
 
