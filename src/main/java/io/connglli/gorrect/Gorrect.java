@@ -40,6 +40,7 @@ import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import io.connglli.gorrect.utility.MemorySize;
 import io.connglli.gorrect.utility.Rand;
+import java.io.ByteArrayOutputStream;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -49,6 +50,7 @@ import java.util.concurrent.Callable;
 import java.util.logging.Level;
 import java.util.stream.Collectors;
 import lombok.NonNull;
+import org.zeroturnaround.exec.ProcessExecutor;
 import picocli.CommandLine;
 
 @CommandLine.Command(
@@ -320,17 +322,6 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
   @Override
   public void checkOptions() throws CommandLine.ParameterException {
-    if (argUseGC != SupportedGCs.DEFAULT) {
-      if (!argUseGC.vmBrand.equals(HostJVM.getBrandName())) {
-        throw new CommandLine.ParameterException(
-            parent.getCommandLine(),
-            "The garbage collector must be compatible with the language VM: "
-                + argUseGC
-                + " is not compatible with "
-                + HostJVM.getBrandName());
-      }
-    }
-
     try {
       MemorySize.parse(optHeapCapacity);
     } catch (Exception e) {
@@ -552,17 +543,6 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
           e);
     }
 
-    if (argUseGc != SupportedGCs.DEFAULT) {
-      if (!argUseGc.vmBrand.equals(HostJVM.getBrandName())) {
-        throw new CommandLine.ParameterException(
-            parent.getCommandLine(),
-            "The garbage collector must be compatible with the language VM: "
-                + argUseGc
-                + " is not compatible with "
-                + HostJVM.getBrandName());
-      }
-    }
-
     if (optOutputDir.exists()) {
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
@@ -587,6 +567,16 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     System.out.println("JVM Implementation Details:");
     jvm.printInfo(System.out);
 
+    log.info("Testing if the JVM can be launched ...");
+    try {
+      testJVM(jvm, argUseGc.enableOptions);
+      log.info("Success");
+    } catch (Exception e) {
+      log.error(
+          "Error: The specified JVM configuration is invalid. See below message:\n"
+              + e.getMessage());
+    }
+
     // Start the fuzzer
     new JavaFuzzer(
             JavaFuzzer.Config.builder()
@@ -602,6 +592,30 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
         .start();
 
     return 0;
+  }
+
+  private void testJVM(JavaVM jvm, String... extraOpts) {
+    ByteArrayOutputStream oss = new ByteArrayOutputStream();
+    List<String> command = new ArrayList<>();
+    command.add(jvm.getJavaExecutablePath());
+    for (String opt : extraOpts) {
+      if (!opt.isEmpty()) {
+        command.add(opt);
+      }
+    }
+    command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.add("--version");
+    try {
+      new ProcessExecutor()
+          .command(command)
+          .redirectOutput(oss)
+          .redirectErrorStream(true)
+          .exitValue(0)
+          .execute();
+    } catch (Exception e) {
+      throw new IllegalArgumentException(oss.toString());
+    }
   }
 }
 

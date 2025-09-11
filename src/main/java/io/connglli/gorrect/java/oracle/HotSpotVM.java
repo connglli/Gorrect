@@ -61,6 +61,7 @@ public class HotSpotVM extends JavaVM {
    * ---------------------
    *
    * Each object in HotSpot is composed of an Ordinary Object Pointer (oop) header and all its fields.
+   * Since these are typically not changed (already stable). We follow JDK21 to describe the layout.
    *
    * Oop Header: Oop header describes the meta information of the object ().
    * + a mark word: 4 or 8 bytes, depending on the VM mode
