@@ -251,6 +251,13 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
 abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
 
   @CommandLine.Option(
+      names = {"--humongous-proba"},
+      paramLabel = "proba",
+      description = "The probability to generate a humongous object rather than a normal object",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected double optHumongousProba = 0.30;
+
+  @CommandLine.Option(
       names = {"--min-instructions"},
       paramLabel = "number",
       description = "Minimum number of instructions to fuzz",
@@ -340,7 +347,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = getGraphSmithConfigBuilder();
     if (argUseGC.isRegionBased) {
       graphSmithConfigBuilder
-          .humongousProba(.20)
+          .humongousProba(optHumongousProba)
           .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
     }
 
@@ -352,7 +359,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder = getProgramSmithConfigBuilder();
     if (argUseGC.isRegionBased) {
       programSmithConfigBuilder
-          .humongousProba(.20)
+          .humongousProba(optHumongousProba)
           .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
     }
 
@@ -502,6 +509,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
                 .maxIterations(optMaxIterations)
+                .humongousObjProba(optHumongousProba)
                 .graphSmithConfig(getGraphSmithConfigBuilder().buildUnchecked())
                 .programSmithConfig(getProgramSmithConfigBuilder().buildUnchecked())
                 .javaVM(jvm)

@@ -67,6 +67,9 @@ public class JavaFuzzer {
     /// The directory where the output files will be stored.
     private final @NonNull String outputDir;
 
+    /// The probability of generating humongous objects when the GC is region-based.
+    private final double humongousObjProba;
+
     /// The config for GraphSmith, which is used to generate init states.
     private final @NonNull GraphSmith.Config graphSmithConfig;
 
@@ -90,6 +93,10 @@ public class JavaFuzzer {
       }
       if (outputDir.isEmpty()) {
         throw new IllegalArgumentException("outputDir must be non-empty");
+      }
+      if (humongousObjProba < 0.0 || humongousObjProba > 1.0) {
+        throw new IllegalArgumentException(
+            "humongousObjProba must be in [0.0, 1.0], got %f".formatted(humongousObjProba));
       }
       graphSmithConfig.check();
       programSmithConfig.check();
@@ -188,9 +195,9 @@ public class JavaFuzzer {
     if (config.useGC.isRegionBased) {
       Long[] humongousLimits =
           config.useGC.computeHumongousObjectMinSizes(config.javaVM.getHeapCapacity());
-      graphSmithConfigBuilder.humongousProba(.30);
+      graphSmithConfigBuilder.humongousProba(config.humongousObjProba);
       graphSmithConfigBuilder.humongousObjSizeBytes(humongousLimits);
-      programSmithConfigBuilder.humongousProba(.30);
+      programSmithConfigBuilder.humongousProba(config.humongousObjProba);
       programSmithConfigBuilder.humongousObjSizeBytes(humongousLimits);
     } else {
       graphSmithConfigBuilder.humongousProba(0);
