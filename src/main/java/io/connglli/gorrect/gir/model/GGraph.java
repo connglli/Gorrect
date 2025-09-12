@@ -224,11 +224,23 @@ public class GGraph {
     objects.remove(objId);
   }
 
+  /// Add a non-volatile reference into the graph. Note that it is the user's responsibility to
+  /// ensure that the referrer and the referent all exist in the graph.
+  @SuppressWarnings("UnusedReturnValue")
+  public GID addReference(
+      @NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId, GReference.Type type) {
+    return addReference(refId, refererId, referentId, type, false);
+  }
+
   /// Add a reference into the graph. Note that it is the user's responsibility to ensure that the
   /// referrer and the referent all exist in the graph.
   @SuppressWarnings("UnusedReturnValue")
   public GID addReference(
-      @NonNull GID refId, @NonNull GID refererId, @NonNull GID referentId, GReference.Type type) {
+      @NonNull GID refId,
+      @NonNull GID refererId,
+      @NonNull GID referentId,
+      GReference.Type type,
+      boolean isVolatile) {
     Assert.set(
         objects.containsKey(refererId),
         String.format(
@@ -244,7 +256,7 @@ public class GGraph {
         String.format(
             "A reference already exists between object %s and object %s", refererId, referentId));
 
-    references.put(refId, new GReference(refId, refererId, referentId, type));
+    references.put(refId, new GReference(refId, refererId, referentId, type, isVolatile));
     refTo.get(refererId).add(referentId);
     refBy.get(referentId).add(refererId);
 

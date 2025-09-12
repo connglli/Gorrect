@@ -100,12 +100,14 @@ public class GReference {
   private final GID referer; // The source/from object of the reference
   private final GID referent; // The target/to object being referenced
   private Type type; // The strength of the reference
+  private final boolean isVolatile; // Whether the object is volatile (can change size)
 
   public GReference(@NonNull GReference other) {
     this.id = other.id;
     this.referer = other.referer;
     this.referent = other.referent;
     this.type = other.type;
+    this.isVolatile = other.isVolatile;
   }
 
   public boolean isStrong() {
@@ -126,6 +128,16 @@ public class GReference {
 
   @Override
   public String toString() {
-    return "ref(" + id + ": " + referer + "-[" + type.name() + "]->" + referent + ")";
+    return "ref("
+        + id
+        + ": "
+        + referer
+        + "-["
+        + type.name()
+        + "]->"
+        + referent
+        + ",volatile="
+        + isVolatile
+        + ")";
   }
 }
