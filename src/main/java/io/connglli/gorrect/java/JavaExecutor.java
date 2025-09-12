@@ -107,10 +107,10 @@ public class JavaExecutor {
     command.add("-ea"); // Enable assertion checks
     command.add("-cp");
     command.add(workdir);
-    command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
-    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
+    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
     for (String opt : extraExecOptions) {
-      if (opt != null && !opt.isEmpty()) {
+      if (opt != null && !opt.isBlank()) {
         command.add(opt);
       }
     }

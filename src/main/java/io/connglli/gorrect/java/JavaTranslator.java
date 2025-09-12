@@ -38,7 +38,7 @@ import lombok.NonNull;
 public class JavaTranslator {
   private final Logger log = Logger.getLogger(JavaTranslator.class);
 
-  public static final String HEAP_DUMP_SIGNAL = "<dump>";
+  public static final String HEAP_DUMP_SIGNAL = "<GORRECT_HEAP_DUMP_SIGNAL>";
 
   @Getter @NonNull private final GProgram program;
   @NonNull private final GeneratedHeap heap;

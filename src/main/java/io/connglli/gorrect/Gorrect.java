@@ -45,6 +45,7 @@ import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.Callable;
 import java.util.logging.Level;
@@ -163,14 +164,14 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
       paramLabel = "size",
       description = "Minimum size of an object for example 1KB, 512MB",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected String optMinObjectSize = "1B";
+  protected String optMinObjectSize = "1KB";
 
   @CommandLine.Option(
       names = {"--max-obj-size"},
       paramLabel = "size",
       description = "Maximum size of an object for example 1KB, 512MB",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected String optMaxObjectSize = "128KB";
+  protected String optMaxObjectSize = "1MB";
 
   @CommandLine.Option(
       names = {"--min-refs"},
@@ -429,11 +430,20 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   protected boolean optStrictValidation = false;
 
   @CommandLine.Option(
+      names = {"--extra-opts"},
+      paramLabel = "opts",
+      description =
+          "Extra JVM options to pass to the Java virtual machine under validation "
+              + "(e.g., --extra-opts -Xcomp --extra-opts -XX:+UseStringDeduplication)",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String[] optExtraOpts = null;
+
+  @CommandLine.Option(
       names = {"-H", "--heap-cap"},
       paramLabel = "size",
-      required = true,
-      description = "Heap capacity of the Java virtual machine under validation for example 1GB")
-  protected String optHeapCapacity;
+      description = "Heap capacity of the Java virtual machine under validation for example 1GB",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected String optHeapCapacity = "1GB";
 
   @CommandLine.Option(
       names = {"-o", "--out-dir"},
@@ -468,6 +478,18 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
           e);
     }
 
+    if (optExtraOpts != null) {
+      List<String> parsedOpts = new ArrayList<>();
+      for (String opt : optExtraOpts) {
+        if (opt != null && !opt.isBlank()) {
+          for (String o : opt.split("\\s+")) {
+            parsedOpts.add(o.trim());
+          }
+        }
+      }
+      optExtraOpts = parsedOpts.toArray(new String[0]);
+    }
+
     if (optOutputDir.exists()) {
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
@@ -494,7 +516,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
 
     log.info("Testing if the JVM can be launched ...");
     try {
-      String testLog = testJVM(jvm, argUseGc);
+      String testLog = testJVM(jvm);
       log.info("Success\n" + testLog);
     } catch (Exception e) {
       log.error(
@@ -514,6 +536,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
                 .programSmithConfig(getProgramSmithConfigBuilder().buildUnchecked())
                 .javaVM(jvm)
                 .useGC(argUseGc)
+                .extraOptions(optExtraOpts)
                 .buildUnchecked()
                 .check())
         .start();
@@ -521,17 +544,14 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     return 0;
   }
 
-  private String testJVM(JavaVM jvm, SupportedGCs useGC) {
+  private String testJVM(JavaVM jvm) {
     ByteArrayOutputStream oss = new ByteArrayOutputStream();
     List<String> command = new ArrayList<>();
     command.add(jvm.getJavaExecutablePath());
-    for (String opt : useGC.enableOptions) {
-      if (!opt.isEmpty()) {
-        command.add(opt);
-      }
-    }
-    command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
-    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0).replace("B", ""));
+    command.addAll(Arrays.stream(argUseGc.enableOptions).toList());
+    command.addAll(Arrays.stream(optExtraOpts).toList());
+    command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
+    command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
     if (jvm instanceof HotSpotVM) {
       // TODO: Move this to SupportedGCs as for example .logOptions
       command.add("-Xlog:gc+init=info::tags");
@@ -544,10 +564,15 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
           .redirectErrorStream(true)
           .exitValue(0)
           .execute();
+      String output = oss.toString();
+      // Some errors due to invalid options may still return exit code 0
+      if (output.contains("Error") || output.contains("Exception")) {
+        throw new IllegalArgumentException(output);
+      }
+      return output;
     } catch (Exception e) {
       throw new IllegalArgumentException(oss.toString());
     }
-    return oss.toString();
   }
 }
 

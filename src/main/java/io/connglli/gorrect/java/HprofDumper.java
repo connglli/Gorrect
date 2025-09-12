@@ -25,7 +25,6 @@
 package io.connglli.gorrect.java;
 
 import io.connglli.gorrect.java.oracle.JavaVM;
-import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
@@ -69,7 +68,7 @@ public class HprofDumper extends InputStream {
       return -1; // EOF
     }
     // Wait until the process signaled us to dump the heap (1 for the newline character)
-    while (pid.get() == -1L || this.out.size() != JavaTranslator.HEAP_DUMP_SIGNAL.length() + 1) {
+    while (pid.get() == -1L || !this.out.toString().contains(JavaTranslator.HEAP_DUMP_SIGNAL)) {
       try {
         Thread.sleep(5L);
       } catch (InterruptedException e) {
@@ -79,12 +78,6 @@ public class HprofDumper extends InputStream {
         return -1; // EOF if interrupted
       }
     }
-    String actual = this.out.toString().strip();
-    Assert.set(
-        JavaTranslator.HEAP_DUMP_SIGNAL.equals(actual),
-        "Output mismatch, perhaps we're dumping the heap of a wrong process: expected: %s, actual: %s",
-        JavaTranslator.HEAP_DUMP_SIGNAL,
-        actual);
     try {
       jvm.dumpHeap(pid.get(), file, /* dead= */ false);
       succeeded = true;

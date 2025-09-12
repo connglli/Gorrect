@@ -82,6 +82,9 @@ public class JavaFuzzer {
     /// The options to enable a specific garbage collector (GC) for the Java VM.
     private final @NonNull SupportedGCs useGC;
 
+    /// Extra options pass to the Java VM under testing
+    private final String[] extraOptions;
+
     public Config check() {
       if (maxWorkers < 0) {
         throw new IllegalArgumentException(
@@ -91,7 +94,7 @@ public class JavaFuzzer {
         throw new IllegalArgumentException(
             "maxIterations must be non-negative, got %d".formatted(maxIterations));
       }
-      if (outputDir.isEmpty()) {
+      if (outputDir.isBlank()) {
         throw new IllegalArgumentException("outputDir must be non-empty");
       }
       if (humongousObjProb < 0.0 || humongousObjProb > 1.0) {
@@ -160,11 +163,10 @@ public class JavaFuzzer {
       double validRate = totalIter == 0 ? 0.0 : (double) validIter * 100.0 / totalIter;
       long elapsedSeconds = (System.currentTimeMillis() - startTimeMills) / 1000;
       double throughput = elapsedSeconds == 0 ? 0.0 : (double) totalIter / elapsedSeconds;
-
       return """
           Total Bugs Found   : %d
           Generated Programs : %d
-          Valid     Programs : %d (%.2f%%)
+          Executed  Programs : %d (%.2f%%)
           Fuzzing Time       : %s
           Fuzzing Throughput : %.2f it/s, %.2f it/m, %.2f it/h
           """
@@ -183,6 +185,7 @@ public class JavaFuzzer {
   @NonNull private final Config config; // Configuration for the fuzzer
   @NonNull private final GraphSmith.Config graphSmithConfig; // Configuration for GraphSmith
   @NonNull private final ProgramSmith.Config programSmithConfig; // Configuration for ProgramSmith
+  @NonNull private final String[] jvmOptions; // JVM options for the Java VM under testing
   @NonNull private final Stats stats; // Statistics for tracking fuzzer performance
   @NonNull private final AtomicBoolean stopEvent; // Flag to signal stopping the fuzzer
 
@@ -204,6 +207,17 @@ public class JavaFuzzer {
     }
     this.graphSmithConfig = graphSmithConfigBuilder.buildUnchecked().check();
     this.programSmithConfig = programSmithConfigBuilder.buildUnchecked().check();
+    // Combine the GC options and extra options for the Java VM under testing
+    this.jvmOptions = new String[config.useGC.enableOptions.length + config.extraOptions.length];
+    System.arraycopy(
+        config.useGC.enableOptions, 0, this.jvmOptions, 0, config.useGC.enableOptions.length);
+    System.arraycopy(
+        config.extraOptions,
+        0,
+        this.jvmOptions,
+        config.useGC.enableOptions.length,
+        config.extraOptions.length);
+    // Utilities for managing the fuzzing process
     this.stats = new Stats();
     this.stopEvent = new AtomicBoolean(false);
   }
@@ -215,14 +229,15 @@ public class JavaFuzzer {
     recoverLogging();
     log.info(
         Logger.AnsiColor.GREEN,
-        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, strictValidation=%s, gcOptions='%s' (regions=%s), javaVM=%s",
+        "Fuzzer started: numWorkers=%d, outputDir=%s, maxIterations=%s, strictValidation=%s, GC=%s (regions=%s), JVM=%s, jvmExecOpts='%s'",
         config.maxWorkers,
         config.outputDir,
         config.maxIterations == 0 ? "infinite" : Integer.toString(config.maxIterations),
         config.strictValidation ? "enabled" : "disabled",
-        String.join(" ", config.useGC.enableOptions),
+        config.useGC.name(),
         config.useGC.isRegionBased ? "true" : "false",
-        config.javaVM.getHomeDirectory());
+        new File(config.javaVM.getHomeDirectory()).getName(),
+        String.join(" ", jvmOptions));
 
     // Capture shutdown signals to stop the fuzzer gracefully
     Runtime.getRuntime()
@@ -455,7 +470,7 @@ public class JavaFuzzer {
       String dumpFilePath = config.strictValidation ? javaFilePath + ".hprof" : null;
       JavaExecutor executor = new JavaExecutor(jvm);
       JavaExecutor.Result execResult =
-          executor.execute(javaFilePath, dumpFilePath, testdir, config.useGC.enableOptions);
+          executor.execute(javaFilePath, dumpFilePath, testdir, jvmOptions);
 
       // The embedded oracle validation reports us a bug
       if (execResult.exitCode() == JavaExecutor.ExitCode.EXECUTION_ASSERTION) {

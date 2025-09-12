@@ -84,6 +84,14 @@ public class MemorySize {
     return toString(bytes, 2);
   }
 
+  public static String toString(long bytes, int decimals, boolean noB) {
+    if (noB) {
+      return toString(bytes, decimals, false).replace("B", "");
+    } else {
+      return toString(bytes, decimals);
+    }
+  }
+
   public static String toString(long bytes, int decimals) {
     if (bytes == 0) return "0B";
 
