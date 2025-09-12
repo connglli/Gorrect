@@ -85,7 +85,7 @@ public class GraphSmith {
     @Builder.Default private final long maxObjSizeBytes = 128_000; // 128KB
 
     /// The probability of turning an object into a humongous object.
-    @Builder.Default private final double humongousProba = 0;
+    @Builder.Default private final double humongousObjProb = 0;
 
     /// The size of treating an object as a humongous object in bytes. Humongous objects are
     /// usually treated specially in a VM. Each object occupy exclusively one or more heap
@@ -143,11 +143,11 @@ public class GraphSmith {
             "maxObjSizeBytes must be greater than or equal to minObjSizeBytes, got maxObjSizeBytes=%d, minObjSizeBytes=%d"
                 .formatted(maxObjSizeBytes, minObjSizeBytes));
       }
-      if (humongousProba < 0 || humongousProba > 1) {
+      if (humongousObjProb < 0 || humongousObjProb > 1) {
         throw new IllegalArgumentException(
-            "humongousProba must be between 0 and 1, got %.2f".formatted(humongousProba));
+            "humongousObjProb must be between 0 and 1, got %.2f".formatted(humongousObjProb));
       }
-      if (humongousProba > 0) {
+      if (humongousObjProb > 0) {
         if (humongousObjSizeBytes.length == 0) {
           throw new IllegalArgumentException("humongousObjSizeBytes cannot be an empty array");
         }
@@ -216,7 +216,7 @@ public class GraphSmith {
   private OracleObject nextObject(OracleHeap heap, GObject.Type type) {
     LangVM vm = heap.getLvm();
     GID id = objectIdSmith.next();
-    boolean humongous = random.nextDouble() < config.humongousProba;
+    boolean humongous = random.nextDouble() < config.humongousObjProb;
     long paddingSize =
         humongous
             ? random.nextLong(

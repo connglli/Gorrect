@@ -54,7 +54,7 @@ import picocli.CommandLine;
 
 @CommandLine.Command(
     name = "gorrect",
-    usageHelpAutoWidth = true,
+    usageHelpWidth = 100,
     mixinStandardHelpOptions = true,
     subcommands = {
       CommandLine.HelpCommand.class,
@@ -145,63 +145,63 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   protected int optMaxRoots = 3;
 
   @CommandLine.Option(
-      names = {"--min-non-roots"},
+      names = {"--min-nroots"},
       paramLabel = "number",
       description = "Minimum number of non-root objects",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinNonRoots = 2;
 
   @CommandLine.Option(
-      names = {"--max-non-roots"},
+      names = {"--max-nroots"},
       paramLabel = "number",
       description = "Maximum number of non-root objects",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxNonRoots = 5;
 
   @CommandLine.Option(
-      names = {"--min-object-size"},
+      names = {"--min-obj-size"},
       paramLabel = "size",
-      description = "Minimum size of an object",
+      description = "Minimum size of an object for example 1KB, 512MB",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected String optMinObjectSize = "1B";
 
   @CommandLine.Option(
-      names = {"--max-object-size"},
+      names = {"--max-obj-size"},
       paramLabel = "size",
-      description = "Maximum size of an object",
+      description = "Maximum size of an object for example 1KB, 512MB",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected String optMaxObjectSize = "128KB";
 
   @CommandLine.Option(
-      names = {"--min-references"},
+      names = {"--min-refs"},
       paramLabel = "number",
       description = "Minimum number of references",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinReferences = 15;
 
   @CommandLine.Option(
-      names = {"--max-references"},
+      names = {"--max-refs"},
       paramLabel = "number",
       description = "Maximum number of references",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxReferences = 25;
 
   @CommandLine.Option(
-      names = {"--strong-reference-weight"},
+      names = {"--strong-ref-wt"},
       paramLabel = "weight",
       description = "Weight for generating a strong reference",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optStrongRefWeight = 50;
 
   @CommandLine.Option(
-      names = {"--soft-reference-weight"},
+      names = {"--soft-ref-wt"},
       paramLabel = "weight",
       description = "Weight for generating a soft reference",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optSoftRefWeight = 20;
 
   @CommandLine.Option(
-      names = {"--weak-reference-weight"},
+      names = {"--weak-ref-wt"},
       paramLabel = "weight",
       description = "Weight for generating a weak reference",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
@@ -225,7 +225,7 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
 
 @CommandLine.Command(
     name = "gsmi",
-    usageHelpAutoWidth = true,
+    usageHelpWidth = 100,
     mixinStandardHelpOptions = true,
     description = "Generates a random object graph.",
     descriptionHeading = "%n",
@@ -251,23 +251,23 @@ class GraphSmithCommand extends GraphSmithOptionsMixin implements GorrectSubComm
 abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
 
   @CommandLine.Option(
-      names = {"--humongous-proba"},
-      paramLabel = "proba",
-      description = "The probability to generate a humongous object rather than a normal object",
+      names = {"--humon-obj-prob"},
+      paramLabel = "prob",
+      description = "Probability to generate a humongous object for region-based GCs",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
-  protected double optHumongousProba = 0.30;
+  protected double optHumongousObjProb = 0.30;
 
   @CommandLine.Option(
-      names = {"--min-instructions"},
+      names = {"--min-insts"},
       paramLabel = "number",
-      description = "Minimum number of instructions to fuzz",
+      description = "Minimum number of instructions to generate",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinInstructions = 1;
 
   @CommandLine.Option(
-      names = {"--max-instructions"},
+      names = {"--max-insts"},
       paramLabel = "number",
-      description = "Maximum number of instructions to fuzz",
+      description = "Maximum number of instructions to generate",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxInstructions = 32;
 
@@ -282,7 +282,7 @@ abstract class ProgramSmithOptionsMixin extends GraphSmithOptionsMixin {
 
 @CommandLine.Command(
     name = "psmi",
-    usageHelpAutoWidth = true,
+    usageHelpWidth = 100,
     mixinStandardHelpOptions = true,
     description =
         "Generates (and validates if requested) a random Gorrect IR program (and the corresponding Java program if requested).",
@@ -294,22 +294,22 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   @CommandLine.ParentCommand protected Gorrect parent;
 
   @CommandLine.Option(
-      names = {"-H", "--heap-capacity"},
+      names = {"-H", "--heap-cap"},
       paramLabel = "size",
-      description = "The heap capacity of the Java virtual machine under validation",
+      description = "Heap capacity of the Java virtual machine under validation",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected String optHeapCapacity = "1GB";
 
   @CommandLine.Option(
-      names = {"-o", "--output-dir"},
+      names = {"-o", "--out-dir"},
       paramLabel = "dir",
       required = true,
-      description = "The output directory for the generated files")
+      description = "Output directory for saving the generated files")
   protected File optOutputDir = null;
 
   @CommandLine.Parameters(
       paramLabel = "collector",
-      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
+      description = "Garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
   protected SupportedGCs argUseGC;
 
   @Override
@@ -347,7 +347,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     GraphSmith.Config.ConfigBuilder graphSmithConfigBuilder = getGraphSmithConfigBuilder();
     if (argUseGC.isRegionBased) {
       graphSmithConfigBuilder
-          .humongousProba(optHumongousProba)
+          .humongousObjProb(optHumongousObjProb)
           .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
     }
 
@@ -359,7 +359,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     ProgramSmith.Config.ConfigBuilder programSmithConfigBuilder = getProgramSmithConfigBuilder();
     if (argUseGC.isRegionBased) {
       programSmithConfigBuilder
-          .humongousProba(optHumongousProba)
+          .humongousObjProb(optHumongousObjProb)
           .humongousObjSizeBytes(argUseGC.computeHumongousObjectMinSizes(heapCapacity));
     }
 
@@ -395,7 +395,7 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
 @CommandLine.Command(
     name = "fuzz",
-    usageHelpAutoWidth = true,
+    usageHelpWidth = 100,
     mixinStandardHelpOptions = true,
     description = "Fuzz and validate a target garbage collector of the host Java virtual machine.",
     descriptionHeading = "%n",
@@ -407,20 +407,20 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   @CommandLine.Option(
       names = {"-j", "--max-workers"},
       paramLabel = "number",
-      description = "The maximum number of workers to use for fuzzing",
+      description = "Maximum number of workers to use for fuzzing",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxWorkers =
       Math.max((int) ((double) Runtime.getRuntime().availableProcessors() * .8), 1);
 
   @CommandLine.Option(
-      names = {"-L", "--max-iterations"},
+      names = {"-L", "--max-iters"},
       paramLabel = "number",
-      description = "The maximum number of iterations to run the fuzzer (0 for infinite)",
+      description = "Maximum number of iterations to run the fuzzer (0 for infinite)",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxIterations = 0;
 
   @CommandLine.Option(
-      names = {"-S", "--strict-validation"},
+      names = {"-S", "--strict"},
       negatable = true,
       description =
           "Validation by dumping the runtime heap and parsing and analyzing the HPROF "
@@ -429,22 +429,22 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   protected boolean optStrictValidation = false;
 
   @CommandLine.Option(
-      names = {"-H", "--heap-capacity"},
+      names = {"-H", "--heap-cap"},
       paramLabel = "size",
       required = true,
-      description = "The heap capacity of the Java virtual machine under validation e.g., 1GB")
+      description = "Heap capacity of the Java virtual machine under validation for example 1GB")
   protected String optHeapCapacity;
 
   @CommandLine.Option(
-      names = {"-o", "--output-dir"},
+      names = {"-o", "--out-dir"},
       paramLabel = "dir",
       required = true,
-      description = "The output directory for the generated files (if any)")
+      description = "Output directory for the generated files (if any)")
   protected File optOutputDir;
 
   @CommandLine.Parameters(
       paramLabel = "collector",
-      description = "The garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
+      description = "Garbage collector under validation (choices: ${COMPLETION-CANDIDATES})")
   protected SupportedGCs argUseGc;
 
   @Override
@@ -509,7 +509,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
                 .maxWorkers(optMaxWorkers)
                 .outputDir(optOutputDir.toString())
                 .maxIterations(optMaxIterations)
-                .humongousObjProba(optHumongousProba)
+                .humongousObjProb(optHumongousObjProb)
                 .graphSmithConfig(getGraphSmithConfigBuilder().buildUnchecked())
                 .programSmithConfig(getProgramSmithConfigBuilder().buildUnchecked())
                 .javaVM(jvm)
@@ -553,7 +553,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
 
 @CommandLine.Command(
     name = "scmp",
-    usageHelpAutoWidth = true,
+    usageHelpWidth = 100,
     mixinStandardHelpOptions = true,
     description =
         "Compare the final runtime state of two different garbage collectors using the host JVM. "
@@ -566,33 +566,31 @@ class StateCompareCommand implements GorrectSubCommand {
   @CommandLine.ParentCommand protected Gorrect parent;
 
   @CommandLine.Option(
-      names = {"-K", "--keep-workdir"},
+      names = {"-K", "--keep-wdir"},
       negatable = true,
       description = "Keep the temporarily created working directory for debugging purpose",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected boolean optKeepWorkdir = false;
 
   @CommandLine.Option(
-      names = {"-H", "--heap-capacity"},
+      names = {"-H", "--heap-cap"},
       paramLabel = "size",
       required = true,
-      description = "The heap capacity of the Java virtual machine under validation")
+      description = "Heap capacity of the Java virtual machine under validation")
   protected String argHeapCapacity;
 
   @CommandLine.Option(
       names = {"-a", "--gc-a"},
       paramLabel = "collector",
       required = true,
-      description =
-          "Options to use the collector A under comparison (choices: ${COMPLETION-CANDIDATES})")
+      description = "Garbage collector A under comparison (choices: ${COMPLETION-CANDIDATES})")
   protected SupportedGCs argUseGcA;
 
   @CommandLine.Option(
       names = {"-b", "--gc-b"},
       paramLabel = "collector",
       required = true,
-      description =
-          "Options to use the collector B under comparison (choices: ${COMPLETION-CANDIDATES})")
+      description = "Garbage collector B under comparison (choices: ${COMPLETION-CANDIDATES})")
   protected SupportedGCs argUseGcB;
 
   @CommandLine.Parameters(
