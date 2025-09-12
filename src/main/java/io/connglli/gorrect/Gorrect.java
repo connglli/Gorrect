@@ -114,15 +114,20 @@ public class Gorrect {
 interface GorrectSubCommand extends Callable<Integer> {
 
   // Override this method to check the validity of the options and throw
-  // CommandLine.ParameterException if the options are invalid.
-  default void checkOptions() throws CommandLine.ParameterException {}
+  // IllegalArgumentException if the options are invalid.
+  default void checkOptions() throws IllegalArgumentException {}
 
   // Override this method to implement the command logic.
   Integer runCommand() throws Exception;
 
   @Override
   default Integer call() throws Exception {
-    checkOptions();
+    try {
+      checkOptions();
+    } catch (IllegalArgumentException e) {
+      System.out.println("Error: " + e.getMessage());
+      return 1;
+    }
     return runCommand();
   }
 }
@@ -314,30 +319,22 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
   protected SupportedGCs argUseGC;
 
   @Override
-  public void checkOptions() throws CommandLine.ParameterException {
+  public void checkOptions() throws IllegalArgumentException {
     try {
       MemorySize.parse(optHeapCapacity);
     } catch (Exception e) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The heap capacity must be a valid memory size (e.g., 1GB, 512MB): " + optHeapCapacity,
           e);
     }
     if (optOutputDir == null) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The output directory is not given");
+      throw new IllegalArgumentException("The output directory is not given");
     }
     if (optOutputDir.exists()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
-    }
-    if (!optOutputDir.mkdir()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
+      throw new IllegalArgumentException("The output directory already exist: " + optOutputDir);
     }
     if (!argUseGC.vmBrand.equals(HostJVM.getBrandName())) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The specified garbage collector "
               + argUseGC
               + " is not supported by the host JVM "
@@ -391,6 +388,8 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
     Assert.set(
         oracleState.equals(transState),
         "The oracle state and the translator state is not equal. There should be bugs in the Java translator!");
+
+    Assert.set(optOutputDir.mkdir(), "Failed to create the output directory: " + optOutputDir);
 
     String javaFilePath =
         translator.exportToJava(optOutputDir.toString(), oracleState, /* heapDump= */ true);
@@ -466,22 +465,19 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
   protected SupportedGCs argUseGc;
 
   @Override
-  public void checkOptions() throws CommandLine.ParameterException {
+  public void checkOptions() throws IllegalArgumentException {
     if (optMaxWorkers <= 0) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The maximum number of workers must be greater than 0.");
+      throw new IllegalArgumentException("The maximum number of workers must be greater than 0.");
     }
 
     if (optMaxIterations < 0) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The maximum number of iterations must be non-negative.");
+      throw new IllegalArgumentException("The maximum number of iterations must be non-negative.");
     }
 
     try {
       MemorySize.parse(optHeapCapacity);
     } catch (Exception e) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The heap capacity must be a valid memory size (e.g., 1GB, 512MB): " + optHeapCapacity,
           e);
     }
@@ -499,17 +495,11 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     }
 
     if (optOutputDir.exists()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The output directory already exist: " + optOutputDir);
-    }
-    if (!optOutputDir.mkdir()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
+      throw new IllegalArgumentException("The output directory already exist: " + optOutputDir);
     }
 
     if (!argUseGc.vmBrand.equals(HostJVM.getBrandName())) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The specified garbage collector "
               + argUseGc
               + " is not supported by the host JVM "
@@ -539,6 +529,10 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       log.error(
           "Error: The specified JVM configuration is invalid. See below message:\n"
               + e.getMessage());
+    }
+
+    if (!optOutputDir.mkdir()) {
+      log.error("Failed to create the output directory: " + optOutputDir);
     }
 
     // Start the fuzzer
@@ -641,26 +635,22 @@ class StateCompareCommand implements GorrectSubCommand {
   protected File argJavaProg;
 
   @Override
-  public void checkOptions() throws CommandLine.ParameterException {
+  public void checkOptions() throws IllegalArgumentException {
     if (!argJavaProg.exists()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The Java program does not exist: " + argJavaProg);
+      throw new IllegalArgumentException("The Java program does not exist: " + argJavaProg);
     }
     if (!argJavaProg.isFile()) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(), "The Java program is not a file: " + argJavaProg);
+      throw new IllegalArgumentException("The Java program is not a file: " + argJavaProg);
     }
     if (!argUseGcA.vmBrand.equals(HostJVM.getBrandName())) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The specified garbage collector A"
               + argUseGcA
               + " is not supported by the host JVM "
               + HostJVM.getBrandName());
     }
     if (!argUseGcB.vmBrand.equals(HostJVM.getBrandName())) {
-      throw new CommandLine.ParameterException(
-          parent.getCommandLine(),
+      throw new IllegalArgumentException(
           "The specified garbage collector B"
               + argUseGcB
               + " is not supported by the host JVM "
