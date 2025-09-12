@@ -674,8 +674,8 @@ public class ProgramSmith {
       boolean humongous = random.nextDouble() < config.humongousObjProb;
       long paddingSize =
           humongous
-              ? random.nextLong(
-                  random.nextItem(config.humongousObjSizeBytes), config.maxObjSizeBytes + 1)
+              ? GraphSmith.randomHumongousObjSize(
+                  random, random.nextItem(config.humongousObjSizeBytes), config.maxObjSizeBytes + 1)
               : random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
       long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
       while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {

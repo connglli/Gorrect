@@ -31,10 +31,7 @@ import io.connglli.gorrect.gir.model.GReference;
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.oracle.OracleHeap;
 import io.connglli.gorrect.oracle.OracleObject;
-import io.connglli.gorrect.utility.Assert;
-import io.connglli.gorrect.utility.Formats;
-import io.connglli.gorrect.utility.Logger;
-import io.connglli.gorrect.utility.Rand;
+import io.connglli.gorrect.utility.*;
 import java.util.*;
 import lombok.Builder;
 import lombok.Getter;
@@ -220,14 +217,49 @@ public class GraphSmith {
     return heap.getState();
   }
 
+  // We prefer larger ones for humongous objects.
+  private static final int[] HUMON_RATIO_WEIGHTS = new int[] {10, 20, 30, 40, 50, 100, 200};
+
+  /**
+   * Randomly generate a humongous object size between minHumonObjSize (inclusive) and maxObjSize
+   * (exclusive). The distribution is biased towards larger sizes following HUMON_RATIO_WEIGHTS.
+   *
+   * <p>For example, if minHumonObjSize is 128KB and maxObjSize is 128MB, the possible sizes are:
+   * [128KB, 256KB), [256KB, 512KB), [512KB, 1MB), ..., [64MB, 128MB). The probability of each
+   * bucket is proportional to HUMON_RATIO_WEIGHTS.
+   */
+  public static long randomHumongousObjSize(Rand random, long minHumonObjSize, long maxObjSize) {
+    int maxNumBuckets = (int) (maxObjSize / minHumonObjSize);
+    Assert.set(maxNumBuckets > 0, "maxObjSize must be greater than or equal to minHumonObjSize");
+    if (maxObjSize % minHumonObjSize == 0) {
+      maxNumBuckets -= 1;
+    }
+    if (maxNumBuckets == 0) {
+      return minHumonObjSize;
+    }
+    if (maxNumBuckets == 1) {
+      return random.nextLong(minHumonObjSize, maxObjSize);
+    }
+    int numBuckets = Math.min(maxNumBuckets, HUMON_RATIO_WEIGHTS.length);
+    Integer[] buckets = new Integer[numBuckets];
+    int[] weights = new int[numBuckets];
+    for (int i = 0; i < numBuckets; i++) {
+      buckets[i] = i + 1;
+      weights[i] = HUMON_RATIO_WEIGHTS[i];
+    }
+    int buk = random.nextItem(buckets, weights);
+    return random.nextLong(
+        buk * minHumonObjSize, buk == numBuckets ? maxObjSize : (buk + 1) * minHumonObjSize);
+  }
+
   private OracleObject nextObject(OracleHeap heap, GObject.Type type) {
     LangVM vm = heap.getLvm();
     GID id = objectIdSmith.next();
     boolean humongous = random.nextDouble() < config.humongousObjProb;
     long paddingSize =
         humongous
-            ? random.nextLong(
-                random.nextItem(config.humongousObjSizeBytes), config.maxObjSizeBytes + 1)
+            ? randomHumongousObjSize(
+                random, random.nextItem(config.humongousObjSizeBytes), config.maxObjSizeBytes + 1)
             : random.nextLong(config.minObjSizeBytes, config.maxObjSizeBytes + 1);
     long objectSize = vm.estimateNewObjectHeapSize(id, paddingSize);
     while (paddingSize > 0 && objectSize > vm.getHeapUnusedBytes()) {
