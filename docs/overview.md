@@ -108,10 +108,13 @@ The following advanced operations may exist:
 * _StrengthRefOperation_: Strengthens the type of a reference one layer up. This will drastically change the
   reachability
   strength of each object in the graph.
+* _AddFanOutRefsOperation_: Creates one object referencing many others (1:N pattern)
+* _AddFanInRefsOperation_: Creates many objects referencing one target (N:1 pattern)
 
 ### More Advanced Operations
 
-Here are some complementary operations that could enhance in the future:
+Here are some complementary operations that could enhance in the future. Some of them are suggested by large language
+models.
 
 ##### Memory Pressure Operations
 
@@ -129,10 +132,12 @@ Here are some complementary operations that could enhance in the future:
 
 ##### Reference Pattern Operations
 
-* _CreateFanOutRefOperation_: Creates one object referencing many others (1:N pattern)
-* _CreateFanInRefOperation_: Creates many objects referencing one target (N:1 pattern)
 * _CreateBidirectionalRefOperation_: Creates mutual references between objects
 * _CloneSubgraphOperation_: Duplicates a portion of the graph to test reference copying
+
+##### JIT-Related Operations
+
+* _AddObjsInLoopOperation_: Creates a loop to create new objects at each iteration
 
 ##### Temporal Operations
 

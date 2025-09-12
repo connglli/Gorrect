@@ -33,6 +33,10 @@ import lombok.NonNull;
  * SupportedGCs enumerates the supported garbage collectors in different JVMs. Each garbage
  * collector may have different performance characteristics and trade-offs. Users can choose a
  * suitable garbage collector based on their application requirements and workload patterns.
+ *
+ * <p>TODO: Instead of heuristically determining all the information, start a thread as a server
+ * with a customized Java agent (or directly attach ourselves as an agent) or WhiteBox apis to query
+ * the actual values at runtime and write them back.
  */
 public enum SupportedGCs {
   /*
