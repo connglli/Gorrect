@@ -335,6 +335,14 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
     }
+    if (!argUseGC.vmBrand.equals(HostJVM.getBrandName())) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The specified garbage collector "
+              + argUseGC
+              + " is not supported by the host JVM "
+              + HostJVM.getBrandName());
+    }
   }
 
   @Override
@@ -498,6 +506,15 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "Failed to create the output directory: " + optOutputDir);
     }
+
+    if (!argUseGc.vmBrand.equals(HostJVM.getBrandName())) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The specified garbage collector "
+              + argUseGc
+              + " is not supported by the host JVM "
+              + HostJVM.getBrandName());
+    }
   }
 
   @Override
@@ -632,6 +649,22 @@ class StateCompareCommand implements GorrectSubCommand {
     if (!argJavaProg.isFile()) {
       throw new CommandLine.ParameterException(
           parent.getCommandLine(), "The Java program is not a file: " + argJavaProg);
+    }
+    if (!argUseGcA.vmBrand.equals(HostJVM.getBrandName())) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The specified garbage collector A"
+              + argUseGcA
+              + " is not supported by the host JVM "
+              + HostJVM.getBrandName());
+    }
+    if (!argUseGcB.vmBrand.equals(HostJVM.getBrandName())) {
+      throw new CommandLine.ParameterException(
+          parent.getCommandLine(),
+          "The specified garbage collector B"
+              + argUseGcB
+              + " is not supported by the host JVM "
+              + HostJVM.getBrandName());
     }
   }
 
