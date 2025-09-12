@@ -125,7 +125,7 @@ interface GorrectSubCommand extends Callable<Integer> {
     try {
       checkOptions();
     } catch (IllegalArgumentException e) {
-      System.out.println("Error: " + e.getMessage());
+      System.err.println("Error: " + e.getMessage());
       return 1;
     }
     return runCommand();
@@ -644,14 +644,14 @@ class StateCompareCommand implements GorrectSubCommand {
     }
     if (!argUseGcA.vmBrand.equals(HostJVM.getBrandName())) {
       throw new IllegalArgumentException(
-          "The specified garbage collector A"
+          "The specified garbage collector A "
               + argUseGcA
               + " is not supported by the host JVM "
               + HostJVM.getBrandName());
     }
     if (!argUseGcB.vmBrand.equals(HostJVM.getBrandName())) {
       throw new IllegalArgumentException(
-          "The specified garbage collector B"
+          "The specified garbage collector B "
               + argUseGcB
               + " is not supported by the host JVM "
               + HostJVM.getBrandName());
@@ -707,33 +707,23 @@ class StateCompareCommand implements GorrectSubCommand {
   private GGraph execute(
       JavaExecutor executor, String javaFile, String dumpFile, String workdir, SupportedGCs useGc) {
     List<String> options = new ArrayList<>(List.of(useGc.enableOptions));
+    options.add("-Xmx" + MemorySize.toString(executor.getJvm().getHeapCapacity(), 0, true));
+    options.add("-Xms" + MemorySize.toString(executor.getJvm().getHeapCapacity(), 0, true));
     if (parent.optVerbose) {
-      if (executor.getJvm() instanceof HotSpotVM) {
-        // TODO: Move this to SupportedGCs as for example .logOptions
-        options.add(
-            // Call `java -Xlog:help` to see the options
-            ("-Xlog:"
-                    // GC options
-                    + "gc*=debug,gc+ref=debug,gc+heap=debug,gc+humongous=debug,gc+stats=debug,"
-                    // Safepoint options
-                    + "safepoint=debug,safepoint+stats=debug:"
-                    // Log to file
-                    + "%s:"
-                    // Format of each log entry
-                    + "time,tags,level")
-                .formatted(workdir + File.separator + dumpFile + ".log"));
-      }
+      options.addAll(
+          Arrays.stream(useGc.getLoggingOptions(workdir + File.separator + dumpFile + ".log"))
+              .toList());
     }
     JavaExecutor.Result res =
         executor.execute(javaFile, dumpFile, workdir, options.toArray(new String[0]));
     if (res.exitCode() != JavaExecutor.ExitCode.SUCCESS) {
-      System.out.println("Error: Unable to executed the given Java program: " + res.errorMessage());
+      System.err.println("Error: Unable to executed the given Java program: " + res.errorMessage());
       System.exit(1);
     }
     try {
       return HprofParser.parse(Path.of(workdir, dumpFile).toString());
     } catch (Exception e) {
-      System.out.println("Error: Unable to parse the heap dump: " + e.getMessage());
+      System.err.println("Error: Unable to parse the heap dump: " + e.getMessage());
       System.exit(1);
       return null; // Unreachable but required by the compiler
     }

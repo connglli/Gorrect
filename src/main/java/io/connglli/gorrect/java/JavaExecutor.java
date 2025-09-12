@@ -120,7 +120,7 @@ public class JavaExecutor {
     HprofDumper dumper = dumpFile == null ? null : heapDumper(workdir + File.separator + dumpFile);
 
     // Execute the Java code
-    log.debug("Executing the Java class by command: %s", String.join(" ", command));
+    log.info("Executing the Java class by command: %s", String.join(" ", command));
     ProcessExecutor executor =
         new ProcessExecutor(command)
             .timeout(1, TimeUnit.MINUTES)

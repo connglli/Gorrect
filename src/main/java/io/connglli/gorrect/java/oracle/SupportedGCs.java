@@ -293,6 +293,28 @@ public enum SupportedGCs {
   }
 
   /**
+   * Get the command line options to output the logs of this garbage collector. If filePath is given
+   * and is a file path, the log is written to the file. If filePath is stderr or stdout, the log is
+   * output to that channel. Otherwise, it is written to stderr.
+   */
+  public String[] getLoggingOptions(String filePath) {
+    return getLoggingOptions(this, filePath);
+  }
+
+  public static String[] getLoggingOptions(@NonNull SupportedGCs gc, String filePath) {
+    String output = filePath == null ? "stdout" : filePath;
+    return switch (gc.vmBrand) {
+      case HotSpotVM.BRAND_NAME, ZingVM.BRAND_NAME, GraalVM.BRAND_NAME ->
+          new String[] {"-Xlog:gc*=debug,safepoint*=debug:" + output + ":time,tags,level"};
+      case OpenJ9VM.BRAND_NAME -> new String[] {"-Xverbosegclog:" + output};
+      default -> {
+        Assert.panic("Unsupported VM brand: " + gc.vmBrand);
+        yield new String[] {""}; // Unreachable but required by the compiler
+      }
+    };
+  }
+
+  /**
    * Get the recommended memory region sizes for this garbage collector in bytes. This is a rough
    * estimation and may not be accurate for all scenarios. Enum items should try their best to
    * provide proper region sizes based on their characteristics and typical usage pattern.

@@ -508,6 +508,8 @@ public class JavaFuzzer {
             Logger.AnsiColor.GREEN,
             "GC BUG FOUND: The Java execution state does NOT match the oracle!");
         throw new OracleValidationFailure(true, valiResult);
+      } else {
+        log.info("Valid");
       }
     }
 
