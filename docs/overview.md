@@ -11,13 +11,43 @@ manipulations on it:
 3. Apply t to G: Resulting in a new graph state G*. This is the expected, oracle state.
 4. Object association: Each node n is mapped to a LVM object o.
 5. Reference association: Each edge e is implemented as a reference field between objects.
-6. Operation association: Each operation op is implemneted as a series of statements allowed by LVM.
+6. Operation association: Each operation op is implemented as a series of statements allowed by LVM.
 7. Generate a test case T for the LVM: A program T that builds the initial state G and applies a sequence t (with
    correct reference types).
 8. Run T in LVM: Execute with full GC enabled (or specific GC configurations).
 9. Extract the reached heap state and translate it into a graph G$: Via JVMTI, jmap, heap dump, or Java Flight Recorder.
    This is the actual, runtime state.
 10. Compare G$ with G*: Differences suggest issues in GC implementation or test harness logic.
+
+## Object Graph
+
+Usually, an object graph G = (V, E) is composed of a set of nodes V and a set of edges E. Each node v in V represents an
+object in the heap, and each edge e in E represents a reference between two objects.
+
+Each node has the following attributes:
+
+* **ID**: A unique identifier for the object.
+* **Type**: The type of the object (e.g., root or ordinary).
+* **Padding**: An array of data so that the object can occupy some memories in the heap.
+* **Humongous**: Indicate if this object is a humongous object or not.
+    * This attribute is optional as it can be indicated from the size of the object.
+
+Each edge has the following attributes:
+
+* **ID**: A unique identifier for the reference.
+* **Type**: The type of the reference (e.g., strong, soft, weak)
+* **Source**: The ID of the referer object.
+* **Target**: The ID of the referent object.
+* **Volatile**: Indicate if this reference is volatile or not.
+    * This attribute has no influence on the graph model and only useful when translating the graph into some VM code
+
+There're some other features that can be added to the graph model, such as:
+
+* **Special Roots**: Add some special root objects like list<reference<T>> so that we can *globally* weak/soft refer to
+  some objects.
+* **Special Nodes**: An normal node is usually a node with the above four attributes. However, we can add some special
+  node to represent objects that looks mighty. For example, object with an infinite list, object with a large number of
+  fields, artificially crafted objects with uncommon object relations, etc.
 
 ## Oracle
 
@@ -92,6 +122,10 @@ The following advanced operations may exist:
   the this object live longer than before.
 * _MakeRootObjNonRootOperation_: Makes a root node non-root. This removes the node from the root set of GC marking and
   consequently making a lot of
+* _RemoveObjOperation_: Removes an existing object from the graph. This operation may cause some objects no longer
+  reachable. This operation aims to reduce the heap usage.
+* _RemoveAllRootsOperation_: Removes all root objects from the graph. This operation may cause a lot of objects no
+  longer reachable. This operation aims to drastically reduce the heap usage.
 * _AddStrongRefOperation_: Adds a strong reference between two objects.
 * _AddSoftRefOperation_: Adds a soft reference between two objects.
 * _AddWeakRefOperation_: Adds a weak reference between two objects.
