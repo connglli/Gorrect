@@ -31,6 +31,11 @@ Each node has the following attributes:
 * **Padding**: An array of data so that the object can occupy some memories in the heap.
 * **Humongous**: Indicate if this object is a humongous object or not.
     * This attribute is optional as it can be indicated from the size of the object.
+    * It is also difficult to determine if an object is humongous or not as different GCs have different
+      implementations.
+* **Age**: The age of the object.
+    * This attribute is optional as it can be indicated from the number of GC cycles.
+    * It is also difficult to determine the age of an object as different GCs have different implementations.
 
 Each edge has the following attributes:
 
@@ -48,6 +53,12 @@ There're some other features that can be added to the graph model, such as:
 * **Special Nodes**: An normal node is usually a node with the above four attributes. However, we can add some special
   node to represent objects that looks mighty. For example, object with an infinite list, object with a large number of
   fields, artificially crafted objects with uncommon object relations, etc.
+
+Yet, we should keep the graph model as simple as possible. Some principles are:
+
+- It would be better to maintain the object graph pure without considering any GC-specific implementation details. For
+  example, regions, TLABs, and ages. Even though these details may better model the real world and effective, they also
+  make the model complex and less general.
 
 ## Oracle
 
@@ -156,6 +167,7 @@ models.
 * _CreateObjectArrayOperation_: Creates arrays with many references to test bulk reference processing
 * _CreateCircularRefOperation_: Creates circular reference chains of specified length
 * _CreateDeepRefChainOperation_: Creates long linear reference chains to test deep marking
+* _AllocHumongousFragmentOperation_: Keeps allocate large objects until a threshold and stop
 
 ##### GC-Specific Stress Operations
 
@@ -163,6 +175,10 @@ models.
 * _CreateOffHeapRefOperation_: Tests references to/from off-heap memory (if applicable)
 * _TriggerOutOfMemoryOperation_: Intentionally causes memory pressure to force GC
 * _CreateInterGenerationalRefOperation_: Creates references between different generations (for generational GCs)
+
+##### Generation-Related Operations
+
+* _FreezeObjectOperation_: Avoiding deletion of an object to simulate long-lived objects
 
 ##### Reference Pattern Operations
 
