@@ -142,7 +142,8 @@ public class JavaTranslator {
           instruction.getObjectSize(),
           referer,
           instruction.getReferenceType(),
-          instruction.getReferenceId());
+          instruction.getReferenceId(),
+          instruction.getIsVolatile());
       return null;
     }
 
@@ -174,7 +175,8 @@ public class JavaTranslator {
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
                       referer,
                       clone,
-                      reference.getType());
+                      reference.getType(),
+                      reference.getIsVolatile());
                 });
         object
             .getReferents()
@@ -185,7 +187,8 @@ public class JavaTranslator {
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
                       clone,
                       referent,
-                      reference.getType());
+                      reference.getType(),
+                      reference.getIsVolatile());
                 });
       }
 
@@ -203,7 +206,7 @@ public class JavaTranslator {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
       GeneratedObject referent = heap.getObject(instruction.getReferentId());
-      referer.strongReference(instruction.getReferenceId(), referent);
+      referer.strongReference(instruction.getReferenceId(), referent, instruction.getIsVolatile());
       return null;
     }
 
@@ -211,7 +214,7 @@ public class JavaTranslator {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
       GeneratedObject referent = heap.getObject(instruction.getReferentId());
-      referer.softReference(instruction.getReferenceId(), referent);
+      referer.softReference(instruction.getReferenceId(), referent, instruction.getIsVolatile());
       return null;
     }
 
@@ -219,7 +222,7 @@ public class JavaTranslator {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
       GeneratedObject referent = heap.getObject(instruction.getReferentId());
-      referer.weakReference(instruction.getReferenceId(), referent);
+      referer.weakReference(instruction.getReferenceId(), referent, instruction.getIsVolatile());
       return null;
     }
 
@@ -228,16 +231,20 @@ public class JavaTranslator {
       GeneratedObject referent = heap.getObject(instruction.getReferentId());
       List<GID> refererIds = instruction.getRefererIds();
       List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+      List<Boolean> isVolatile = instruction.getIsVolatile();
       List<GID> referenceIds = instruction.getReferenceIds();
       Assert.set(
           refererIds.size() == referenceTypes.size(),
           "The number of referers must match the number of reference types");
       Assert.set(
+          refererIds.size() == isVolatile.size(),
+          "The number of referers must match the size of isVolatile array");
+      Assert.set(
           refererIds.size() == referenceIds.size(),
           "The number of referers must match the number of references");
       for (int i = 0; i < refererIds.size(); i++) {
         heap.getObject(refererIds.get(i))
-            .reference(referenceIds.get(i), referent, referenceTypes.get(i));
+            .reference(referenceIds.get(i), referent, referenceTypes.get(i), isVolatile.get(i));
       }
       return null;
     }
@@ -247,16 +254,23 @@ public class JavaTranslator {
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
       List<GID> referentIds = instruction.getReferentIds();
       List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+      List<Boolean> isVolatile = instruction.getIsVolatile();
       List<GID> referenceIds = instruction.getReferenceIds();
       Assert.set(
           referentIds.size() == referenceTypes.size(),
-          "The number of referers must match the number of reference types");
+          "The number of referents must match the number of reference types");
+      Assert.set(
+          referentIds.size() == isVolatile.size(),
+          "The number of referents must match the size of isVolatile array");
       Assert.set(
           referentIds.size() == referenceIds.size(),
-          "The number of referers must match the number of references");
+          "The number of referents must match the number of references");
       for (int i = 0; i < referentIds.size(); i++) {
         referer.reference(
-            referenceIds.get(i), heap.getObject(referentIds.get(i)), referenceTypes.get(i));
+            referenceIds.get(i),
+            heap.getObject(referentIds.get(i)),
+            referenceTypes.get(i),
+            isVolatile.get(i));
       }
       return null;
     }

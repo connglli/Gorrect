@@ -93,6 +93,9 @@ public class GraphSmith {
     /// maxObjSizeBytes and larger than or equal to minObjSizeBytes.
     @Builder.Default private final Long[] humongousObjSizeBytes = new Long[] {128_000L}; // 128KB
 
+    /// The probability of turning a reference into a volatile reference.
+    @Builder.Default private final double volatileRefProb = 0;
+
     public Config check() {
       if (minRoots <= 0) {
         throw new IllegalArgumentException(
@@ -167,6 +170,10 @@ public class GraphSmith {
                 "humongousObjSizeBytes[%d] must be smaller than or equal to maxObjSizeBytes, got humongousObjSizeBytes[%d]=%d, maxObjSizeBytes=%d"
                     .formatted(index, index, size, maxObjSizeBytes));
           }
+        }
+        if (volatileRefProb < 0 || volatileRefProb > 1) {
+          throw new IllegalArgumentException(
+              "volatileRefProb must be between 0 and 1, got %.2f".formatted(volatileRefProb));
         }
       }
       return this;
@@ -274,10 +281,12 @@ public class GraphSmith {
             },
             new int[] {config.strongRefWeight, config.softRefWeight, config.weakRefWeight});
 
+    boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+
     switch (refType) {
-      case STRONG -> referer.strongReference(refId, referent);
-      case SOFT -> referer.softReference(refId, referent);
-      case WEAK -> referer.weakReference(refId, referent);
+      case STRONG -> referer.strongReference(refId, referent, isVolatile);
+      case SOFT -> referer.softReference(refId, referent, isVolatile);
+      case WEAK -> referer.weakReference(refId, referent, isVolatile);
       default -> Assert.panic("Cannot create a reference of type " + refType);
     }
 
@@ -307,7 +316,8 @@ public class GraphSmith {
         // object. So this is safe when no new references are added. However, after we add any
         // reference to make some previously unreachable objects reachable, some other previously
         // unreachable referent might also become reachable, causing this method to fail.
-        referer.strongReference(referenceId, referent);
+        referer.strongReference(
+            referenceId, referent, random.nextDouble() < config.volatileRefProb);
         reachable.add(referentId);
       } catch (AssertionError e) {
         // pass

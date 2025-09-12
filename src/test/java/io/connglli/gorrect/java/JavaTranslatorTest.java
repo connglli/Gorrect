@@ -88,8 +88,9 @@ public class JavaTranslatorTest {
 
     program.addInstruction(new GAddRootObjInstruction(30L * 1024 * 1024, r1));
     program.addInstruction(
-        new GAddNonRootObjInstruction(300L * 1024 * 1024, r1, GReference.Type.WEAK, o1, e_r1_o1));
-    program.addInstruction(new GAddWeakRefInstruction(o1, r1, e_o1_r1));
+        new GAddNonRootObjInstruction(
+            300L * 1024 * 1024, r1, GReference.Type.WEAK, false, o1, e_r1_o1));
+    program.addInstruction(new GAddWeakRefInstruction(o1, r1, false, e_o1_r1));
     program.addInstruction(new GAddRootObjInstruction(1024L, r2));
     program.addInstruction(new GRemoveObjInstruction(r2));
 
@@ -128,10 +129,12 @@ public class JavaTranslatorTest {
 
     program.addInstruction(new GAddRootObjInstruction(30L * 1024 * 1024, r1));
     program.addInstruction(
-        new GAddNonRootObjInstruction(300L * 1024 * 1024, r1, GReference.Type.STRONG, o1, e_r1_o1));
+        new GAddNonRootObjInstruction(
+            300L * 1024 * 1024, r1, GReference.Type.STRONG, false, o1, e_r1_o1));
     program.addInstruction(
-        new GAddNonRootObjInstruction(300L * 1024 * 1024, o1, GReference.Type.STRONG, o2, e_o1_o2));
-    program.addInstruction(new GAddStrongRefInstruction(o2, o1, e_o2_o1));
+        new GAddNonRootObjInstruction(
+            300L * 1024 * 1024, o1, GReference.Type.STRONG, false, o2, e_o1_o2));
+    program.addInstruction(new GAddStrongRefInstruction(o2, o1, false, e_o2_o1));
 
     // Execute the program
     JavaTranslator interpreter = new JavaTranslator(program);
@@ -163,7 +166,8 @@ public class JavaTranslatorTest {
 
     program.addInstruction(new GAddRootObjInstruction(30L * 1024 * 1024, r1));
     program.addInstruction(
-        new GAddNonRootObjInstruction(300L * 1024 * 1024, r1, GReference.Type.SOFT, o1, e_r1_o1));
+        new GAddNonRootObjInstruction(
+            300L * 1024 * 1024, r1, GReference.Type.SOFT, false, o1, e_r1_o1));
 
     // Execute the program
     JavaTranslator interpreter = new JavaTranslator(program);
@@ -196,11 +200,11 @@ public class JavaTranslatorTest {
     GID ref_r1_o1 = new GID("ref-r1_o1");
     program.addInstruction(
         new GAddNonRootObjInstruction(
-            10L * 1024 * 1024, r1, GReference.Type.STRONG, o1, ref_r1_o1));
+            10L * 1024 * 1024, r1, GReference.Type.STRONG, false, o1, ref_r1_o1));
 
     // Add strong reference
     GID ref_o1_r1 = new GID("ref-o1_r1");
-    program.addInstruction(new GAddStrongRefInstruction(o1, r1, ref_o1_r1));
+    program.addInstruction(new GAddStrongRefInstruction(o1, r1, false, ref_o1_r1));
 
     // Soften reference
     program.addInstruction(new GSoftenRefInstruction(ref_r1_o1));
@@ -209,7 +213,7 @@ public class JavaTranslatorTest {
     GID o2 = new GID("o2");
     GID ref_o1_o2 = new GID("ref-o1_o2");
     program.addInstruction(
-        new GAddNonRootObjInstruction(1024L, o1, GReference.Type.WEAK, o2, ref_o1_o2));
+        new GAddNonRootObjInstruction(1024L, o1, GReference.Type.WEAK, false, o2, ref_o1_o2));
 
     // Replace referent, o1 get unreachable
     program.addInstruction(new GReplaceReferentInstruction(ref_r1_o1, o2));
@@ -224,7 +228,11 @@ public class JavaTranslatorTest {
         List.of(GReference.Type.STRONG, GReference.Type.WEAK);
     program.addInstruction(
         new GAddFanoutRefsInstruction(
-            r2, fanoutReferentIds, fanoutReferenceTypes, fanoutReferenceIds));
+            r2,
+            fanoutReferentIds,
+            fanoutReferenceTypes,
+            fanoutReferentIds.stream().map(r -> false).toList(),
+            fanoutReferenceIds));
 
     // Add fanin references
     List<GID> faninRefererIds = List.of(r1, o2);
@@ -232,7 +240,12 @@ public class JavaTranslatorTest {
         List.of(GReference.Type.STRONG, GReference.Type.SOFT);
     List<GID> faninReferenceIds = List.of(new GID("ref-r1_r2"), new GID("ref-o2_r2"));
     program.addInstruction(
-        new GAddFaninRefsInstruction(faninRefererIds, r2, faninReferenceTypes, faninReferenceIds));
+        new GAddFaninRefsInstruction(
+            faninRefererIds,
+            r2,
+            faninReferenceTypes,
+            faninRefererIds.stream().map(r -> false).toList(),
+            faninReferenceIds));
 
     // Clone object
     GID o2c = new GID("o2c");

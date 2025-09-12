@@ -213,6 +213,13 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optWeakRefWeight = 30;
 
+  @CommandLine.Option(
+      names = {"--vol-obj-prob"},
+      paramLabel = "prob",
+      description = "Probability to generate a volatile reference",
+      showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
+  protected double optVolatileRefProb = 0.30;
+
   protected GraphSmith.Config.ConfigBuilder getGraphSmithConfigBuilder() {
     return GraphSmith.Config.builder()
         .minRoots(optMinRoots)
@@ -225,7 +232,8 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
         .maxObjSizeBytes(MemorySize.parse(optMaxObjectSize))
         .strongRefWeight(optStrongRefWeight)
         .softRefWeight(optSoftRefWeight)
-        .weakRefWeight(optWeakRefWeight);
+        .weakRefWeight(optWeakRefWeight)
+        .volatileRefProb(optVolatileRefProb);
   }
 }
 

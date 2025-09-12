@@ -60,6 +60,11 @@ public class GAddFaninRefsInstruction extends GInstruction {
   @NonNull
   List<GReference.Type> referenceTypes;
 
+  /** Whether the new references are volatile */
+  @GIRInput(3)
+  @NonNull
+  List<Boolean> isVolatile;
+
   /** The newly created references */
   @GIROutput(0)
   @GIRNotExist(GIRNotExist.Type.REFERENCE)

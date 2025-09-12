@@ -37,12 +37,12 @@ class IdSmithTest {
 
   @BeforeEach
   void setUp() {
-    idSmith = new IdSmith("test");
+    idSmith = new IdSmith("test_");
   }
 
   @Test
   void testConstructorWithValidPrefix() {
-    IdSmith smith = new IdSmith("prefix");
+    IdSmith smith = new IdSmith("prefix_");
     assertNotNull(smith);
   }
 
@@ -65,8 +65,7 @@ class IdSmithTest {
   @Test
   void testNextWithEmptyPrefix() {
     IdSmith emptyPrefixSmith = new IdSmith("");
-    GID id = emptyPrefixSmith.next();
-    assertEquals("_0", id.get());
+    assertThrows(AssertionError.class, emptyPrefixSmith::next);
   }
 
   @Test
@@ -142,8 +141,8 @@ class IdSmithTest {
 
   @Test
   void testDifferentPrefixes() {
-    IdSmith smith1 = new IdSmith("prefix1");
-    IdSmith smith2 = new IdSmith("prefix2");
+    IdSmith smith1 = new IdSmith("prefix1_");
+    IdSmith smith2 = new IdSmith("prefix2_");
 
     GID id1 = smith1.next();
     GID id2 = smith2.next();
@@ -162,17 +161,17 @@ class IdSmithTest {
 
   @Test
   void testSpecialCharactersInPrefix() {
-    IdSmith smith = new IdSmith("test-prefix");
+    IdSmith smith = new IdSmith("test-prefix_");
     GID id = smith.next();
     assertEquals("test-prefix_0", id.get());
   }
 
   @Test
   void testWithLongPrefix() {
-    String longPrefix = "a".repeat(100);
+    String longPrefix = "a".repeat(100) + "_";
     IdSmith smith = new IdSmith(longPrefix);
     GID id = smith.next();
-    assertEquals(longPrefix + "_0", id.get());
+    assertEquals(longPrefix + "0", id.get());
   }
 
   @Test

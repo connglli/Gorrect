@@ -59,6 +59,11 @@ public class GAddNonRootObjInstruction extends GInstruction {
   @NonNull
   GReference.Type referenceType;
 
+  /** Whether the new reference is volatile. */
+  @GIRInput(3)
+  @NonNull
+  Boolean isVolatile;
+
   /** The unique ID assigned to the newly created object. */
   @GIROutput(0)
   @GIRNotExist(GIRNotExist.Type.OBJECT)

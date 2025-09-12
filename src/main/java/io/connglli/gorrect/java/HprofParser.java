@@ -182,7 +182,8 @@ public class HprofParser {
         GReference.Type referenceType = entry.getValue();
         Assert.set(graph.hasObject(referentId), "Referent object does not exist: " + referentId);
         GID referenceId = refIdSmith.next(refererId, referentId);
-        graph.addReference(referenceId, refererId, referentId, referenceType);
+        // Whether the reference is volatile is not tracked in the heap and not important
+        graph.addReference(referenceId, refererId, referentId, referenceType, false);
         log.info("Register reference: %s -> %s (%s)", refererId, referentId, referenceType);
       }
     }

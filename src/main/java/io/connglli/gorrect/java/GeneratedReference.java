@@ -49,6 +49,8 @@ class GeneratedReference {
 
   @Getter @Setter @NonNull GReference.Type type;
 
+  @Getter @NonNull Boolean isVolatile;
+
   @NonNull
   GeneratedObject getReferer() {
     return heap.getObject(refererId);

@@ -110,21 +110,27 @@ public class OracleObject {
     return heap.getWeakReferers(this);
   }
 
-  public void strongReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-    heap.strongReference(referenceId, this, referent);
+  public void strongReference(
+      @NonNull GID referenceId, @NonNull OracleObject referent, @NonNull Boolean isVolatile) {
+    heap.strongReference(referenceId, this, referent, isVolatile);
   }
 
-  public void softReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-    heap.softReference(referenceId, this, referent);
+  public void softReference(
+      @NonNull GID referenceId, @NonNull OracleObject referent, @NonNull Boolean isVolatile) {
+    heap.softReference(referenceId, this, referent, isVolatile);
   }
 
-  public void weakReference(@NonNull GID referenceId, @NonNull OracleObject referent) {
-    heap.weakReference(referenceId, this, referent);
+  public void weakReference(
+      @NonNull GID referenceId, @NonNull OracleObject referent, @NonNull Boolean isVolatile) {
+    heap.weakReference(referenceId, this, referent, isVolatile);
   }
 
   /* package */ void reference(
-      @NonNull GID referenceId, @NonNull OracleObject referent, @NonNull GReference.Type type) {
-    heap.reference(referenceId, this, referent, type);
+      @NonNull GID referenceId,
+      @NonNull OracleObject referent,
+      @NonNull GReference.Type type,
+      @NonNull Boolean isVolatile) {
+    heap.reference(referenceId, this, referent, type, isVolatile);
   }
 
   public void unlink(@NonNull OracleObject referent) {

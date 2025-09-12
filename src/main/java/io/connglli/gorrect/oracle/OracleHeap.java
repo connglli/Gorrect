@@ -258,27 +258,37 @@ public class OracleHeap {
   }
 
   /* package */ void strongReference(
-      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
-    reference(referenceId, referer, referent, GReference.Type.STRONG);
+      @NonNull GID referenceId,
+      @NonNull OracleObject referer,
+      @NonNull OracleObject referent,
+      @NonNull Boolean isVolatile) {
+    reference(referenceId, referer, referent, GReference.Type.STRONG, isVolatile);
   }
 
   /* package */ void softReference(
-      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
-    reference(referenceId, referer, referent, GReference.Type.SOFT);
+      @NonNull GID referenceId,
+      @NonNull OracleObject referer,
+      @NonNull OracleObject referent,
+      @NonNull Boolean isVolatile) {
+    reference(referenceId, referer, referent, GReference.Type.SOFT, isVolatile);
   }
 
   /* package */ void weakReference(
-      @NonNull GID referenceId, @NonNull OracleObject referer, @NonNull OracleObject referent) {
-    reference(referenceId, referer, referent, GReference.Type.WEAK);
+      @NonNull GID referenceId,
+      @NonNull OracleObject referer,
+      @NonNull OracleObject referent,
+      @NonNull Boolean isVolatile) {
+    reference(referenceId, referer, referent, GReference.Type.WEAK, isVolatile);
   }
 
   /* package */ void reference(
       @NonNull GID referenceId,
       @NonNull OracleObject referer,
       @NonNull OracleObject referent,
-      GReference.Type type) {
+      @NonNull GReference.Type type,
+      @NonNull Boolean isVolatile) {
     lvm.onOracleReference(referenceId, referer, referent, type);
-    graph.addReference(referenceId, referer.getId(), referent.getId(), type);
+    graph.addReference(referenceId, referer.getId(), referent.getId(), type, isVolatile);
   }
 
   /* package */ void unlink(@NonNull OracleObject referer, @NonNull OracleObject referent) {
@@ -293,7 +303,12 @@ public class OracleHeap {
         "Cannot redirect reference %s to the same referent",
         reference.getId());
     unlink(reference.getReferer(), reference.getReferent());
-    reference(reference.getId(), reference.getReferer(), newReferent, reference.getType());
+    reference(
+        reference.getId(),
+        reference.getReferer(),
+        newReferent,
+        reference.getType(),
+        reference.isVolatile());
   }
 
   /* package */ void strengthen(@NonNull OracleReference reference) {

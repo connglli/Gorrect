@@ -108,7 +108,10 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
         heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
     OracleObject refererObject = heap.getObject(instruction.getRefererId());
     refererObject.reference(
-        instruction.getReferenceId(), referentObject, instruction.getReferenceType());
+        instruction.getReferenceId(),
+        referentObject,
+        instruction.getReferenceType(),
+        instruction.getIsVolatile());
     return null;
   }
 
@@ -141,7 +144,8 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
               clone.reference(
                   new GID(reference.getId() + instruction.getReferenceSuffix()),
                   referent,
-                  reference.getType());
+                  reference.getType(),
+                  reference.isVolatile());
             });
     object
         .getReferers()
@@ -151,7 +155,8 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
               referer.reference(
                   new GID(reference.getId() + instruction.getReferenceSuffix()),
                   clone,
-                  reference.getType());
+                  reference.getType(),
+                  reference.isVolatile());
             });
     return null;
   }
@@ -168,7 +173,10 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   public Void visit(GAddStrongRefInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getRefererId())
-        .strongReference(instruction.getReferenceId(), heap.getObject(instruction.getReferentId()));
+        .strongReference(
+            instruction.getReferenceId(),
+            heap.getObject(instruction.getReferentId()),
+            instruction.getIsVolatile());
     return null;
   }
 
@@ -176,14 +184,20 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   public Void visit(GAddSoftRefInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.getObject(instruction.getRefererId())
-        .softReference(instruction.getReferenceId(), heap.getObject(instruction.getReferentId()));
+        .softReference(
+            instruction.getReferenceId(),
+            heap.getObject(instruction.getReferentId()),
+            instruction.getIsVolatile());
     return null;
   }
 
   @Override
   public Void visit(GAddWeakRefInstruction instruction) {
     heap.getObject(instruction.getRefererId())
-        .weakReference(instruction.getReferenceId(), heap.getObject(instruction.getReferentId()));
+        .weakReference(
+            instruction.getReferenceId(),
+            heap.getObject(instruction.getReferentId()),
+            instruction.getIsVolatile());
     return null;
   }
 
@@ -193,17 +207,21 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
     OracleObject referent = heap.getObject(instruction.getReferentId());
     List<GID> refererIds = instruction.getRefererIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+    List<Boolean> isVolatile = instruction.getIsVolatile();
     List<GID> referenceIds = instruction.getReferenceIds();
     Assert.set(
         refererIds.size() == referenceTypes.size(),
         "The number of referers must match the number of reference types");
+    Assert.set(
+        refererIds.size() == isVolatile.size(),
+        "The number of referers must match the size of isVolatile array");
     Assert.set(
         refererIds.size() == referenceIds.size(),
         "The number of referers must match the number of references");
 
     for (int i = 0; i < refererIds.size(); i++) {
       heap.getObject(refererIds.get(i))
-          .reference(referenceIds.get(i), referent, referenceTypes.get(i));
+          .reference(referenceIds.get(i), referent, referenceTypes.get(i), isVolatile.get(i));
     }
     return null;
   }
@@ -214,17 +232,24 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
     OracleObject referer = heap.getObject(instruction.getRefererId());
     List<GID> referentIds = instruction.getReferentIds();
     List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+    List<Boolean> isVolatile = instruction.getIsVolatile();
     List<GID> referenceIds = instruction.getReferenceIds();
     Assert.set(
         referentIds.size() == referenceTypes.size(),
-        "The number of referers must match the number of reference types");
+        "The number of referents must match the number of reference types");
+    Assert.set(
+        referentIds.size() == isVolatile.size(),
+        "The number of referents must match the size of isVolatile array");
     Assert.set(
         referentIds.size() == referenceIds.size(),
-        "The number of referers must match the number of references");
+        "The number of referents must match the number of references");
 
     for (int i = 0; i < referentIds.size(); i++) {
       referer.reference(
-          referenceIds.get(i), heap.getObject(referentIds.get(i)), referenceTypes.get(i));
+          referenceIds.get(i),
+          heap.getObject(referentIds.get(i)),
+          referenceTypes.get(i),
+          isVolatile.get(i));
     }
     return null;
   }

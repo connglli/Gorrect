@@ -52,6 +52,11 @@ public class GAddWeakRefInstruction extends GInstruction {
   @NonNull
   GID referentId;
 
+  /** Whether the new reference is volatile. */
+  @GIRInput(2)
+  @NonNull
+  Boolean isVolatile;
+
   /** The unique ID assigned to the newly created weak reference. */
   @GIROutput(0)
   @GIRNotExist(GIRNotExist.Type.REFERENCE)

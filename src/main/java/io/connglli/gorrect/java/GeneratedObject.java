@@ -104,20 +104,23 @@ class GeneratedObject {
 
   @SuppressWarnings("UnusedReturnValue")
   @NonNull
-  GeneratedReference strongReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
-    return heap.reference(referenceId, this, referent, GReference.Type.STRONG);
+  GeneratedReference strongReference(
+      @NonNull GID referenceId, @NonNull GeneratedObject referent, @NonNull Boolean isVolatile) {
+    return heap.reference(referenceId, this, referent, GReference.Type.STRONG, isVolatile);
   }
 
   @SuppressWarnings("UnusedReturnValue")
   @NonNull
-  GeneratedReference softReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
-    return heap.reference(referenceId, this, referent, GReference.Type.SOFT);
+  GeneratedReference softReference(
+      @NonNull GID referenceId, @NonNull GeneratedObject referent, @NonNull Boolean isVolatile) {
+    return heap.reference(referenceId, this, referent, GReference.Type.SOFT, isVolatile);
   }
 
   @SuppressWarnings("UnusedReturnValue")
   @NonNull
-  GeneratedReference weakReference(@NonNull GID referenceId, @NonNull GeneratedObject referent) {
-    return heap.reference(referenceId, this, referent, GReference.Type.WEAK);
+  GeneratedReference weakReference(
+      @NonNull GID referenceId, @NonNull GeneratedObject referent, @NonNull Boolean isVolatile) {
+    return heap.reference(referenceId, this, referent, GReference.Type.WEAK, isVolatile);
   }
 
   @SuppressWarnings("UnusedReturnValue")
@@ -125,8 +128,9 @@ class GeneratedObject {
   GeneratedReference reference(
       @NonNull GID referenceId,
       @NonNull GeneratedObject referent,
-      @NonNull GReference.Type referenceType) {
-    return heap.reference(referenceId, this, referent, referenceType);
+      @NonNull GReference.Type referenceType,
+      @NonNull Boolean isVolatile) {
+    return heap.reference(referenceId, this, referent, referenceType, isVolatile);
   }
 
   void free() {

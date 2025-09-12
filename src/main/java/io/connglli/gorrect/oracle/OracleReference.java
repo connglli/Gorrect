@@ -48,6 +48,10 @@ public class OracleReference {
     reference.setType(type);
   }
 
+  public boolean isVolatile() {
+    return reference.isVolatile();
+  }
+
   public OracleObject getReferer() {
     return heap.getObject(reference.getReferer());
   }

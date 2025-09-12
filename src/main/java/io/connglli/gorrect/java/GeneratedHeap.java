@@ -124,7 +124,8 @@ class GeneratedHeap {
             reference.getId(),
             referer.getId(),
             reference.getReferent().getId(),
-            reference.getType());
+            reference.getType(),
+            reference.getIsVolatile());
       }
     }
     if (clean) {
@@ -262,7 +263,8 @@ class GeneratedHeap {
       for (GReference reference : initState.getReferences()) {
         GeneratedObject referer = getObject(reference.getReferer());
         GeneratedObject referent = getObject(reference.getReferent());
-        allocator.reference(reference.getId(), referer, referent, reference.getType());
+        allocator.reference(
+            reference.getId(), referer, referent, reference.getType(), reference.isVolatile());
       }
     }
   }
@@ -346,9 +348,10 @@ class GeneratedHeap {
         @NonNull GID referenceId,
         @NonNull GeneratedObject referer,
         @NonNull GeneratedObject referent,
-        @NonNull GReference.Type referenceType) {
+        @NonNull GReference.Type referenceType,
+        @NonNull Boolean isVolatile) {
       GeneratedReference reference =
-          GeneratedHeap.this.reference(referenceId, referer, referent, referenceType);
+          GeneratedHeap.this.reference(referenceId, referer, referent, referenceType, isVolatile);
       // After referencing, the reachability of the objects might change.
       // So we need to patch it back to avoid our allocated objects (and its referents)
       // from being set as non-strongly reachable.
@@ -372,7 +375,8 @@ class GeneratedHeap {
       long objectSize,
       @NonNull GeneratedObject referer,
       @NonNull GReference.Type referenceType,
-      @NonNull GID referenceId) {
+      @NonNull GID referenceId,
+      @NonNull Boolean isVolatile) {
 
     ensureReachable(
         referer,
@@ -394,12 +398,18 @@ class GeneratedHeap {
                 referenceType));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, objectClazz.getId());
+    Modifier[] fieldMods;
+    if (isVolatile) {
+      fieldMods = new Modifier[] {Modifier.PUBLIC, Modifier.VOLATILE};
+    } else {
+      fieldMods = new Modifier[] {Modifier.PUBLIC};
+    }
     switch (referenceType) {
       case STRONG:
         {
           // Create a field in our class so that we can reference the object
           refererClazz.addField(
-              FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
+              FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, fieldMods)
                   .initializer("null")
                   .build());
           // Reference the object object by our new field
@@ -414,9 +424,7 @@ class GeneratedHeap {
           ClassName softRefClazz = ClassName.get(SoftReference.class);
           // Create a field in our class so that we can reference the object
           refererClazz.addField(
-              FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
-                  .initializer("null")
-                  .build());
+              FieldSpec.builder(softRefClazz, fieldName, fieldMods).initializer("null").build());
           // Reference the object object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
@@ -431,9 +439,7 @@ class GeneratedHeap {
           ClassName weakRefClazz = ClassName.get(WeakReference.class);
           // Create a field in our class so that we can reference the object
           refererClazz.addField(
-              FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
-                  .initializer("null")
-                  .build());
+              FieldSpec.builder(weakRefClazz, fieldName, fieldMods).initializer("null").build());
           // Reference the object object by our new field
           appendStatement(
               "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
@@ -450,7 +456,13 @@ class GeneratedHeap {
 
     putReference(
         new GeneratedReference(
-            this, referenceId, fieldName, referer.getId(), object.getId(), referenceType));
+            this,
+            referenceId,
+            fieldName,
+            referer.getId(),
+            object.getId(),
+            referenceType,
+            isVolatile));
 
     // The reference relationship is changed, we should update the heap
     updateHeap();
@@ -656,7 +668,8 @@ class GeneratedHeap {
       @NonNull GID referenceId,
       @NonNull GeneratedObject referer,
       @NonNull GeneratedObject referent,
-      @NonNull GReference.Type referenceType) {
+      @NonNull GReference.Type referenceType,
+      @NonNull Boolean isVolatile) {
     ensureReachable(
         referer,
         GReference.Type.STRONG,
@@ -664,6 +677,12 @@ class GeneratedHeap {
             .formatted(referer.getId(), referer.getJavaRefId()));
 
     String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
+    Modifier[] fieldMods;
+    if (isVolatile) {
+      fieldMods = new Modifier[] {Modifier.PUBLIC, Modifier.VOLATILE};
+    } else {
+      fieldMods = new Modifier[] {Modifier.PUBLIC};
+    }
     GeneratedObjectClass refererClazz = referer.getClazz();
 
     switch (referenceType) {
@@ -673,7 +692,7 @@ class GeneratedHeap {
           // It is likely that the referer and the referent has been linked before
           if (!refererClazz.hasField(fieldName)) {
             refererClazz.addField(
-                FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC)
+                FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, fieldMods)
                     .initializer("null")
                     .build());
           }
@@ -691,9 +710,7 @@ class GeneratedHeap {
           // It is likely that the referer and the referent has been linked before
           if (!refererClazz.hasField(fieldName)) {
             refererClazz.addField(
-                FieldSpec.builder(softRefClazz, fieldName, Modifier.PUBLIC)
-                    .initializer("null")
-                    .build());
+                FieldSpec.builder(softRefClazz, fieldName, fieldMods).initializer("null").build());
           }
           // Reference the referent object by our new field
           appendStatement(
@@ -711,9 +728,7 @@ class GeneratedHeap {
           // It is likely that the referer and the referent has been linked before
           if (!refererClazz.hasField(fieldName)) {
             refererClazz.addField(
-                FieldSpec.builder(weakRefClazz, fieldName, Modifier.PUBLIC)
-                    .initializer("null")
-                    .build());
+                FieldSpec.builder(weakRefClazz, fieldName, fieldMods).initializer("null").build());
           }
           // Reference the referent object by our new field
           appendStatement(
@@ -733,7 +748,13 @@ class GeneratedHeap {
     GeneratedReference reference =
         putReference(
             new GeneratedReference(
-                this, referenceId, fieldName, referer.getId(), referent.getId(), referenceType));
+                this,
+                referenceId,
+                fieldName,
+                referer.getId(),
+                referent.getId(),
+                referenceType,
+                isVolatile));
     updateHeap();
 
     return reference;
@@ -796,7 +817,12 @@ class GeneratedHeap {
       referent.toRoot(); // Temporarily make it a root to ensure it is reachable
     }
     unlink(reference);
-    reference(reference.getId(), referer, referent, reference.getType().strengthen());
+    reference(
+        reference.getId(),
+        referer,
+        referent,
+        reference.getType().strengthen(),
+        reference.getIsVolatile());
     if (!isRoot) {
       referent.toNonRoot(); // Restore the original state
     }
@@ -812,7 +838,12 @@ class GeneratedHeap {
       referent.toRoot(); // Temporarily make it a root to ensure it is reachable
     }
     unlink(reference);
-    reference(reference.getId(), referer, referent, reference.getType().soften());
+    reference(
+        reference.getId(),
+        referer,
+        referent,
+        reference.getType().soften(),
+        reference.getIsVolatile());
     if (!isRoot) {
       referent.toNonRoot(); // Restore the original state
     }

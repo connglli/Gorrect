@@ -70,6 +70,9 @@ public class ProgramSmith {
     /// maxObjSizeBytes and larger than or equal to minObjSizeBytes.
     @Builder.Default private final Long[] humongousObjSizeBytes = new Long[] {128_000L}; // 128KB
 
+    /// The probability of turning a reference into a volatile reference.
+    @Builder.Default private final double volatileRefProb = 0;
+
     public Config check() {
       if (minInstructions < 1) {
         throw new IllegalArgumentException(
@@ -114,6 +117,10 @@ public class ProgramSmith {
                     .formatted(index, index, size, maxObjSizeBytes));
           }
         }
+      }
+      if (volatileRefProb < 0 || volatileRefProb > 1) {
+        throw new IllegalArgumentException(
+            "volatileRefProb must be between 0 and 1, got %.2f".formatted(volatileRefProb));
       }
       return this;
     }
@@ -240,7 +247,7 @@ public class ProgramSmith {
     SmithImpl smith = new SmithImpl(vm, interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     // TODO: Add force-GC instructions manually and intentionally
-    for (int i = 0; i < numInstructions - 1; i++) { // The last instruction is forcing GC
+    for (int i = 0; i < numInstructions; i++) { // The last instruction is forcing GC
       if (stats.numTotalGeneration - stats.numValidGeneration > maxNumTrials) {
         log.debug("Too many invalid generations, possibly due to stopping.");
         break;
@@ -249,7 +256,12 @@ public class ProgramSmith {
         log.debug("Cannot generate more instructions due to insufficient memory.");
         break; // Out of memory
       }
-      Class<? extends GInstruction> instClazz = random.nextItem(instWeights);
+      Class<? extends GInstruction> instClazz;
+      if (i == numInstructions - 1) {
+        instClazz = GForceAnyGCInstruction.class;
+      } else {
+        instClazz = random.nextItem(instWeights);
+      }
       GInstruction mock = mockInstruction(instClazz);
       log.debug("Generating instruction: " + mock.getOpCode());
       GInstruction instruction = mock.accept(smith);
@@ -274,7 +286,6 @@ public class ProgramSmith {
         stats.numTotalGeneration++;
       }
     }
-    program.addInstruction(mockInstruction(GForceAnyGCInstruction.class).accept(smith));
     stats.generationTimeMillis = System.currentTimeMillis() - stats.generationTimeMillis;
     return program;
   }
@@ -351,8 +362,9 @@ public class ProgramSmith {
       GID objectId = objectIdSmith.next();
       GID referenceId = referenceIdSmith.next(refererId, objectId);
       GReference.Type referenceType = randomReferenceType();
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
       return new GAddNonRootObjInstruction(
-          objectSize, refererId, referenceType, objectId, referenceId);
+          objectSize, refererId, referenceType, isVolatile, objectId, referenceId);
     }
 
     @Override
@@ -426,7 +438,8 @@ public class ProgramSmith {
         return null;
       }
       GID referenceId = referenceIdSmith.next(data.a(), data.b());
-      return new GAddStrongRefInstruction(data.a(), data.b(), referenceId);
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddStrongRefInstruction(data.a(), data.b(), isVolatile, referenceId);
     }
 
     @Override
@@ -436,7 +449,8 @@ public class ProgramSmith {
         return null;
       }
       GID referenceId = referenceIdSmith.next(data.a(), data.b());
-      return new GAddSoftRefInstruction(data.a(), data.b(), referenceId);
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddSoftRefInstruction(data.a(), data.b(), isVolatile, referenceId);
     }
 
     @Override
@@ -446,7 +460,8 @@ public class ProgramSmith {
         return null;
       }
       GID referenceId = referenceIdSmith.next(data.a(), data.b());
-      return new GAddWeakRefInstruction(data.a(), data.b(), referenceId);
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddWeakRefInstruction(data.a(), data.b(), isVolatile, referenceId);
     }
 
     @Override
@@ -488,7 +503,11 @@ public class ProgramSmith {
               .map(refererId -> referenceIdSmith.next(refererId, referentId))
               .toList();
 
-      return new GAddFaninRefsInstruction(refererIds, referentId, referenceTypes, referenceIds);
+      List<Boolean> isVolatile =
+          refererIds.stream().map(r -> random.nextDouble() < config.volatileRefProb).toList();
+
+      return new GAddFaninRefsInstruction(
+          refererIds, referentId, referenceTypes, isVolatile, referenceIds);
     }
 
     @Override
@@ -530,7 +549,11 @@ public class ProgramSmith {
               .map(referentId -> referenceIdSmith.next(refererId, referentId))
               .toList();
 
-      return new GAddFanoutRefsInstruction(refererId, referentIds, referenceTypes, referenceIds);
+      List<Boolean> isVolatile =
+          referentIds.stream().map(r -> random.nextDouble() < config.volatileRefProb).toList();
+
+      return new GAddFanoutRefsInstruction(
+          refererId, referentIds, referenceTypes, isVolatile, referenceIds);
     }
 
     @Override
@@ -738,7 +761,7 @@ public class ProgramSmith {
     fakeInstructions.put(
         GAddNonRootObjInstruction.class,
         new GAddNonRootObjInstruction(
-            0L, new GID("_"), GReference.Type.STRONG, new GID("_"), new GID("_")));
+            0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
     fakeInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
     fakeInstructions.put(GMakeNonRootInstruction.class, new GMakeNonRootInstruction(new GID("_")));
     fakeInstructions.put(
@@ -746,19 +769,20 @@ public class ProgramSmith {
     fakeInstructions.put(GRemoveObjInstruction.class, new GRemoveObjInstruction(new GID("_")));
     fakeInstructions.put(
         GAddStrongRefInstruction.class,
-        new GAddStrongRefInstruction(new GID("_"), new GID("_"), new GID("_")));
+        new GAddStrongRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     fakeInstructions.put(
         GAddSoftRefInstruction.class,
-        new GAddSoftRefInstruction(new GID("_"), new GID("_"), new GID("_")));
+        new GAddSoftRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     fakeInstructions.put(
         GAddWeakRefInstruction.class,
-        new GAddWeakRefInstruction(new GID("_"), new GID("_"), new GID("_")));
+        new GAddWeakRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     fakeInstructions.put(
         GAddFaninRefsInstruction.class,
         new GAddFaninRefsInstruction(
             List.of(new GID("_")),
             new GID("_"),
             List.of(GReference.Type.STRONG),
+            List.of(false),
             List.of(new GID("_"))));
     fakeInstructions.put(
         GAddFanoutRefsInstruction.class,
@@ -766,6 +790,7 @@ public class ProgramSmith {
             new GID("_"),
             List.of(new GID("_")),
             List.of(GReference.Type.STRONG),
+            List.of(false),
             List.of(new GID("_"))));
     fakeInstructions.put(
         GReplaceReferentInstruction.class,

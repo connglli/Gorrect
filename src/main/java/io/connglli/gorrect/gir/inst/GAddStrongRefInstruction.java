@@ -52,6 +52,11 @@ public class GAddStrongRefInstruction extends GInstruction {
   @NonNull
   GID referentId;
 
+  /** Whether the new reference is volatile. */
+  @GIRInput(2)
+  @NonNull
+  Boolean isVolatile;
+
   /** The unique ID assigned to the newly created strong reference. */
   @GIROutput(0)
   @GIRNotExist(GIRNotExist.Type.REFERENCE)

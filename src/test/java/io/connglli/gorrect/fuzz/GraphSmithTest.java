@@ -55,7 +55,7 @@ class GraphSmithTest {
 
   @Test
   void testCraftBasicGraph() {
-    GraphSmith.Config config = configBuilder.build();
+    GraphSmith.Config config = configBuilder.buildUnchecked();
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
     GGraph graph = smith.craft(vm);
@@ -75,7 +75,7 @@ class GraphSmithTest {
             .maxNonRoots(1)
             .minRefs(1)
             .maxRefs(1)
-            .build();
+            .buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -99,7 +99,7 @@ class GraphSmithTest {
             .strongRefWeight(60)
             .softRefWeight(20)
             .weakRefWeight(20)
-            .build();
+            .buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -125,7 +125,7 @@ class GraphSmithTest {
             .maxNonRoots(8)
             .minRefs(10)
             .maxRefs(10)
-            .build();
+            .buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -156,7 +156,7 @@ class GraphSmithTest {
             .strongRefWeight(50)
             .softRefWeight(30)
             .weakRefWeight(20)
-            .build();
+            .buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -183,7 +183,7 @@ class GraphSmithTest {
     long maxSize = 1000;
 
     GraphSmith.Config config =
-        configBuilder.minObjSizeBytes(minSize).maxObjSizeBytes(maxSize).build();
+        configBuilder.minObjSizeBytes(minSize).maxObjSizeBytes(maxSize).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -201,7 +201,7 @@ class GraphSmithTest {
   @Test
   void testUniqueObjectIds() {
     GraphSmith.Config config =
-        configBuilder.minRoots(5).maxRoots(5).minNonRoots(15).maxNonRoots(15).build();
+        configBuilder.minRoots(5).maxRoots(5).minNonRoots(15).maxNonRoots(15).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -216,7 +216,7 @@ class GraphSmithTest {
 
   @Test
   void testUniqueReferenceIds() {
-    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
+    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -232,7 +232,7 @@ class GraphSmithTest {
 
   @Test
   void testNoSelfReferences() {
-    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).build();
+    GraphSmith.Config config = configBuilder.minRefs(20).maxRefs(20).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -245,7 +245,7 @@ class GraphSmithTest {
 
   @Test
   void testNoDuplicateReferences() {
-    GraphSmith.Config config = configBuilder.minRefs(15).maxRefs(15).build();
+    GraphSmith.Config config = configBuilder.minRefs(15).maxRefs(15).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
@@ -259,7 +259,7 @@ class GraphSmithTest {
 
   @Test
   void testMultipleGraphsAreIndependent() {
-    GraphSmith.Config config = configBuilder.build();
+    GraphSmith.Config config = configBuilder.buildUnchecked();
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
     GGraph graph1 = smith.craft(vm);
@@ -290,7 +290,7 @@ class GraphSmithTest {
             .maxObjSizeBytes(200)
             .minNonRoots(20) // This should cause out of memory
             .maxNonRoots(20)
-            .build();
+            .buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
 
@@ -304,7 +304,7 @@ class GraphSmithTest {
 
   @Test
   void testConfigBuilderDefaults() {
-    GraphSmith.Config config = GraphSmith.Config.builder().build();
+    GraphSmith.Config config = GraphSmith.Config.builder().buildUnchecked();
 
     assertEquals(1, config.getMinRoots());
     assertEquals(10, config.getMaxRoots());
@@ -322,7 +322,7 @@ class GraphSmithTest {
   @Test
   void testGraphContainsCorrectObjectTypes() {
     GraphSmith.Config config =
-        configBuilder.minRoots(3).maxRoots(3).minNonRoots(5).maxNonRoots(5).build();
+        configBuilder.minRoots(3).maxRoots(3).minNonRoots(5).maxNonRoots(5).buildUnchecked();
 
     GraphSmith smith = new GraphSmith(config, objectIdSmith, referenceIdSmith);
     GGraph graph = smith.craft(vm);
