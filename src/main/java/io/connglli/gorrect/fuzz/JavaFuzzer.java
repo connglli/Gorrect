@@ -399,7 +399,7 @@ public class JavaFuzzer {
         }
         try {
           recoverLogging();
-          //          io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
+          io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
         } catch (Exception e) {
           log.warning(
               "Worker failed to remove the work directory of iteration %d: %s", i, e.getMessage());
