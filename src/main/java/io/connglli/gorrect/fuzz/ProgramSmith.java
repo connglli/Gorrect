@@ -201,6 +201,7 @@ public class ProgramSmith {
 
   static {
     instWeights.put(GForceAnyGCInstruction.class, 10);
+    instWeights.put(GRunOutOfMemoryInstruction.class, 5);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);
@@ -333,6 +334,11 @@ public class ProgramSmith {
     @Override
     public GInstruction visit(GForceAnyGCInstruction instruction) {
       return new GForceAnyGCInstruction();
+    }
+
+    @Override
+    public GInstruction visit(GRunOutOfMemoryInstruction instruction) {
+      return new GRunOutOfMemoryInstruction();
     }
 
     @Override
@@ -756,6 +762,7 @@ public class ProgramSmith {
 
   static {
     fakeInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
+    fakeInstructions.put(GRunOutOfMemoryInstruction.class, new GRunOutOfMemoryInstruction());
     fakeInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
     fakeInstructions.put(

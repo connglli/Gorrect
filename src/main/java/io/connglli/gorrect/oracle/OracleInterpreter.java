@@ -90,7 +90,17 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
 
   @Override
   public Void visit(GForceAnyGCInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
     heap.compact();
+    return null;
+  }
+
+  @Override
+  public Void visit(GRunOutOfMemoryInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
+    // An OOM does not add new objects to our heap, merely triggers
+    // a GC to remove all soft references should be cleared.
+    heap.stressCompact();
     return null;
   }
 

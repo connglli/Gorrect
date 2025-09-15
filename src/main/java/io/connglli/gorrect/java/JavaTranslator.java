@@ -128,6 +128,14 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GRunOutOfMemoryInstruction instruction) {
+      instruction.checkValidity(getState());
+      // When an OOM happens, all soft references are cleared
+      heap.stressCompact();
+      return null;
+    }
+
     public Void visit(GAddRootObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.allocRootWithoutInitializer(instruction.getObjectId(), instruction.getObjectSize());

@@ -50,6 +50,16 @@ public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T>
   }
 
   @Override
+  public T visit(GForceAnyGCInstruction instruction) {
+    return defaultVisit(instruction);
+  }
+
+  @Override
+  public T visit(GRunOutOfMemoryInstruction instruction) {
+    return defaultVisit(instruction);
+  }
+
+  @Override
   public T visit(GAddRootObjInstruction instruction) {
     return defaultVisit(instruction);
   }

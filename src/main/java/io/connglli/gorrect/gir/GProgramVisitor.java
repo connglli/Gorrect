@@ -51,6 +51,8 @@ public interface GProgramVisitor<T> {
 
   T visit(GForceAnyGCInstruction instruction);
 
+  T visit(GRunOutOfMemoryInstruction instruction);
+
   // -=======================================================
   // Object management instructions
   // -=======================================================
