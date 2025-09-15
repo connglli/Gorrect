@@ -64,7 +64,57 @@ class ForceGC {
   }
 
   public static boolean forceGCInMemoryPressure() {
-    // TODO: Allocate a large amount of memory to create memory pressure
-    return forceGC();
+    java.util.Random random = new java.util.Random(0);
+    java.util.LinkedList<java.lang.ref.SoftReference<byte[]>> softRefs =
+        new java.util.LinkedList<>();
+    memoryPressureHolder = softRefs;
+    java.util.LinkedList<Object> oomTrigs = new java.util.LinkedList<>();
+    memoryPressureHolder = oomTrigs;
+
+    long totalMemory = Runtime.getRuntime().totalMemory();
+
+    long minObjSize = totalMemory / 250;
+    long maxObjSize = minObjSize * 16;
+    long factor = maxObjSize - minObjSize;
+
+    int trigSize = (int) Math.min(totalMemory, 256_000_000); // 256MB
+
+    try {
+      long numSoftRefs = (long) (0.95 * totalMemory / minObjSize);
+
+      while (numSoftRefs-- > 0) {
+        int allocationSize = (int) minObjSize + (int) (random.nextDouble() * factor);
+        softRefs.add(new java.lang.ref.SoftReference<>(new byte[allocationSize]));
+      }
+
+      while (true) {
+        oomTrigs.add(new byte[trigSize]);
+      }
+    } catch (OutOfMemoryError e) {
+      memoryPressureHolder = null;
+      oomTrigs = null;
+
+      long oomSoftRefSize = softRefs.size();
+      long numNonNull = 0;
+
+      for (java.lang.ref.SoftReference<byte[]> ref : softRefs) {
+        if (ref.get() != null) {
+          numNonNull++;
+        }
+      }
+
+      softRefs = null;
+      assert numNonNull == 0
+          : "Soft references should be cleared under memory pressure, but found %d non-null soft references among %d soft references"
+              .formatted(numNonNull, oomSoftRefSize);
+    } finally {
+      assert oomTrigs == null
+          : "Should have cleared all objects in OOM triggers array, i.e., oomTrigs";
+      assert softRefs == null
+          : "Should have cleared all objects in soft references array, i.e., softRefs";
+    }
+    return true;
   }
+
+  private static Object memoryPressureHolder = null; // To prevent compiler optimization
 }
