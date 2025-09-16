@@ -24,15 +24,13 @@
 
 package io.connglli.gorrect.java;
 
-import com.palantir.javapoet.ClassName;
-import com.palantir.javapoet.FieldSpec;
-import com.palantir.javapoet.MethodSpec;
-import com.palantir.javapoet.TypeSpec;
+import com.palantir.javapoet.*;
 import io.connglli.gorrect.gir.model.GID;
 import java.util.UUID;
 import javax.lang.model.element.Modifier;
 import lombok.Getter;
 import lombok.NonNull;
+import lombok.RequiredArgsConstructor;
 
 /**
  * GeneratedMainClass is the main class that contains the main method for the generation Java code.
@@ -52,6 +50,8 @@ final class GeneratedMainClass extends GeneratedClass {
           .returns(void.class)
           .addParameter(String[].class, "args")
           .addException(Exception.class);
+  // The code generator for the main method.
+  @Getter private final CodeGenerator codeGen = new CodeGenerator(mainMethodSpec);
 
   GeneratedMainClass(GeneratedHeap heap) {
     super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
@@ -62,10 +62,6 @@ final class GeneratedMainClass extends GeneratedClass {
             .build());
   }
 
-  void addStatement(@NonNull String stmtFormat, Object... stmtArgs) {
-    mainMethodSpec.addStatement(stmtFormat, stmtArgs);
-  }
-
   @Override
   TypeSpec build() {
     addMethod(mainMethodSpec.build());
@@ -74,5 +70,62 @@ final class GeneratedMainClass extends GeneratedClass {
 
   static String computeFieldName(@NonNull GID gid) {
     return ROOT_REF_FIELD_NAME_PREFIX + gid;
+  }
+
+  /// A helper class to generate code for the main method.
+  /// It exists to avoid exposing the MethodSpec.Builder directly.
+  @SuppressWarnings("UnusedReturnValue")
+  @RequiredArgsConstructor
+  static class CodeGenerator {
+
+    @NonNull MethodSpec.Builder method;
+
+    public MethodSpec.Builder addStatement(@NonNull String format, Object... args) {
+      return method.addStatement(format, args);
+    }
+
+    public MethodSpec.Builder addStatement(@NonNull CodeBlock codeBlock) {
+      return method.addStatement(codeBlock);
+    }
+
+    public MethodSpec.Builder addComment(@NonNull String format, Object... args) {
+      return method.addStatement("/* " + format + " */", args);
+    }
+
+    public MethodSpec.Builder addCode(@NonNull String format, Object... args) {
+      return method.addCode(format, args);
+    }
+
+    public MethodSpec.Builder addCode(CodeBlock codeBlock) {
+      return method.addCode(codeBlock);
+    }
+
+    public MethodSpec.Builder beginControlFlow(@NonNull String controlFlow, Object... args) {
+      return method.beginControlFlow(controlFlow, args);
+    }
+
+    public MethodSpec.Builder beginControlFlow(@NonNull CodeBlock codeBlock) {
+      return method.beginControlFlow(codeBlock);
+    }
+
+    public MethodSpec.Builder nextControlFlow(@NonNull String controlFlow, Object... args) {
+      return method.nextControlFlow(controlFlow, args);
+    }
+
+    public MethodSpec.Builder nextControlFlow(@NonNull CodeBlock codeBlock) {
+      return method.nextControlFlow(codeBlock);
+    }
+
+    public MethodSpec.Builder endControlFlow(@NonNull String controlFlow, Object... args) {
+      return method.endControlFlow(controlFlow, args);
+    }
+
+    public MethodSpec.Builder endControlFlow(@NonNull CodeBlock codeBlock) {
+      return method.endControlFlow(codeBlock);
+    }
+
+    public MethodSpec.Builder endControlFlow() {
+      return method.endControlFlow();
+    }
   }
 }

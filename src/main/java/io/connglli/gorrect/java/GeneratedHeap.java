@@ -154,13 +154,18 @@ class GeneratedHeap {
   }
 
   /// Append a comment to the generated class.
-  void appendComment(String comment) {
-    appendStatement("/* " + comment + " */");
+  void appendComment(@NonNull String comment) {
+    mainClazz.getCodeGen().addComment(comment);
   }
 
   /// Append a statement to the generated class.
   void appendStatement(@NonNull String stmtFormat, Object... stmtArgs) {
-    mainClazz.addStatement(stmtFormat, stmtArgs);
+    mainClazz.getCodeGen().addStatement(stmtFormat, stmtArgs);
+  }
+
+  /// Obtain the code generator for the generated class.
+  GeneratedMainClass.CodeGenerator getCodeGen() {
+    return mainClazz.getCodeGen();
   }
 
   /// Generate the Java code and return the relative file path to the workdir parameter.
@@ -359,12 +364,16 @@ class GeneratedHeap {
       return reference;
     }
 
-    @Override
-    public void close() {
+    public void clear() {
       // We clear the pool to release all the strong references
       appendStatement(OBJECT_POOL_NAME + ".clear()");
       // The reference relationship is changed, we should update the heap
-      updateHeap();
+      updateHeap(this);
+    }
+
+    @Override
+    public void close() {
+      clear();
     }
   }
 
