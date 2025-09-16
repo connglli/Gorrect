@@ -225,7 +225,7 @@ public class ProgramSmith {
     // TODO: Currently, we disable swapping referents due the the above issue.
     instWeights.put(GSwapReferentsInstruction.class, 0);
     instWeights.put(GSoftenRefInstruction.class, 5);
-    instWeights.put(GStrengthRefInstruction.class, 5);
+    instWeights.put(GStrengthenRefInstruction.class, 5);
     instWeights.put(GRemoveRefInstruction.class, 30);
     instWeights.put(GRemoveAllReferentsInstruction.class, 30);
   }
@@ -634,7 +634,7 @@ public class ProgramSmith {
     }
 
     @Override
-    public GInstruction visit(GStrengthRefInstruction unused) {
+    public GInstruction visit(GStrengthenRefInstruction unused) {
       // We restrict the referer and referent to be strongly reachable
       StateRandDecor s = currState();
       GID referenceId =
@@ -648,7 +648,7 @@ public class ProgramSmith {
         log.debug("Cannot strengthen a reference due to no suitable candidates.");
         return null;
       }
-      return new GStrengthRefInstruction(referenceId);
+      return new GStrengthenRefInstruction(referenceId);
     }
 
     @Override
@@ -805,7 +805,8 @@ public class ProgramSmith {
     fakeInstructions.put(
         GSwapReferentsInstruction.class, new GSwapReferentsInstruction(new GID("_"), new GID("_")));
     fakeInstructions.put(GSoftenRefInstruction.class, new GSoftenRefInstruction(new GID("_")));
-    fakeInstructions.put(GStrengthRefInstruction.class, new GStrengthRefInstruction(new GID("_")));
+    fakeInstructions.put(
+        GStrengthenRefInstruction.class, new GStrengthenRefInstruction(new GID("_")));
     fakeInstructions.put(GRemoveRefInstruction.class, new GRemoveRefInstruction(new GID("_")));
     fakeInstructions.put(
         GRemoveAllReferentsInstruction.class, new GRemoveAllReferentsInstruction(new GID("_")));

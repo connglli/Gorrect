@@ -265,7 +265,7 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   }
 
   @Override
-  public Void visit(GStrengthRefInstruction instruction) {
+  public Void visit(GStrengthenRefInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.getReference(instruction.getReferenceId()).strengthen();
     return null;

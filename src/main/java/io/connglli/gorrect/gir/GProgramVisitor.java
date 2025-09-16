@@ -89,7 +89,7 @@ public interface GProgramVisitor<T> {
 
   T visit(GSoftenRefInstruction instruction);
 
-  T visit(GStrengthRefInstruction instruction);
+  T visit(GStrengthenRefInstruction instruction);
 
   T visit(GRemoveRefInstruction instruction);
 

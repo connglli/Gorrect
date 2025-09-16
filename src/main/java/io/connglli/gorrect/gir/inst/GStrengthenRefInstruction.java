@@ -40,7 +40,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("strength-ref")
-public class GStrengthRefInstruction extends GInstruction {
+public class GStrengthenRefInstruction extends GInstruction {
   /** The ID of the reference to be strengthened by one level. */
   @GIRInput(0)
   @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)

@@ -125,7 +125,7 @@ public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T>
   }
 
   @Override
-  public T visit(GStrengthRefInstruction instruction) {
+  public T visit(GStrengthenRefInstruction instruction) {
     return defaultVisit(instruction);
   }
 

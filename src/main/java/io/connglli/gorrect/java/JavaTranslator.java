@@ -334,7 +334,7 @@ public class JavaTranslator {
       return null;
     }
 
-    public Void visit(GStrengthRefInstruction instruction) {
+    public Void visit(GStrengthenRefInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId()).strengthen();
       return null;
