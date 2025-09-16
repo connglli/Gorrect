@@ -201,7 +201,7 @@ public class ProgramSmith {
 
   static {
     instWeights.put(GForceAnyGCInstruction.class, 10);
-    instWeights.put(GRunOutOfMemoryInstruction.class, 5);
+    instWeights.put(GRunOutOfMemoryInstruction.class, 2);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);
