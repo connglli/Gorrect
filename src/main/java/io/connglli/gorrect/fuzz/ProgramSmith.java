@@ -200,9 +200,9 @@ public class ProgramSmith {
       new LinkedHashMap<>();
 
   static {
-    instWeights.put(GForceAnyGCInstruction.class, 10);
+    instWeights.put(GForceAnyGCInstruction.class, 2);
     instWeights.put(GRunOutOfMemoryInstruction.class, 2);
-    instWeights.put(GFragmentHeapInstruction.class, 3);
+    instWeights.put(GFragmentHeapInstruction.class, 2);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);

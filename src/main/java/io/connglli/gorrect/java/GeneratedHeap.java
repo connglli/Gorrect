@@ -510,7 +510,7 @@ class GeneratedHeap {
   }
 
   // Remove all unreachable objects from the heap
-  public void clean() {
+  public void clean(boolean appGCStmt) {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getReachableObjects();
     Set<GID> objectsToRemove = new HashSet<>();
@@ -522,12 +522,14 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
-    // Insert a GC call to try triggering the garbage collection
-    appendStatement("ForceGC.tryGC()");
+    if (appGCStmt) {
+      // Insert a GC call to try triggering the garbage collection
+      appendStatement("ForceGC.tryGC()");
+    }
   }
 
   // Remove all unreachable and weakly reachable objects from the heap
-  public void compact() {
+  public void compact(boolean appGCStmt) {
     GGraph state = getState();
     Map<GID, GReference.Type> reachability = state.markReachability();
     Set<GID> objectsToRemove = new HashSet<>();
@@ -540,12 +542,14 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
-    // Insert a forced GC call to trigger collecting weakly reachable objects
-    appendStatement("ForceGC.forceGC()");
+    if (appGCStmt) {
+      // Insert a forced GC call to trigger collecting weakly reachable objects
+      appendStatement("ForceGC.forceGC()");
+    }
   }
 
   // Remove all unreachable and weakly reachable and softly reachable objects from the heap
-  public void stressCompact() {
+  public void stressCompact(boolean appGCStmt) {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getStronglyReachableObjects();
     Set<GID> objectsToRemove = new HashSet<>();
@@ -557,8 +561,10 @@ class GeneratedHeap {
     for (GID objectId : objectsToRemove) {
       moveObjectAndItsReferencesToDead(objects.get(objectId));
     }
-    // Insert a forced GC call to trigger collecting weakly and softly reachable objects
-    appendStatement("ForceGC.forceGCInMemoryPressure()");
+    if (appGCStmt) {
+      // Insert a forced GC call to trigger collecting weakly and softly reachable objects
+      appendStatement("ForceGC.forceGCInMemoryPressure()");
+    }
   }
 
   // -========================================================================

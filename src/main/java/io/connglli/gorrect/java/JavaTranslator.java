@@ -56,7 +56,7 @@ public class JavaTranslator {
 
   public void translate() {
     program.accept(this.impl);
-    heap.clean();
+    heap.clean(/* appGCStmt= */ true);
   }
 
   /// Get the UUID of the generated Java class.
@@ -124,7 +124,7 @@ public class JavaTranslator {
     @Override
     public Void visit(GForceAnyGCInstruction instruction) {
       instruction.checkValidity(getState());
-      heap.compact();
+      heap.compact(/* appGCStmt= */ true);
       return null;
     }
 
@@ -132,7 +132,7 @@ public class JavaTranslator {
     public Void visit(GRunOutOfMemoryInstruction instruction) {
       instruction.checkValidity(getState());
       // When an OOM happens, all soft references are cleared
-      heap.stressCompact();
+      heap.stressCompact(/* appGCStmt= */ true);
       return null;
     }
 
@@ -175,7 +175,7 @@ public class JavaTranslator {
     public Void visit(GMakeNonRootInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getObjectId()).toNonRoot();
-      heap.clean();
+      heap.clean(/* appGCStmt= */ false);
       return null;
     }
 
@@ -217,7 +217,7 @@ public class JavaTranslator {
     public Void visit(GRemoveObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getObjectId()).free();
-      heap.clean();
+      heap.clean(/* appGCStmt= */ false);
       return null;
     }
 
@@ -280,7 +280,7 @@ public class JavaTranslator {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId())
           .redirect(heap.getObject(instruction.getNewReferentId()));
-      heap.clean();
+      heap.clean(/* appGCStmt= */ false);
       return null;
     }
 
@@ -316,7 +316,7 @@ public class JavaTranslator {
     public Void visit(GRemoveRefInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId()).unlink();
-      heap.clean();
+      heap.clean(/* appGCStmt= */ false);
       return null;
     }
 
@@ -325,7 +325,7 @@ public class JavaTranslator {
       heap.getObject(instruction.getRefererId())
           .getReferences()
           .forEach(GeneratedReference::unlink);
-      heap.clean();
+      heap.clean(/* appGCStmt= */ false);
       return null;
     }
   }
