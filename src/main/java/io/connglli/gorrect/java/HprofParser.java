@@ -171,7 +171,7 @@ public class HprofParser {
           "%s object already exists: %s",
           object.isRoot() ? "Root" : "Non-root",
           objectId);
-      log.info("Registering non-root: " + objectId);
+      log.debug("Registering non-root: " + objectId);
       graph.addObject(objectId, object.type, object.size);
     }
     for (GObjRecord referer : objects.values()) {
@@ -184,7 +184,7 @@ public class HprofParser {
         GID referenceId = refIdSmith.next(refererId, referentId);
         // Whether the reference is volatile is not tracked in the heap and not important
         graph.addReference(referenceId, refererId, referentId, referenceType, false);
-        log.info("Register reference: %s -> %s (%s)", refererId, referentId, referenceType);
+        log.debug("Register reference: %s -> %s (%s)", refererId, referentId, referenceType);
       }
     }
     return graph;
@@ -327,7 +327,7 @@ public class HprofParser {
       }
       // Delete the cache if it is older than the hprof file
       if (cacheDir.lastModified() <= hprofFile.lastModified()) {
-        log.info(
+        log.debug(
             "Deleting existing hprof cache since it's tool old: " + cacheDir.getAbsolutePath());
         boolean deleted = Files.deleteFileTreeIfExists(cacheDir.toPath());
         Assert.set(deleted, "Failed to delete hprof cache: " + cacheDir.getAbsolutePath());
@@ -348,7 +348,7 @@ public class HprofParser {
     } catch (Exception e) {
       // Ignore
     }
-    log.info(
+    log.debug(
         "Found %s object: %s (instance_id=%d, root_obj=%b, num_referents=%d, padding_size=%sB, shallow_size=%dB, retained_size=%s, reachable_size=%s)",
         isRoot ? "root" : "non-root",
         object.id,

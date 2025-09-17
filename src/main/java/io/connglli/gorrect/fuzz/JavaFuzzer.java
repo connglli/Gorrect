@@ -367,7 +367,6 @@ public class JavaFuzzer {
         try {
           Files.createDirectories(testPath);
           // Each test also has its own logging
-          Logger.enableHeadless();
           Logger.setOutput(
               new PrintStream(new FileOutputStream(testdir + File.separator + "work.log")));
           fuzzOnce(workdir + File.separator + testNameFormat.formatted(i));

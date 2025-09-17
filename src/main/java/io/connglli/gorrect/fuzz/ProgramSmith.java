@@ -240,7 +240,7 @@ public class ProgramSmith {
   @Getter private final int maxNumTrials = 320;
 
   /// Craft a GIR program for the given vm with the given initial graph state.
-  public GProgram craft(LangVM vm, @NonNull GGraph initState) {
+  public GProgram craft(@NonNull LangVM vm, @NonNull GGraph initState) {
     stats.reset();
     vm.reset(); // Reset the VM to a clean state
     log.debug("Reset the VM (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
@@ -262,57 +262,74 @@ public class ProgramSmith {
         log.debug("Cannot generate more instructions due to insufficient memory.");
         break; // Out of memory
       }
-      Class<? extends GInstruction> instClazz;
+      GInstruction instruction;
       if (i == numInstructions - 1) {
-        instClazz = GForceAnyGCInstruction.class;
+        instruction = nextInstruction(GForceAnyGCInstruction.class, smith);
       } else {
-        instClazz = random.nextItem(instWeights);
+        instruction = nextInstruction(smith);
       }
-      GInstruction mock = mockInstruction(instClazz);
-      log.debug(
-          "Generating instruction (heap="
-              + MemorySize.toString(vm.getHeapUnusedBytes())
-              + "): "
-              + mock.getOpCode());
-      GInstruction instruction = mock.accept(smith);
+      stats.numTotalGeneration++;
       if (instruction == null) {
-        stats.numTotalGeneration++;
-        log.debug("  failed: instruction is null");
         i -= 1; // Retry the same instruction index
         continue;
       }
-      log.debug("  instruction: " + instruction);
-      try {
-        // FIXME: In case the state of the interpreter is changed, we'd better unroll the state.
-        interpreter.interpret(instruction);
-        stats.contribute(instClazz);
-        log.debug("  succeeded");
-        program.addInstruction(instruction);
-        // Check if we need to release some frozen objects
-        {
-          List<GID> toUnfreeze = new ArrayList<>();
-          for (Map.Entry<GID, Integer> kv : frozenObjects.entrySet()) {
-            if (kv.getValue() < 0) {
-              toUnfreeze.add(kv.getKey());
-            } else {
-              kv.setValue(kv.getValue() - 1);
-            }
-          }
-          for (GID id : toUnfreeze) {
-            frozenObjects.remove(id);
-            log.debug("  released frozen object " + id);
-          }
-        }
-      } catch (Throwable e) {
-        // The instruction cannot be safely executed
-        log.debug("  failed: " + e.getMessage());
-        i -= 1; // Retry the same instruction index
-      } finally {
-        stats.numTotalGeneration++;
-      }
+      program.addInstruction(instruction);
+      stats.contribute(instruction.getClass());
     }
     stats.generationTimeMillis = System.currentTimeMillis() - stats.generationTimeMillis;
     return program;
+  }
+
+  private GInstruction nextInstruction(@NonNull SmithImpl smith) {
+    return nextInstruction(random.nextItem(instWeights), smith);
+  }
+
+  private GInstruction nextInstruction(
+      Predicate<Class<? extends GInstruction>> pred, @NonNull SmithImpl smith) {
+    Class<? extends GInstruction> instClass;
+    do {
+      instClass = random.nextItem(instWeights);
+    } while (!pred.test(instClass));
+    return nextInstruction(instClass, smith);
+  }
+
+  private GInstruction nextInstruction(
+      @NonNull Class<? extends GInstruction> instClazz, @NonNull SmithImpl smith) {
+    GInstruction mock = MockInstructionSmith.craft(instClazz);
+    log.debug(
+        "Generating instruction (heap="
+            + MemorySize.toString(smith.vm.getHeapUnusedBytes())
+            + "): "
+            + mock.getOpCode());
+    GInstruction instruction = mock.accept(smith);
+    if (instruction == null) {
+      log.debug("  failed: instruction is null");
+      return null;
+    }
+    log.debug("  instruction: " + instruction);
+    try {
+      // FIXME: In case the state of the interpreter is changed, we'd better unroll the state.
+      smith.interpreter.interpret(instruction);
+      log.debug("  succeeded");
+      // Check if we need to release some frozen objects
+      List<GID> toUnfreeze = new ArrayList<>();
+      for (Map.Entry<GID, Integer> kv : smith.frozenObjects.entrySet()) {
+        if (kv.getValue() < 0) {
+          toUnfreeze.add(kv.getKey());
+        } else {
+          kv.setValue(kv.getValue() - 1);
+        }
+      }
+      for (GID id : toUnfreeze) {
+        smith.frozenObjects.remove(id);
+        log.debug("  released frozen object " + id);
+      }
+      return instruction;
+    } catch (Throwable e) {
+      // The instruction cannot be safely executed
+      log.debug("  failed: " + e.getMessage());
+      return null;
+    }
   }
 
   @RequiredArgsConstructor
@@ -845,40 +862,42 @@ public class ProgramSmith {
       return StateRandDecor.of(interpreter);
     }
   }
+}
 
-  // These are fake instructions that work as workarounds for branching our instruction generation.
-  // These instructions are invalid instructions and should not be used for other purpose.
-  private static final Map<Class<? extends GInstruction>, GInstruction> fakeInstructions =
+class MockInstructionSmith {
+  // These are fake/mock instructions that work as workarounds for branching our instruction
+  // generation. They are invalid instructions and should not be used for other purpose.
+  private static final Map<Class<? extends GInstruction>, GInstruction> mockInstructions =
       new HashMap<>();
 
   static {
-    fakeInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
-    fakeInstructions.put(GRunOutOfMemoryInstruction.class, new GRunOutOfMemoryInstruction());
-    fakeInstructions.put(
+    mockInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
+    mockInstructions.put(GRunOutOfMemoryInstruction.class, new GRunOutOfMemoryInstruction());
+    mockInstructions.put(
         GFragmentHeapInstruction.class,
         new GFragmentHeapInstruction(1, List.of(1L), List.of(new GID("_"))));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddNonRootObjInstruction.class,
         new GAddNonRootObjInstruction(
             0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
-    fakeInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
-    fakeInstructions.put(GMakeNonRootInstruction.class, new GMakeNonRootInstruction(new GID("_")));
-    fakeInstructions.put(GFreezeObjInstruction.class, new GFreezeObjInstruction(new GID("_"), 1));
-    fakeInstructions.put(
+    mockInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
+    mockInstructions.put(GMakeNonRootInstruction.class, new GMakeNonRootInstruction(new GID("_")));
+    mockInstructions.put(GFreezeObjInstruction.class, new GFreezeObjInstruction(new GID("_"), 1));
+    mockInstructions.put(
         GCloneObjInstruction.class, new GCloneObjInstruction(new GID("_"), new GID("_"), "0"));
-    fakeInstructions.put(GRemoveObjInstruction.class, new GRemoveObjInstruction(new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(GRemoveObjInstruction.class, new GRemoveObjInstruction(new GID("_")));
+    mockInstructions.put(
         GAddStrongRefInstruction.class,
         new GAddStrongRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddSoftRefInstruction.class,
         new GAddSoftRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddWeakRefInstruction.class,
         new GAddWeakRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddFaninRefsInstruction.class,
         new GAddFaninRefsInstruction(
             List.of(new GID("_")),
@@ -886,7 +905,7 @@ public class ProgramSmith {
             List.of(GReference.Type.STRONG),
             List.of(false),
             List.of(new GID("_"))));
-    fakeInstructions.put(
+    mockInstructions.put(
         GAddFanoutRefsInstruction.class,
         new GAddFanoutRefsInstruction(
             new GID("_"),
@@ -894,21 +913,21 @@ public class ProgramSmith {
             List.of(GReference.Type.STRONG),
             List.of(false),
             List.of(new GID("_"))));
-    fakeInstructions.put(
+    mockInstructions.put(
         GReplaceReferentInstruction.class,
         new GReplaceReferentInstruction(new GID("_"), new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(
         GSwapReferentsInstruction.class, new GSwapReferentsInstruction(new GID("_"), new GID("_")));
-    fakeInstructions.put(GSoftenRefInstruction.class, new GSoftenRefInstruction(new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(GSoftenRefInstruction.class, new GSoftenRefInstruction(new GID("_")));
+    mockInstructions.put(
         GStrengthenRefInstruction.class, new GStrengthenRefInstruction(new GID("_")));
-    fakeInstructions.put(GRemoveRefInstruction.class, new GRemoveRefInstruction(new GID("_")));
-    fakeInstructions.put(
+    mockInstructions.put(GRemoveRefInstruction.class, new GRemoveRefInstruction(new GID("_")));
+    mockInstructions.put(
         GRemoveAllReferentsInstruction.class, new GRemoveAllReferentsInstruction(new GID("_")));
   }
 
-  private GInstruction mockInstruction(Class<? extends GInstruction> instructionClass) {
-    return fakeInstructions.get(instructionClass);
+  static GInstruction craft(Class<? extends GInstruction> instructionClass) {
+    return mockInstructions.get(instructionClass);
   }
 }
 
