@@ -75,6 +75,11 @@ public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T>
   }
 
   @Override
+  public T visit(GAddAnonymRootInstruction instruction) {
+    return defaultVisit(instruction);
+  }
+
+  @Override
   public T visit(GMakeRootInstruction instruction) {
     return defaultVisit(instruction);
   }

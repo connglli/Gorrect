@@ -25,7 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
-import io.connglli.gorrect.gir.inst.marks.GUserEnsuredEffect;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
@@ -44,7 +44,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("freeze-obj")
-public class GFreezeObjInstruction extends GInstruction implements GUserEnsuredEffect {
+public class GFreezeObjInstruction extends GInstruction implements GIRMarkReenterable {
 
   @GIRInput(0)
   @GIRReachable

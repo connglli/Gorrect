@@ -31,28 +31,35 @@ import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
-import lombok.RequiredArgsConstructor;
 
 /** Represents a complete GIR program containing instructions and metadata. */
 @Getter
-@RequiredArgsConstructor
 public class GProgram {
   @NonNull private final GSetHeapInstruction configuration;
 
   private final List<GInstruction> instructions = new ArrayList<>();
 
-  public void addInstruction(GInstruction instruction) {
-    Assert.set(
-        !(instruction instanceof GSetHeapInstruction), "GSetHeapInstruction is already added");
-    instructions.add(instruction);
+  public GProgram(@NonNull GSetHeapInstruction config) {
+    this.configuration = config;
+    configuration.setIndex(-1); // See GInstruction
   }
 
+  /// The number of non-configuration instructions in this program.
   public int size() {
     return instructions.size();
   }
 
+  /// Checks if this program contains no non-configuration instructions.
   public boolean isEmpty() {
     return instructions.isEmpty();
+  }
+
+  /// Adds a non-configuration instruction to the end of this program.
+  public void addInstruction(GInstruction instruction) {
+    Assert.set(
+        !(instruction instanceof GSetHeapInstruction), "GSetHeapInstruction is already added");
+    instructions.add(instruction);
+    instruction.setIndex(instructions.size() - 1); // See GInstruction
   }
 
   public <T> T accept(GProgramVisitor<T> visitor) {

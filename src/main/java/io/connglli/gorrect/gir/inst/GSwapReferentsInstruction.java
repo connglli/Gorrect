@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
@@ -41,7 +42,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("swap-referents")
-public class GSwapReferentsInstruction extends GInstruction {
+public class GSwapReferentsInstruction extends GInstruction implements GIRMarkReenterable {
   /** The ID of the first reference involved in the swap operation. */
   @GIRInput(0)
   @GIRNotExist(value = GIRNotExist.Type.REFERENCE, reverse = true)

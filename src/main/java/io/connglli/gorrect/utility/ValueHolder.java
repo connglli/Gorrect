@@ -34,4 +34,8 @@ import lombok.Setter;
 @Setter
 public class ValueHolder<V> {
   private @NonNull V v;
+
+  public static <V> ValueHolder<V> of(V v) {
+    return new ValueHolder<>(v);
+  }
 }

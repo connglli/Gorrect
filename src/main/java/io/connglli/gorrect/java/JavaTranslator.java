@@ -30,7 +30,9 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.utility.*;
+import java.util.ArrayList;
 import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
@@ -140,7 +142,11 @@ public class JavaTranslator {
     public Void visit(GFragmentHeapInstruction instruction) {
       instruction.checkValidity(getState());
       List<Long> objectSizes = instruction.getObjectSizes();
-      List<GID> objectIDs = instruction.getObjectIDs();
+      // We follow OracleInterpreter to compute the anonymous ID
+      List<GID> objectIDs = new ArrayList<>(objectSizes.size());
+      for (int i = 0; i < instruction.getCount(); i++) {
+        objectIDs.add(OracleInterpreter.computeAnonymousId(instruction, i));
+      }
       for (int i = 0; i < instruction.getCount(); i++) {
         heap.allocRootWithoutInitializer(objectIDs.get(i), objectSizes.get(i));
       }
@@ -163,6 +169,15 @@ public class JavaTranslator {
           instruction.getReferenceType(),
           instruction.getReferenceId(),
           instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddAnonymRootInstruction instruction) {
+      instruction.checkValidity(getState());
+      // We follow OracleInterpreter to compute the anonymous ID
+      heap.allocRootWithoutInitializer(
+          OracleInterpreter.computeAnonymousId(instruction), instruction.getObjectSize());
       return null;
     }
 

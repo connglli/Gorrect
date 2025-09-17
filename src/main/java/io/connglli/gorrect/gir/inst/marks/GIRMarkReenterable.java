@@ -22,20 +22,12 @@
  * SOFTWARE.
  */
 
-package io.connglli.gorrect.gir.model;
+package io.connglli.gorrect.gir.inst.marks;
 
 /**
- * GAnonymousID represents an anonymous ID that is guaranteed to be unique within the program. It is
- * typically used for temporary or intermediate objects that do not require a meaningful name.
+ * This is a marker indicating that the instruction can be re-entered, i.e., can be executed
+ * multiple times. Indeed, most instructions are not re-enterable, e.g., an GAddRootObjInstruction
+ * cannot be re-executed because it an object with the same name already exists; adding a
+ * name-conflict object is not allowed by our GGraph model.
  */
-class GAnonymousID extends GID {
-
-  public GAnonymousID() {
-    super("_gorrect_anonym_" + System.nanoTime());
-  }
-
-  @Override
-  protected boolean isAnonymous() {
-    return true;
-  }
-}
+public interface GIRMarkReenterable {}

@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
 import lombok.AccessLevel;
 import lombok.EqualsAndHashCode;
 import lombok.RequiredArgsConstructor;
@@ -38,7 +39,7 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("force-any-gc")
-public class GForceAnyGCInstruction extends GInstruction {
+public class GForceAnyGCInstruction extends GInstruction implements GIRMarkReenterable {
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {

@@ -205,6 +205,7 @@ public class ProgramSmith {
     instWeights.put(GFragmentHeapInstruction.class, 2);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
+    instWeights.put(GAddAnonymRootInstruction.class, 20);
     instWeights.put(GMakeRootInstruction.class, 20);
     instWeights.put(GMakeNonRootInstruction.class, 20);
     instWeights.put(GFreezeObjInstruction.class, 5);
@@ -250,7 +251,7 @@ public class ProgramSmith {
     log.debug("Setup initial state (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     Map<GID, Integer> frozenObjects = new HashMap<>();
-    SmithImpl smith = new SmithImpl(vm, interpreter, frozenObjects);
+    SmithImpl smith = new SmithImpl(vm, interpreter, program, frozenObjects);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     // TODO: Add force-GC instructions manually and intentionally
     for (int i = 0; i < numInstructions; i++) { // The last instruction is forcing GC
@@ -308,6 +309,8 @@ public class ProgramSmith {
     }
     log.debug("  instruction: " + instruction);
     try {
+      // Preset the instruction index otherwise interpretation may fail
+      instruction.setIndex(smith.program.size());
       // FIXME: In case the state of the interpreter is changed, we'd better unroll the state.
       smith.interpreter.interpret(instruction);
       log.debug("  succeeded");
@@ -358,6 +361,7 @@ public class ProgramSmith {
 
     @NonNull private final LangVM vm;
     @NonNull private final OracleInterpreter interpreter;
+    @NonNull private final GProgram program;
     @NonNull private final Map<GID, Integer> frozenObjects;
 
     @Override
@@ -373,17 +377,17 @@ public class ProgramSmith {
     }
 
     @Override
-    public GInstruction visit(GForceAnyGCInstruction instruction) {
+    public GInstruction visit(GForceAnyGCInstruction unused) {
       return new GForceAnyGCInstruction();
     }
 
     @Override
-    public GInstruction visit(GRunOutOfMemoryInstruction instruction) {
+    public GInstruction visit(GRunOutOfMemoryInstruction unused) {
       return new GRunOutOfMemoryInstruction();
     }
 
     @Override
-    public GInstruction visit(GFragmentHeapInstruction instruction) {
+    public GInstruction visit(GFragmentHeapInstruction unused) {
       long takenBytes = (long) (vm.getHeapUnusedBytes() * .75);
       int minNumObjects = 10, maxNumObjects = 32;
 
@@ -408,12 +412,7 @@ public class ProgramSmith {
         objectSizes.add(currentSize);
       }
 
-      List<GID> objectIDs = new ArrayList<>(objectSizes.size());
-      for (int i = 0; i < objectSizes.size(); i++) {
-        objectIDs.add(objectIdSmith.next());
-      }
-
-      return new GFragmentHeapInstruction(objectSizes.size(), objectSizes, objectIDs);
+      return new GFragmentHeapInstruction(objectSizes.size(), objectSizes);
     }
 
     @Override
@@ -446,6 +445,17 @@ public class ProgramSmith {
       boolean isVolatile = random.nextDouble() < config.volatileRefProb;
       return new GAddNonRootObjInstruction(
           objectSize, refererId, referenceType, isVolatile, objectId, referenceId);
+    }
+
+    @Override
+    public GInstruction visit(GAddAnonymRootInstruction unused) {
+      long paddingSize =
+          randomPadding(OracleInterpreter.computeAnonymousId(program.getInstructions().size()));
+      if (paddingSize < 0) {
+        log.debug("Cannot add an anonymous object due to insufficient memory.");
+        return null;
+      }
+      return new GAddAnonymRootInstruction(paddingSize);
     }
 
     @Override
@@ -874,14 +884,14 @@ class MockInstructionSmith {
     mockInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
     mockInstructions.put(GRunOutOfMemoryInstruction.class, new GRunOutOfMemoryInstruction());
     mockInstructions.put(
-        GFragmentHeapInstruction.class,
-        new GFragmentHeapInstruction(1, List.of(1L), List.of(new GID("_"))));
+        GFragmentHeapInstruction.class, new GFragmentHeapInstruction(1, List.of(1L)));
     mockInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
     mockInstructions.put(
         GAddNonRootObjInstruction.class,
         new GAddNonRootObjInstruction(
             0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
+    mockInstructions.put(GAddAnonymRootInstruction.class, new GAddAnonymRootInstruction(0L));
     mockInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
     mockInstructions.put(GMakeNonRootInstruction.class, new GMakeNonRootInstruction(new GID("_")));
     mockInstructions.put(GFreezeObjInstruction.class, new GFreezeObjInstruction(new GID("_"), 1));

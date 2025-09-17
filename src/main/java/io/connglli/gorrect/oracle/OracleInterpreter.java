@@ -30,10 +30,12 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.utility.Assert;
 import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import lombok.Getter;
 import lombok.NonNull;
 
 /**
@@ -75,6 +77,41 @@ public class OracleInterpreter {
 
   public GGraph getState() {
     return heap.getState();
+  }
+
+  /**
+   * AnonymousID represents an anonymous ID that is guaranteed to be unique within the program,
+   * defined based on instruction index. See GAddAnonymRootInstruction.
+   */
+  public static class AnonymousID extends GID {
+
+    @Getter private final int index;
+    @Getter private final int subindex;
+
+    AnonymousID(int index, int subindex) {
+      super("_anonym_id_" + index + "_x_" + subindex);
+      Assert.set(index >= 0, "The index of an anonymous ID must be non-negative, got " + index);
+      Assert.set(
+          subindex >= 0, "The subindex of an anonymous ID must be non-negative, got " + subindex);
+      this.index = index;
+      this.subindex = subindex;
+    }
+  }
+
+  public static @NonNull GID computeAnonymousId(@NonNull GInstruction instruction) {
+    return computeAnonymousId(instruction.getIndex());
+  }
+
+  public static @NonNull GID computeAnonymousId(@NonNull GInstruction instruction, int subindex) {
+    return computeAnonymousId(instruction.getIndex(), subindex);
+  }
+
+  public static @NonNull GID computeAnonymousId(int index) {
+    return new AnonymousID(index, 0);
+  }
+
+  public static @NonNull GID computeAnonymousId(int index, int subindex) {
+    return new AnonymousID(index, subindex);
   }
 
   protected class Impl implements GProgramVisitor<Void> {
@@ -130,7 +167,10 @@ public class OracleInterpreter {
     public Void visit(GFragmentHeapInstruction instruction) {
       instruction.checkValidity(heap.getGraph());
       List<Long> objectSizes = instruction.getObjectSizes();
-      List<GID> objectIDs = instruction.getObjectIDs();
+      List<GID> objectIDs = new ArrayList<>(objectSizes.size());
+      for (int i = 0; i < instruction.getCount(); i++) {
+        objectIDs.add(computeAnonymousId(instruction, i));
+      }
       for (int i = 0; i < instruction.getCount(); i++) {
         heap.allocRootObject(objectIDs.get(i), objectSizes.get(i));
       }
@@ -155,6 +195,14 @@ public class OracleInterpreter {
           referentObject,
           instruction.getReferenceType(),
           instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddAnonymRootInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.allocRootObject(
+          OracleInterpreter.computeAnonymousId(instruction), instruction.getObjectSize());
       return null;
     }
 

@@ -25,9 +25,8 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
-import io.connglli.gorrect.gir.inst.marks.GUserEnsuredEffect;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkUserEnsuredEffect;
 import io.connglli.gorrect.gir.model.GGraph;
-import io.connglli.gorrect.gir.model.GID;
 import java.util.List;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -36,14 +35,14 @@ import lombok.experimental.FieldDefaults;
  * GFragmentHeapInstruction allocates a number of large objects as GC roots, trying to make the heap
  * fragment. However, there's no guarantee that the heap will actually fragment. The user should try
  * best to provide object sizes that are likely to fragment the heap. The created objects are all
- * anonymous and will perhaps stay in the heap until the end of the program.
+ * anonymous roots and will perhaps stay in the heap until the end of the program.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("fragment-heap")
-public class GFragmentHeapInstruction extends GInstruction implements GUserEnsuredEffect {
+public class GFragmentHeapInstruction extends GInstruction implements GIRMarkUserEnsuredEffect {
 
   /** The number of objects to be allocated. */
   @GIRInput(0)
@@ -54,12 +53,6 @@ public class GFragmentHeapInstruction extends GInstruction implements GUserEnsur
   @GIRInput(1)
   @NonNull
   List<Long> objectSizes;
-
-  /** The IDs of the allocated objects. The size of this list should be count. */
-  @GIROutput(0)
-  @GIRNotExist(GIRNotExist.Type.OBJECT)
-  @NonNull
-  List<GID> objectIDs;
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
@@ -73,9 +66,6 @@ public class GFragmentHeapInstruction extends GInstruction implements GUserEnsur
     }
     if (objectSizes.size() != count) {
       throw new InvalidInputException("The size of objectSizes must be equal to count: " + this);
-    }
-    if (objectIDs.size() != count) {
-      throw new InvalidInputException("The size of objectIDs must be equal to count: " + this);
     }
     for (Long s : objectSizes) {
       if (s <= 0) {

@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
@@ -38,7 +39,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("run-out-of-memory")
-public class GRunOutOfMemoryInstruction extends GInstruction {
+public class GRunOutOfMemoryInstruction extends GInstruction implements GIRMarkReenterable {
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {

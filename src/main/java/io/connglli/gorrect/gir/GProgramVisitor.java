@@ -63,6 +63,8 @@ public interface GProgramVisitor<T> {
 
   T visit(GAddNonRootObjInstruction instruction);
 
+  T visit(GAddAnonymRootInstruction instruction);
+
   T visit(GMakeRootInstruction instruction);
 
   T visit(GMakeNonRootInstruction instruction);

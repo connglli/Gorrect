@@ -44,7 +44,11 @@ public final class Formats {
     String[] parts = name.split("_");
     String camelCase =
         Arrays.stream(parts)
-            .map(part -> part.substring(0, 1).toUpperCase() + part.substring(1).toLowerCase())
+            .map(
+                part ->
+                    part.isEmpty()
+                        ? part
+                        : part.substring(0, 1).toUpperCase() + part.substring(1).toLowerCase())
             .collect(Collectors.joining());
     return capitalize
         ? camelCase

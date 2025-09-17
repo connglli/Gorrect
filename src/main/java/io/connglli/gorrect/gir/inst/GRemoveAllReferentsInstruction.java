@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
 import io.connglli.gorrect.gir.model.GID;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -39,7 +40,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("remove-all-referents")
-public class GRemoveAllReferentsInstruction extends GInstruction {
+public class GRemoveAllReferentsInstruction extends GInstruction implements GIRMarkReenterable {
 
   @GIRInput(0)
   @GIRReachable

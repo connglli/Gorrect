@@ -86,7 +86,7 @@ public class GGraph {
     }
   }
 
-  public GGraph deepCopy() {
+  public @NonNull GGraph deepCopy() {
     return new GGraph(this);
   }
 
@@ -197,12 +197,6 @@ public class GGraph {
     refTo.put(objId, new HashSet<>());
     refBy.put(objId, new HashSet<>());
     return objId;
-  }
-
-  /// Add an anonymous object into the graph. Note that each call of this method creates a new
-  /// object and insert that into the graph with a unique ID.
-  public GID addAnonymousObject(GObject.Type type, long size) {
-    return addObject(new GAnonymousID(), type, size);
   }
 
   /// Remove an object from the graph. This operation may cause certain objects unreachable. Call

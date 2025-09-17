@@ -38,6 +38,8 @@ import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.Set;
 import java.util.stream.Collectors;
+import lombok.Getter;
+import lombok.Setter;
 
 /**
  * GInstruction represents an instruction of the Gorrect IR (GIR). All instructions of GIR operate
@@ -69,7 +71,16 @@ public abstract class GInstruction {
     }
   }
 
-  private String opCode;
+  // The index of the instruction in the program.
+  // The index should be set by the program when the instruction is added.
+  // Note that:
+  // - The index is -2 for an instruction that is not added to any program.
+  // - The index is -1 for the configuration instruction.
+  // - The non-negative index is for normal instructions, starting from 0.
+  @Getter @Setter private int index = -2;
+
+  // The opcode of the instruction, computed at runtime by @GIROpCode
+  private String opCode = null;
 
   /**
    * Returns the opcode of the instruction. The opcode is defined by the {@link GIROpCode}
@@ -221,6 +232,13 @@ public abstract class GInstruction {
    * @param graph The graph on which the instruction is executed
    */
   public void checkValidity(GGraph graph) {
+    if (index < -1) {
+      throw new InvalidInputException(
+          "Instruction index must be set immediately after being added into a program. (instruction: "
+              + this
+              + ")");
+    }
+
     Set<GID> reachableObjects = graph.getReachableObjects();
 
     // Check all objects marked with @GIRReachable are indeed reachable
