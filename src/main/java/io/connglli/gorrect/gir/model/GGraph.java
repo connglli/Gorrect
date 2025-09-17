@@ -201,8 +201,8 @@ public class GGraph {
 
   /// Add an anonymous object into the graph. Note that each call of this method creates a new
   /// object and insert that into the graph with a unique ID.
-  public GAnonymousID addAnonymousObject(GObject.Type type, long size) {
-    return (GAnonymousID) addObject(new GAnonymousID(), type, size);
+  public GID addAnonymousObject(GObject.Type type, long size) {
+    return addObject(new GAnonymousID(), type, size);
   }
 
   /// Remove an object from the graph. This operation may cause certain objects unreachable. Call

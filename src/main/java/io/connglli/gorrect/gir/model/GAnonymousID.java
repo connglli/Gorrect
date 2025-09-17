@@ -28,9 +28,14 @@ package io.connglli.gorrect.gir.model;
  * GAnonymousID represents an anonymous ID that is guaranteed to be unique within the program. It is
  * typically used for temporary or intermediate objects that do not require a meaningful name.
  */
-public class GAnonymousID extends GID {
+class GAnonymousID extends GID {
 
   public GAnonymousID() {
     super("_gorrect_anonym_" + System.nanoTime());
+  }
+
+  @Override
+  protected boolean isAnonymous() {
+    return true;
   }
 }

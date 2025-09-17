@@ -71,4 +71,8 @@ public class GID implements Comparable<GID> {
   public String toString() {
     return id;
   }
+
+  protected boolean isAnonymous() {
+    return false;
+  }
 }
