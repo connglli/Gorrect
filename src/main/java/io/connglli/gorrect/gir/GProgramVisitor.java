@@ -67,6 +67,8 @@ public interface GProgramVisitor<T> {
 
   T visit(GMakeNonRootInstruction instruction);
 
+  T visit(GFreezeObjInstruction instruction);
+
   T visit(GCloneObjInstruction instruction);
 
   T visit(GRemoveObjInstruction instruction);

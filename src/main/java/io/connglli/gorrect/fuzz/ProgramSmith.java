@@ -207,6 +207,7 @@ public class ProgramSmith {
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);
     instWeights.put(GMakeNonRootInstruction.class, 20);
+    instWeights.put(GFreezeObjInstruction.class, 5);
     // Currently, we disable cloning objects as the requirements are overly strict.
     // It requires the object, all its referers and referents to be strongly reachable.
     instWeights.put(GCloneObjInstruction.class, 0);
@@ -248,7 +249,8 @@ public class ProgramSmith {
     OracleInterpreter interpreter = new OracleInterpreter(vm, program);
     log.debug("Setup initial state (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
-    SmithImpl smith = new SmithImpl(vm, interpreter, program);
+    Map<GID, Integer> frozenObjects = new HashMap<>();
+    SmithImpl smith = new SmithImpl(vm, interpreter, frozenObjects);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
     // TODO: Add force-GC instructions manually and intentionally
     for (int i = 0; i < numInstructions; i++) { // The last instruction is forcing GC
@@ -286,6 +288,21 @@ public class ProgramSmith {
         stats.contribute(instClazz);
         log.debug("  succeeded");
         program.addInstruction(instruction);
+        // Check if we need to release some frozen objects
+        {
+          List<GID> toUnfreeze = new ArrayList<>();
+          for (Map.Entry<GID, Integer> kv : frozenObjects.entrySet()) {
+            if (kv.getValue() < 0) {
+              toUnfreeze.add(kv.getKey());
+            } else {
+              kv.setValue(kv.getValue() - 1);
+            }
+          }
+          for (GID id : toUnfreeze) {
+            frozenObjects.remove(id);
+            log.debug("  released frozen object " + id);
+          }
+        }
       } catch (Throwable e) {
         // The instruction cannot be safely executed
         log.debug("  failed: " + e.getMessage());
@@ -324,7 +341,7 @@ public class ProgramSmith {
 
     @NonNull private final LangVM vm;
     @NonNull private final OracleInterpreter interpreter;
-    @NonNull private final GProgram program;
+    @NonNull private final Map<GID, Integer> frozenObjects;
 
     @Override
     public GInstruction visit(GProgram program) {
@@ -428,12 +445,27 @@ public class ProgramSmith {
 
     @Override
     public GInstruction visit(GMakeNonRootInstruction unused) {
-      GID rootId = currState().randomRootObject();
+      // Although it is allowed to make a frozen object non-root, we avoid doing so to
+      // try making the frozen object survive longer.
+      GID rootId =
+          currState().randomObject(o -> o.isRoot() && !frozenObjects.containsKey(o.getId()));
       if (rootId == null) {
         log.debug("Cannot make a root object non-root due to no root objects.");
         return null;
       }
       return new GMakeNonRootInstruction(rootId);
+    }
+
+    @Override
+    public GInstruction visit(GFreezeObjInstruction instruction) {
+      GID objectId = currState().randomStronglyReachableObject();
+      if (objectId == null) {
+        log.debug("Cannot freeze an object due to no strongly-reachable objects.");
+        return null;
+      }
+      int nStep = random.nextInt(16, 64);
+      frozenObjects.put(objectId, nStep);
+      return new GFreezeObjInstruction(objectId, nStep);
     }
 
     @Override
@@ -466,7 +498,8 @@ public class ProgramSmith {
       GID objectId =
           s.randomObject(
               o ->
-                  s.isStronglyReachable(o.getId())
+                  !frozenObjects.containsKey(o.getId())
+                      && s.isStronglyReachable(o.getId())
                       && s.getReferers(o.getId()).stream()
                           .allMatch(or -> s.isStronglyReachable(or.getId())));
       if (objectId == null) {
@@ -607,8 +640,13 @@ public class ProgramSmith {
     public GInstruction visit(GReplaceReferentInstruction unused) {
       // We restrict the referer and the new referent to be strongly reachable
       StateRandDecor s = currState();
+      // Although it is allowed to replace a frozen object if it is a referent, we avoid
+      // doing so to try making the frozen object survive longer.
       GID referenceId =
-          s.randomReference(reference -> s.isStronglyReachable(reference.getReferer()));
+          s.randomReference(
+              reference ->
+                  s.isStronglyReachable(reference.getReferer())
+                      && !frozenObjects.containsKey(reference.getReferent()));
       if (referenceId == null) {
         log.debug("Cannot replace a referent due to no suitable references.");
         return null;
@@ -696,8 +734,13 @@ public class ProgramSmith {
     public GInstruction visit(GRemoveRefInstruction unused) {
       // We restrict the referer to be strongly reachable
       StateRandDecor s = currState();
+      // Although it is allowed to remove a reference whose referent is a frozen object,
+      // we avoid doing so to try making the frozen object survive longer.
       GID referenceId =
-          s.randomReference(reference -> s.isStronglyReachable(reference.getReferer()));
+          s.randomReference(
+              reference ->
+                  s.isStronglyReachable(reference.getReferer())
+                      && !frozenObjects.containsKey(reference.getReferent()));
       if (referenceId == null) {
         log.debug("Cannot remove a reference due to no suitable candidates.");
         return null;
@@ -709,7 +752,14 @@ public class ProgramSmith {
     public GInstruction visit(GRemoveAllReferentsInstruction unused) {
       // We restrict the referer to be strongly reachable
       StateRandDecor s = currState();
-      GID refererId = s.randomObject(object -> s.isStronglyReachable(object.getId()));
+      // Although it is allowed to remove a frozen object if it is a referent,
+      // we avoid doing so to try making the frozen object survive longer.
+      GID refererId =
+          s.randomObject(
+              referer ->
+                  s.isStronglyReachable(referer.getId())
+                      && s.getReferents(referer.getId()).stream()
+                          .noneMatch(referent -> frozenObjects.containsKey(referent.getId())));
       if (refererId == null) {
         log.debug("Cannot remove all referents due to no suitable candidates.");
         return null;
@@ -815,6 +865,7 @@ public class ProgramSmith {
             0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
     fakeInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
     fakeInstructions.put(GMakeNonRootInstruction.class, new GMakeNonRootInstruction(new GID("_")));
+    fakeInstructions.put(GFreezeObjInstruction.class, new GFreezeObjInstruction(new GID("_"), 1));
     fakeInstructions.put(
         GCloneObjInstruction.class, new GCloneObjInstruction(new GID("_"), new GID("_"), "0"));
     fakeInstructions.put(GRemoveObjInstruction.class, new GRemoveObjInstruction(new GID("_")));

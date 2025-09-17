@@ -38,7 +38,7 @@ import lombok.experimental.FieldDefaults;
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
-@GIROpCode("make-root-obj-non-root")
+@GIROpCode("make-non-root")
 public class GMakeNonRootInstruction extends GInstruction {
   /** The ID of the root object that are about to make non-root. */
   @GIRInput(0)

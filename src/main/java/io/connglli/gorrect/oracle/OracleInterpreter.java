@@ -30,7 +30,10 @@ import io.connglli.gorrect.gir.inst.*;
 import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import lombok.NonNull;
 
 /**
@@ -40,30 +43,32 @@ import lombok.NonNull;
  * OracleHeap} are similar to those in GIR, but they are more memory-aware and more convenient. The
  * interpreter is used to execute a GIR program and simulate the change of the {@link GGraph}.
  */
-public class OracleInterpreter implements GProgramVisitor<Void> {
-
-  @SuppressWarnings("FieldCanBeLocal")
-  @NonNull
-  private final LangVM lvm;
+@SuppressWarnings("FieldCanBeLocal")
+public class OracleInterpreter {
 
   @NonNull private final GProgram program;
-
   @NonNull private final OracleHeap heap;
+  @NonNull private final Impl impl;
 
   public OracleInterpreter(@NonNull LangVM lvm, @NonNull GProgram program) {
-    this.lvm = lvm;
     this.program = program;
     this.heap = new OracleHeap(lvm);
+    this.impl = new Impl();
+  }
+
+  public LangVM getLangVM() {
+    return heap.getLvm();
   }
 
   public void interpret() {
-    program.accept(this);
+    program.accept(this.impl);
     heap.clean();
   }
 
   public void interpret(GInstruction... instructions) {
     for (GInstruction instruction : instructions) {
-      instruction.accept(this);
+      instruction.accept(this.impl);
+      this.impl.updateFrozonObjects();
     }
     heap.clean();
   }
@@ -72,234 +77,267 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
     return heap.getState();
   }
 
-  @Override
-  public Void visit(GProgram program) {
-    program.getConfiguration().accept(this);
-    for (GInstruction instruction : program.getInstructions()) {
-      instruction.accept(this);
+  protected class Impl implements GProgramVisitor<Void> {
+    private final Map<GID, Integer> frozenObjects = new HashMap<>();
+
+    public void updateFrozonObjects() {
+      List<GID> toUnfreeze = new ArrayList<>();
+      for (Map.Entry<GID, Integer> kv : frozenObjects.entrySet()) {
+        if (kv.getValue() < 0) {
+          toUnfreeze.add(kv.getKey());
+        } else {
+          kv.setValue(kv.getValue() - 1);
+        }
+      }
+      for (GID id : toUnfreeze) {
+        frozenObjects.remove(id);
+      }
     }
-    return null;
-  }
 
-  @Override
-  public Void visit(GSetHeapInstruction instruction) {
-    heap.initialize(instruction.getInitState());
-    return null;
-  }
-
-  @Override
-  public Void visit(GForceAnyGCInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.compact();
-    return null;
-  }
-
-  @Override
-  public Void visit(GRunOutOfMemoryInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    // An OOM does not add new objects to our heap, merely triggers
-    // a GC to remove all soft references should be cleared.
-    heap.stressCompact();
-    return null;
-  }
-
-  @Override
-  public Void visit(GFragmentHeapInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    List<Long> objectSizes = instruction.getObjectSizes();
-    List<GID> objectIDs = instruction.getObjectIDs();
-    for (int i = 0; i < instruction.getCount(); i++) {
-      heap.allocRootObject(objectIDs.get(i), objectSizes.get(i));
+    @Override
+    public Void visit(GProgram program) {
+      program.getConfiguration().accept(this);
+      for (GInstruction instruction : program.getInstructions()) {
+        instruction.accept(this);
+        updateFrozonObjects();
+      }
+      return null;
     }
-    return null;
-  }
 
-  @Override
-  public Void visit(GAddRootObjInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());
-    return null;
-  }
-
-  @Override
-  public Void visit(GAddNonRootObjInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    OracleObject referentObject =
-        heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
-    OracleObject refererObject = heap.getObject(instruction.getRefererId());
-    refererObject.reference(
-        instruction.getReferenceId(),
-        referentObject,
-        instruction.getReferenceType(),
-        instruction.getIsVolatile());
-    return null;
-  }
-
-  @Override
-  public Void visit(GMakeRootInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getNonRootObject(instruction.getObjectId()).toRoot();
-    return null;
-  }
-
-  @Override
-  public Void visit(GMakeNonRootInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getRootObject(instruction.getObjectId()).toNonRoot();
-    heap.clean();
-    return null;
-  }
-
-  @Override
-  public Void visit(GCloneObjInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    OracleObject object = heap.getObject(instruction.getObjectId());
-    OracleObject clone =
-        heap.allocateObject(instruction.getCloneId(), object.getSize(), object.getType());
-    object
-        .getReferents()
-        .forEach(
-            referent -> {
-              OracleReference reference = heap.getReference(object, referent);
-              clone.reference(
-                  new GID(reference.getId() + instruction.getReferenceSuffix()),
-                  referent,
-                  reference.getType(),
-                  reference.isVolatile());
-            });
-    object
-        .getReferers()
-        .forEach(
-            referer -> {
-              OracleReference reference = heap.getReference(referer, object);
-              referer.reference(
-                  new GID(reference.getId() + instruction.getReferenceSuffix()),
-                  clone,
-                  reference.getType(),
-                  reference.isVolatile());
-            });
-    return null;
-  }
-
-  @Override
-  public Void visit(GRemoveObjInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getObject(instruction.getObjectId()).free();
-    heap.clean();
-    return null;
-  }
-
-  @Override
-  public Void visit(GAddStrongRefInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getObject(instruction.getRefererId())
-        .strongReference(
-            instruction.getReferenceId(),
-            heap.getObject(instruction.getReferentId()),
-            instruction.getIsVolatile());
-    return null;
-  }
-
-  @Override
-  public Void visit(GAddSoftRefInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getObject(instruction.getRefererId())
-        .softReference(
-            instruction.getReferenceId(),
-            heap.getObject(instruction.getReferentId()),
-            instruction.getIsVolatile());
-    return null;
-  }
-
-  @Override
-  public Void visit(GAddWeakRefInstruction instruction) {
-    heap.getObject(instruction.getRefererId())
-        .weakReference(
-            instruction.getReferenceId(),
-            heap.getObject(instruction.getReferentId()),
-            instruction.getIsVolatile());
-    return null;
-  }
-
-  @Override
-  public Void visit(GAddFaninRefsInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    OracleObject referent = heap.getObject(instruction.getReferentId());
-    List<GID> refererIds = instruction.getRefererIds();
-    List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
-    List<Boolean> isVolatile = instruction.getIsVolatile();
-    List<GID> referenceIds = instruction.getReferenceIds();
-    for (int i = 0; i < refererIds.size(); i++) {
-      heap.getObject(refererIds.get(i))
-          .reference(referenceIds.get(i), referent, referenceTypes.get(i), isVolatile.get(i));
+    @Override
+    public Void visit(GSetHeapInstruction instruction) {
+      heap.initialize(instruction.getInitState());
+      return null;
     }
-    return null;
-  }
 
-  @Override
-  public Void visit(GAddFanoutRefsInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    OracleObject referer = heap.getObject(instruction.getRefererId());
-    List<GID> referentIds = instruction.getReferentIds();
-    List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
-    List<Boolean> isVolatile = instruction.getIsVolatile();
-    List<GID> referenceIds = instruction.getReferenceIds();
-    for (int i = 0; i < referentIds.size(); i++) {
-      referer.reference(
-          referenceIds.get(i),
-          heap.getObject(referentIds.get(i)),
-          referenceTypes.get(i),
-          isVolatile.get(i));
+    @Override
+    public Void visit(GForceAnyGCInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.compact();
+      return null;
     }
-    return null;
-  }
 
-  @Override
-  public Void visit(GStrengthenRefInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getReference(instruction.getReferenceId()).strengthen();
-    return null;
-  }
+    @Override
+    public Void visit(GRunOutOfMemoryInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      // An OOM does not add new objects to our heap, merely triggers
+      // a GC to remove all soft references should be cleared.
+      heap.stressCompact();
+      return null;
+    }
 
-  @Override
-  public Void visit(GSoftenRefInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getReference(instruction.getReferenceId()).soften();
-    return null;
-  }
+    @Override
+    public Void visit(GFragmentHeapInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      List<Long> objectSizes = instruction.getObjectSizes();
+      List<GID> objectIDs = instruction.getObjectIDs();
+      for (int i = 0; i < instruction.getCount(); i++) {
+        heap.allocRootObject(objectIDs.get(i), objectSizes.get(i));
+      }
+      return null;
+    }
 
-  @Override
-  public Void visit(GReplaceReferentInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getReference(instruction.getReferenceId())
-        .redirect(heap.getObject(instruction.getNewReferentId()));
-    heap.clean();
-    return null;
-  }
+    @Override
+    public Void visit(GAddRootObjInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());
+      return null;
+    }
 
-  @Override
-  public Void visit(GSwapReferentsInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    OracleReference ref1 = heap.getReference(instruction.getReferenceId1());
-    OracleReference ref2 = heap.getReference(instruction.getReferenceId2());
-    ref1.redirect(ref2.getReferent());
-    ref2.redirect(ref1.getReferent());
-    return null;
-  }
+    @Override
+    public Void visit(GAddNonRootObjInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleObject referentObject =
+          heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
+      OracleObject refererObject = heap.getObject(instruction.getRefererId());
+      refererObject.reference(
+          instruction.getReferenceId(),
+          referentObject,
+          instruction.getReferenceType(),
+          instruction.getIsVolatile());
+      return null;
+    }
 
-  @Override
-  public Void visit(GRemoveRefInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getReference(instruction.getReferenceId()).unlink();
-    heap.clean();
-    return null;
-  }
+    @Override
+    public Void visit(GMakeRootInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getNonRootObject(instruction.getObjectId()).toRoot();
+      return null;
+    }
 
-  @Override
-  public Void visit(GRemoveAllReferentsInstruction instruction) {
-    instruction.checkValidity(heap.getGraph());
-    heap.getObject(instruction.getRefererId()).getReferences().forEach(OracleReference::unlink);
-    heap.clean();
-    return null;
+    @Override
+    public Void visit(GMakeNonRootInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getRootObject(instruction.getObjectId()).toNonRoot();
+      heap.clean();
+      return null;
+    }
+
+    @Override
+    public Void visit(GFreezeObjInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      frozenObjects.put(instruction.getObjectId(), instruction.getNStep());
+      return null;
+    }
+
+    @Override
+    public Void visit(GCloneObjInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleObject object = heap.getObject(instruction.getObjectId());
+      OracleObject clone =
+          heap.allocateObject(instruction.getCloneId(), object.getSize(), object.getType());
+      object
+          .getReferents()
+          .forEach(
+              referent -> {
+                OracleReference reference = heap.getReference(object, referent);
+                clone.reference(
+                    new GID(reference.getId() + instruction.getReferenceSuffix()),
+                    referent,
+                    reference.getType(),
+                    reference.isVolatile());
+              });
+      object
+          .getReferers()
+          .forEach(
+              referer -> {
+                OracleReference reference = heap.getReference(referer, object);
+                referer.reference(
+                    new GID(reference.getId() + instruction.getReferenceSuffix()),
+                    clone,
+                    reference.getType(),
+                    reference.isVolatile());
+              });
+      return null;
+    }
+
+    @Override
+    public Void visit(GRemoveObjInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (frozenObjects.containsKey(instruction.getObjectId())) {
+        throw new IllegalStateException(
+            "Trying to remove a frozen object with id="
+                + instruction.getObjectId()
+                + ", steps="
+                + frozenObjects.get(instruction.getObjectId()));
+      }
+      heap.getObject(instruction.getObjectId()).free();
+      heap.clean();
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddStrongRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getObject(instruction.getRefererId())
+          .strongReference(
+              instruction.getReferenceId(),
+              heap.getObject(instruction.getReferentId()),
+              instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddSoftRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getObject(instruction.getRefererId())
+          .softReference(
+              instruction.getReferenceId(),
+              heap.getObject(instruction.getReferentId()),
+              instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddWeakRefInstruction instruction) {
+      heap.getObject(instruction.getRefererId())
+          .weakReference(
+              instruction.getReferenceId(),
+              heap.getObject(instruction.getReferentId()),
+              instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddFaninRefsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleObject referent = heap.getObject(instruction.getReferentId());
+      List<GID> refererIds = instruction.getRefererIds();
+      List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+      List<Boolean> isVolatile = instruction.getIsVolatile();
+      List<GID> referenceIds = instruction.getReferenceIds();
+      for (int i = 0; i < refererIds.size(); i++) {
+        heap.getObject(refererIds.get(i))
+            .reference(referenceIds.get(i), referent, referenceTypes.get(i), isVolatile.get(i));
+      }
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddFanoutRefsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleObject referer = heap.getObject(instruction.getRefererId());
+      List<GID> referentIds = instruction.getReferentIds();
+      List<GReference.Type> referenceTypes = instruction.getReferenceTypes();
+      List<Boolean> isVolatile = instruction.getIsVolatile();
+      List<GID> referenceIds = instruction.getReferenceIds();
+      for (int i = 0; i < referentIds.size(); i++) {
+        referer.reference(
+            referenceIds.get(i),
+            heap.getObject(referentIds.get(i)),
+            referenceTypes.get(i),
+            isVolatile.get(i));
+      }
+      return null;
+    }
+
+    @Override
+    public Void visit(GStrengthenRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getReference(instruction.getReferenceId()).strengthen();
+      return null;
+    }
+
+    @Override
+    public Void visit(GSoftenRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getReference(instruction.getReferenceId()).soften();
+      return null;
+    }
+
+    @Override
+    public Void visit(GReplaceReferentInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getReference(instruction.getReferenceId())
+          .redirect(heap.getObject(instruction.getNewReferentId()));
+      heap.clean();
+      return null;
+    }
+
+    @Override
+    public Void visit(GSwapReferentsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleReference ref1 = heap.getReference(instruction.getReferenceId1());
+      OracleReference ref2 = heap.getReference(instruction.getReferenceId2());
+      ref1.redirect(ref2.getReferent());
+      ref2.redirect(ref1.getReferent());
+      return null;
+    }
+
+    @Override
+    public Void visit(GRemoveRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getReference(instruction.getReferenceId()).unlink();
+      heap.clean();
+      return null;
+    }
+
+    @Override
+    public Void visit(GRemoveAllReferentsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      heap.getObject(instruction.getRefererId()).getReferences().forEach(OracleReference::unlink);
+      heap.clean();
+      return null;
+    }
   }
 }

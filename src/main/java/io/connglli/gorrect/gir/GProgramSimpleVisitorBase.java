@@ -85,6 +85,11 @@ public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T>
   }
 
   @Override
+  public T visit(GFreezeObjInstruction instruction) {
+    return defaultVisit(instruction);
+  }
+
+  @Override
   public T visit(GRemoveObjInstruction instruction) {
     return defaultVisit(instruction);
   }

@@ -179,6 +179,13 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GFreezeObjInstruction instruction) {
+      instruction.checkValidity(getState());
+      // Do nothing. Frozen objects do not influence the generation of the heap.
+      return null;
+    }
+
     public Void visit(GCloneObjInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject object = heap.getObject(instruction.getObjectId());
