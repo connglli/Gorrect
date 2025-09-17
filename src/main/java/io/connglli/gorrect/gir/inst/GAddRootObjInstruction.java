@@ -58,7 +58,6 @@ public class GAddRootObjInstruction extends GInstruction {
 
   @Override
   public void checkValidity(GGraph graph) {
-    super.checkValidity(graph);
     if (objectSize < 0) {
       throw new InvalidInputException(
           "Object size must be non-negative, but got "
@@ -67,5 +66,6 @@ public class GAddRootObjInstruction extends GInstruction {
               + this
               + ")");
     }
+    super.checkValidity(graph);
   }
 }

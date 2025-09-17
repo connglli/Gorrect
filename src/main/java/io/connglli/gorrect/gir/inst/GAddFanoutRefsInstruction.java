@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.model.GGraph;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GReference;
 import java.util.List;
@@ -74,5 +75,29 @@ public class GAddFanoutRefsInstruction extends GInstruction {
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {
     return visitor.visit(this);
+  }
+
+  @Override
+  public void checkValidity(GGraph graph) {
+    if (referentIds.isEmpty()) {
+      throw new InvalidInputException(
+          "There must be at least one referent (instruction=%s)".formatted(this));
+    }
+    if (referentIds.size() == referenceTypes.size()) {
+      throw new InvalidInputException(
+          "The number of referents must match the number of reference types (instruction=%s)"
+              .formatted(this));
+    }
+    if (referentIds.size() == isVolatile.size()) {
+      throw new InvalidInputException(
+          "The number of referents must match the size of isVolatile array (instruction=%s)"
+              .formatted(this));
+    }
+    if (referentIds.size() == referenceIds.size()) {
+      throw new InvalidInputException(
+          "The number of referents must match the number of references (instruction=%s)"
+              .formatted(this));
+    }
+    super.checkValidity(graph);
   }
 }
