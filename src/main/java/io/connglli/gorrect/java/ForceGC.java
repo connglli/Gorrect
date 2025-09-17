@@ -113,7 +113,7 @@ class ForceGC {
       assert softRefs == null
           : "Should have cleared all objects in soft references array, i.e., softRefs";
     }
-    return true;
+    return forceGC();
   }
 
   private static Object memoryPressureHolder = null; // To prevent compiler optimization

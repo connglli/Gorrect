@@ -26,6 +26,7 @@ package io.connglli.gorrect.java.oracle;
 
 import io.connglli.gorrect.oracle.LangVM;
 import io.connglli.gorrect.utility.Assert;
+import io.connglli.gorrect.utility.MemorySize;
 import java.io.File;
 import java.io.IOException;
 import java.io.PrintStream;
@@ -150,5 +151,10 @@ public abstract class JavaVM extends LangVM {
   protected void assertToolExists(String toolName) {
     String toolPath = getToolExecutablePath(toolName);
     Assert.set(Files.exists(Path.of(toolPath)), "Required tool not found at " + toolPath);
+  }
+
+  @Override
+  public long estimatedHeapReservedBytes() {
+    return MemorySize.parse("150MB");
   }
 }

@@ -46,6 +46,11 @@ public class NoOpVM extends LangVM {
   }
 
   @Override
+  public long estimatedHeapReservedBytes() {
+    return 0;
+  }
+
+  @Override
   public long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize) {
     return requestedSize;
   }

@@ -24,10 +24,7 @@
 
 package io.connglli.gorrect.oracle;
 
-import io.connglli.gorrect.gir.model.GGraph;
-import io.connglli.gorrect.gir.model.GID;
-import io.connglli.gorrect.gir.model.GObject;
-import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.gir.model.*;
 import io.connglli.gorrect.utility.Assert;
 import java.util.Set;
 import java.util.stream.Collectors;

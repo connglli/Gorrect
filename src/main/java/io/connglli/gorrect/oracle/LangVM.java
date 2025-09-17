@@ -28,6 +28,7 @@ import io.connglli.gorrect.gir.GProgram;
 import io.connglli.gorrect.gir.model.GID;
 import io.connglli.gorrect.gir.model.GObject;
 import io.connglli.gorrect.gir.model.GReference;
+import io.connglli.gorrect.utility.MemorySize;
 import java.util.List;
 import lombok.Getter;
 import lombok.NonNull;
@@ -56,12 +57,20 @@ public abstract class LangVM {
   @Getter protected long heapUnusedBytes;
 
   public LangVM(long heapCapacity) {
+    if (heapCapacity <= 0) {
+      throw new OutOfMemError("Heap capacity must be positive, got " + heapCapacity);
+    }
     this.heapCapacity = heapCapacity;
-    this.heapUnusedBytes = heapCapacity;
+    this.heapUnusedBytes = heapCapacity - estimatedHeapReservedBytes();
+    if (this.heapUnusedBytes <= 0) {
+      throw new OutOfMemError(
+          "There're no memories left after we reserve %s memories. Please increase the heap capacity."
+              .formatted(MemorySize.toString(estimatedHeapReservedBytes())));
+    }
   }
 
   public void reset() {
-    this.heapUnusedBytes = heapCapacity;
+    this.heapUnusedBytes = heapCapacity - estimatedHeapReservedBytes();
   }
 
   public abstract LangVM clone();
@@ -69,6 +78,8 @@ public abstract class LangVM {
   // -================================================
   // - Heap Helper Methods
   // -================================================
+
+  public abstract long estimatedHeapReservedBytes();
 
   public abstract long estimateNewObjectHeapSize(@NonNull GID objectId, long requestedSize);
 

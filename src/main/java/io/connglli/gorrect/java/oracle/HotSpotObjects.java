@@ -131,6 +131,13 @@ public class HotSpotObjects {
     return layout.layout(ClassData.parseInstance(object)).instanceSize();
   }
 
+  /// Compute the total size of an object including all reachable objects.
+  public long computeDeepSize(Object object) {
+    // TODO: Consider rewrite GraphLayout.parseInstance()
+    Assert.panic("Not implemented yet");
+    return -1;
+  }
+
   /// Align the size to the object alignment.
   public long align(long size) {
     long am = model.objectAlignment() - 1;

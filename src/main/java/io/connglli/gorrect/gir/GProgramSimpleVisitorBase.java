@@ -60,6 +60,11 @@ public abstract class GProgramSimpleVisitorBase<T> implements GProgramVisitor<T>
   }
 
   @Override
+  public T visit(GFragmentHeapInstruction instruction) {
+    return defaultVisit(instruction);
+  }
+
+  @Override
   public T visit(GAddRootObjInstruction instruction) {
     return defaultVisit(instruction);
   }

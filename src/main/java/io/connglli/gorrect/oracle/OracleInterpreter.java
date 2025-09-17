@@ -105,6 +105,17 @@ public class OracleInterpreter implements GProgramVisitor<Void> {
   }
 
   @Override
+  public Void visit(GFragmentHeapInstruction instruction) {
+    instruction.checkValidity(heap.getGraph());
+    List<Long> objectSizes = instruction.getObjectSizes();
+    List<GID> objectIDs = instruction.getObjectIDs();
+    for (int i = 0; i < instruction.getCount(); i++) {
+      heap.allocRootObject(objectIDs.get(i), objectSizes.get(i));
+    }
+    return null;
+  }
+
+  @Override
   public Void visit(GAddRootObjInstruction instruction) {
     instruction.checkValidity(heap.getGraph());
     heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());

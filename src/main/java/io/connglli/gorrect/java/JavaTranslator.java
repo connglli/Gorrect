@@ -136,6 +136,17 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GFragmentHeapInstruction instruction) {
+      instruction.checkValidity(getState());
+      List<Long> objectSizes = instruction.getObjectSizes();
+      List<GID> objectIDs = instruction.getObjectIDs();
+      for (int i = 0; i < instruction.getCount(); i++) {
+        heap.allocRootWithoutInitializer(objectIDs.get(i), objectSizes.get(i));
+      }
+      return null;
+    }
+
     public Void visit(GAddRootObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.allocRootWithoutInitializer(instruction.getObjectId(), instruction.getObjectSize());

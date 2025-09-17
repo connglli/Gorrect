@@ -202,6 +202,7 @@ public class ProgramSmith {
   static {
     instWeights.put(GForceAnyGCInstruction.class, 10);
     instWeights.put(GRunOutOfMemoryInstruction.class, 2);
+    instWeights.put(GFragmentHeapInstruction.class, 3);
     instWeights.put(GAddRootObjInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
     instWeights.put(GMakeRootInstruction.class, 20);
@@ -241,9 +242,11 @@ public class ProgramSmith {
   public GProgram craft(LangVM vm, @NonNull GGraph initState) {
     stats.reset();
     vm.reset(); // Reset the VM to a clean state
+    log.debug("Reset the VM (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     stats.generationTimeMillis = System.currentTimeMillis();
     GProgram program = new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), initState));
     OracleInterpreter interpreter = new OracleInterpreter(vm, program);
+    log.debug("Setup initial state (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     SmithImpl smith = new SmithImpl(vm, interpreter, program);
     int numInstructions = random.nextInt(config.minInstructions, config.maxInstructions + 1);
@@ -264,7 +267,11 @@ public class ProgramSmith {
         instClazz = random.nextItem(instWeights);
       }
       GInstruction mock = mockInstruction(instClazz);
-      log.debug("Generating instruction: " + mock.getOpCode());
+      log.debug(
+          "Generating instruction (heap="
+              + MemorySize.toString(vm.getHeapUnusedBytes())
+              + "): "
+              + mock.getOpCode());
       GInstruction instruction = mock.accept(smith);
       if (instruction == null) {
         stats.numTotalGeneration++;
@@ -339,6 +346,40 @@ public class ProgramSmith {
     @Override
     public GInstruction visit(GRunOutOfMemoryInstruction instruction) {
       return new GRunOutOfMemoryInstruction();
+    }
+
+    @Override
+    public GInstruction visit(GFragmentHeapInstruction instruction) {
+      long takenBytes = (long) (vm.getHeapUnusedBytes() * .75);
+      int minNumObjects = 10, maxNumObjects = 32;
+
+      // We don't respect the user specified max object size, as we want to fragment the heap
+      long minSize = Math.max(takenBytes / maxNumObjects, MemorySize.of(16, MemorySize.Unit.MB));
+      long maxSize = Math.min(MemorySize.of(128, MemorySize.Unit.MB), takenBytes / minNumObjects);
+      if (maxSize < minSize) {
+        maxSize = minSize;
+      }
+      long aveSize = (minSize + maxSize) / 2;
+
+      // Allocate objects until we run out of takenBytes or reach the estimated number of objects
+      int estNumObjects = (int) (takenBytes / aveSize);
+      long cumulatedSize = 0;
+      List<Long> objectSizes = new ArrayList<>(estNumObjects);
+      while (cumulatedSize < takenBytes && objectSizes.size() < estNumObjects) {
+        long currentSize = random.nextLong(minSize, maxSize + 1);
+        if (cumulatedSize + currentSize > takenBytes) {
+          currentSize = takenBytes - cumulatedSize;
+          cumulatedSize += currentSize;
+        }
+        objectSizes.add(currentSize);
+      }
+
+      List<GID> objectIDs = new ArrayList<>(objectSizes.size());
+      for (int i = 0; i < objectSizes.size(); i++) {
+        objectIDs.add(objectIdSmith.next());
+      }
+
+      return new GFragmentHeapInstruction(objectSizes.size(), objectSizes, objectIDs);
     }
 
     @Override
@@ -763,6 +804,9 @@ public class ProgramSmith {
   static {
     fakeInstructions.put(GForceAnyGCInstruction.class, new GForceAnyGCInstruction());
     fakeInstructions.put(GRunOutOfMemoryInstruction.class, new GRunOutOfMemoryInstruction());
+    fakeInstructions.put(
+        GFragmentHeapInstruction.class,
+        new GFragmentHeapInstruction(1, List.of(1L), List.of(new GID("_"))));
     fakeInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
     fakeInstructions.put(
