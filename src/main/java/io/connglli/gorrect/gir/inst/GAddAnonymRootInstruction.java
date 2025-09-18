@@ -25,7 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
-import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReinterpretable;
 import io.connglli.gorrect.gir.model.GGraph;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
@@ -43,7 +43,7 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("add-anonym-root")
-public class GAddAnonymRootInstruction extends GInstruction implements GIRMarkReenterable {
+public class GAddAnonymRootInstruction extends GInstruction implements GIRMarkReinterpretable {
 
   /** The size in bytes of the new anonymous root to be created. */
   @GIRInput(0)

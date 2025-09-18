@@ -29,4 +29,4 @@ package io.connglli.gorrect.gir.inst.marks;
  * interpreter/translator of the instruction can assume that the effects would be definitely applied
  * after executing the instruction.
  */
-public interface GIRMarkUserEnsuredEffect {}
+public interface GIRMarkUserEnsuredEffect extends GIRMark {}

@@ -25,21 +25,23 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
-import io.connglli.gorrect.gir.inst.marks.GIRMarkReenterable;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReinterpretable;
 import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /**
  * GOutOfMemoryInstruction represents an instruction to stress test memory by making the language
  * virtual machine throw an out of memory error. The requirement for this instruction is that:
- * strongly reachable objects before executing us remain strongly-reachable after execution.
+ * strongly reachable objects before executing this instruction remain strongly-reachable after
+ * execution, whereas softly- and weakly-reachable objects before executing this instruction become
+ * unreachable and get cleared.
  */
 @RequiredArgsConstructor
 @FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("run-out-of-memory")
-public class GRunOutOfMemoryInstruction extends GInstruction implements GIRMarkReenterable {
+public class GRunOutOfMemoryInstruction extends GInstruction implements GIRMarkReinterpretable {
 
   @Override
   public <T> T accept(GProgramVisitor<T> visitor) {

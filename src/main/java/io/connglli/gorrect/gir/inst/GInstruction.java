@@ -56,6 +56,27 @@ import lombok.Setter;
  * InvalidInputException} or {@link InvalidOutputException} will be thrown. For limited memory, some
  * instruction may fail due to for example weakly/softly reachable objects are garbage collected. In
  * these cases, an exception will be thrown.
+ *
+ * <p>Other properties:<br>
+ * * An instruction is by default graph-effectful as it modifies the object graph. If an instruction
+ * is free of graph effect, it should be marked with {@link GIRMarkNoGraphEffect}.<br>
+ * * For instructions that have effect on the object graph, the effect should be guaranteed by the
+ * interpreter in most cases. However, there're instructions that have graph effect yet the effect
+ * is instead ensured by the user, such instructions should be marked with {@link
+ * GIRMarkUserEnsuredEffect}. <br>
+ * * Most instructions are not re-enterable (i.e., cannot be executed multiple times). This is
+ * because objects and references are uniquely identified by their names in the graph, and
+ * adding/removing/altering name-conflict objects/references is not allowed by our GGraph model.
+ * Instructions that can be re-entered should be marked with {@link GIRMarkInterpretable}.<br>
+ * * Interpreting some instruction may fail if the graph is not properly guarded. For instructions
+ * that should be guarded, they should be marked with {@link GIRMarkRequiresGuard}, and the types
+ * used to guard the instruction should be provided. <br>
+ * * Some instructions are reversible, i.e., they have a reverse instruction that can revert the
+ * effect of the original instruction. Such instructions should be marked with {@link
+ * GIRMarkReversible}, and the reverse instruction should be provided. Note that the reverse may not
+ * be the exact inverse of the original instruction, e.g., an instruction that adds an object may
+ * have a reverse instruction that removes the object, but the reverse instruction may fail if the
+ * object has been modified after being added. <br>
  */
 public abstract class GInstruction {
 

@@ -25,6 +25,7 @@
 package io.connglli.gorrect.gir.inst;
 
 import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReinterpretable;
 import io.connglli.gorrect.gir.inst.marks.GIRMarkUserEnsuredEffect;
 import io.connglli.gorrect.gir.model.GGraph;
 import java.util.List;
@@ -42,7 +43,8 @@ import lombok.experimental.FieldDefaults;
 @Getter
 @EqualsAndHashCode(callSuper = true)
 @GIROpCode("fragment-heap")
-public class GFragmentHeapInstruction extends GInstruction implements GIRMarkUserEnsuredEffect {
+public class GFragmentHeapInstruction extends GInstruction
+    implements GIRMarkUserEnsuredEffect, GIRMarkReinterpretable {
 
   /** The number of objects to be allocated. */
   @GIRInput(0)

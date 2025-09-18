@@ -24,10 +24,10 @@
 
 package io.connglli.gorrect.gir.inst.marks;
 
-/**
- * This is a marker indicating that the instruction can be re-entered, i.e., can be executed
- * multiple times. Indeed, most instructions are not re-enterable, e.g., an GAddRootObjInstruction
- * cannot be re-executed because it an object with the same name already exists; adding a
- * name-conflict object is not allowed by our GGraph model.
- */
-public interface GIRMarkReenterable {}
+import java.util.List;
+
+public interface GIRMarkRequiresGuard extends GIRMark {
+
+  /// The full-qualified names of the types used to guard the instruction.
+  List<String> getGuardedTypes();
+}
