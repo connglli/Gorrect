@@ -34,7 +34,6 @@ import io.connglli.gorrect.oracle.OracleInterpreter;
 import io.connglli.gorrect.utility.*;
 import java.util.ArrayList;
 import java.util.List;
-import lombok.Getter;
 import lombok.NonNull;
 
 public class JavaTranslator {
@@ -42,21 +41,19 @@ public class JavaTranslator {
 
   public static final String HEAP_DUMP_SIGNAL = "<GORRECT_HEAP_DUMP_SIGNAL>";
 
-  @Getter @NonNull private final GProgram program;
   @NonNull private final GeneratedHeap heap;
   @NonNull private final Impl impl;
 
-  public JavaTranslator(@NonNull GProgram program) {
-    this(program, true);
+  public JavaTranslator() {
+    this(true);
   }
 
-  public JavaTranslator(@NonNull GProgram program, boolean strict) {
-    this.program = program;
+  public JavaTranslator(boolean strict) {
     this.heap = new GeneratedHeap(strict);
     this.impl = new Impl();
   }
 
-  public void translate() {
+  public void translate(@NonNull GProgram program) {
     program.accept(this.impl);
     heap.clean(/* appGCStmt= */ true);
   }

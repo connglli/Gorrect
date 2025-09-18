@@ -48,12 +48,10 @@ import lombok.NonNull;
 @SuppressWarnings("FieldCanBeLocal")
 public class OracleInterpreter {
 
-  @NonNull private final GProgram program;
   @NonNull private final OracleHeap heap;
   @NonNull private final Impl impl;
 
-  public OracleInterpreter(@NonNull LangVM lvm, @NonNull GProgram program) {
-    this.program = program;
+  public OracleInterpreter(@NonNull LangVM lvm) {
     this.heap = new OracleHeap(lvm);
     this.impl = new Impl();
   }
@@ -62,20 +60,15 @@ public class OracleInterpreter {
     return heap.getLvm();
   }
 
-  public void interpret() {
-    program.accept(this.impl);
-    heap.clean();
+  public void interpret(@NonNull GProgram program) {
+    this.impl.interpret(program);
   }
 
-  public void interpret(GInstruction... instructions) {
-    for (GInstruction instruction : instructions) {
-      instruction.accept(this.impl);
-      this.impl.updateFrozonObjects();
-    }
-    heap.clean();
+  public void interpret(@NonNull GInstruction instruction) {
+    this.impl.interpret(instruction);
   }
 
-  public GGraph getState() {
+  public @NonNull GGraph getState() {
     return heap.getState();
   }
 
@@ -117,6 +110,16 @@ public class OracleInterpreter {
   protected class Impl implements GProgramVisitor<Void> {
     private final Map<GID, Integer> frozenObjects = new HashMap<>();
 
+    public void interpret(@NonNull GProgram program) {
+      program.accept(this);
+      heap.clean();
+    }
+
+    public void interpret(@NonNull GInstruction instruction) {
+      instruction.accept(this);
+      updateFrozonObjects();
+    }
+
     public void updateFrozonObjects() {
       List<GID> toUnfreeze = new ArrayList<>();
       for (Map.Entry<GID, Integer> kv : frozenObjects.entrySet()) {
@@ -133,10 +136,9 @@ public class OracleInterpreter {
 
     @Override
     public Void visit(GProgram program) {
-      program.getConfiguration().accept(this);
+      interpret(program.getConfiguration());
       for (GInstruction instruction : program.getInstructions()) {
-        instruction.accept(this);
-        updateFrozonObjects();
+        interpret(instruction);
       }
       return null;
     }

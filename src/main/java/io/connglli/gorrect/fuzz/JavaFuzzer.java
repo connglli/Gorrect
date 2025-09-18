@@ -435,8 +435,8 @@ public class JavaFuzzer {
       // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
       log.info("Interpret the GIR using the Oracle Interpreter ...");
       JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
-      OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm, program);
-      interpreter.interpret();
+      OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm);
+      interpreter.interpret(program);
 
       GGraph oracleState = interpreter.getState();
       log.info("Succeeded. The interpreter stopped with the following final state:");
@@ -444,8 +444,8 @@ public class JavaFuzzer {
 
       // Translate the Gorrect IR program to Java code and obtain the interpreter state.
       log.info("Generating the Java program by translating the GIR program ...");
-      JavaTranslator translator = new JavaTranslator(program);
-      translator.translate();
+      JavaTranslator translator = new JavaTranslator();
+      translator.translate(program);
 
       GGraph transState = translator.getState();
       log.info("Succeeded. The translator stopped with the following final state:");

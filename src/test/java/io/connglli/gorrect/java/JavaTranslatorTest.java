@@ -60,8 +60,8 @@ public class JavaTranslatorTest {
     program.addInstruction(addRootObj);
 
     // Execute the program
-    JavaTranslator interpreter = new JavaTranslator(program);
-    interpreter.translate();
+    JavaTranslator interpreter = new JavaTranslator();
+    interpreter.translate(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -95,8 +95,8 @@ public class JavaTranslatorTest {
     program.addInstruction(new GRemoveObjInstruction(r2));
 
     // Execute the program
-    JavaTranslator interpreter = new JavaTranslator(program, false);
-    interpreter.translate();
+    JavaTranslator interpreter = new JavaTranslator(false);
+    interpreter.translate(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -137,8 +137,8 @@ public class JavaTranslatorTest {
     program.addInstruction(new GAddStrongRefInstruction(o2, o1, false, e_o2_o1));
 
     // Execute the program
-    JavaTranslator interpreter = new JavaTranslator(program);
-    interpreter.translate();
+    JavaTranslator interpreter = new JavaTranslator();
+    interpreter.translate(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -170,8 +170,8 @@ public class JavaTranslatorTest {
             300L * 1024 * 1024, r1, GReference.Type.SOFT, false, o1, e_r1_o1));
 
     // Execute the program
-    JavaTranslator interpreter = new JavaTranslator(program);
-    interpreter.translate();
+    JavaTranslator interpreter = new JavaTranslator();
+    interpreter.translate(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -252,8 +252,8 @@ public class JavaTranslatorTest {
     program.addInstruction(new GCloneObjInstruction(o2, o2c, "__cloned"));
 
     // Execute the program
-    JavaTranslator interpreter = new JavaTranslator(program, false);
-    interpreter.translate();
+    JavaTranslator interpreter = new JavaTranslator(false);
+    interpreter.translate(program);
 
     GGraph intermediateState = interpreter.getState();
     assertFalse(intermediateState.hasObject(o1), "Expected o1 to be unreachable");
@@ -282,8 +282,8 @@ public class JavaTranslatorTest {
     // Remove reference
     newProgram.addInstruction(new GRemoveRefInstruction(new GID("ref-r2_o2")));
 
-    JavaTranslator newInterpreter = new JavaTranslator(newProgram, false);
-    newInterpreter.translate();
+    JavaTranslator newInterpreter = new JavaTranslator(false);
+    newInterpreter.translate(newProgram);
 
     GGraph finalState = newInterpreter.getState();
     stronglyReachable = finalState.getStronglyReachableObjects();

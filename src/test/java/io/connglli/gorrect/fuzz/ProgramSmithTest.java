@@ -400,7 +400,8 @@ class ProgramSmithTest {
     // Try to create and use an interpreter with the generated program
     assertDoesNotThrow(
         () -> {
-          OracleInterpreter interpreter = new OracleInterpreter(vm, program);
+          OracleInterpreter interpreter = new OracleInterpreter(vm);
+          interpreter.interpret(program);
           assertNotNull(interpreter, "Interpreter should be created successfully");
         },
         "Should be able to create interpreter with generated program");

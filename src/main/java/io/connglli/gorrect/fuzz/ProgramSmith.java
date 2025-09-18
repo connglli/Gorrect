@@ -247,7 +247,7 @@ public class ProgramSmith {
     log.debug("Reset the VM (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     stats.generationTimeMillis = System.currentTimeMillis();
     GProgram program = new GProgram(new GSetHeapInstruction(vm.getHeapCapacity(), initState));
-    OracleInterpreter interpreter = new OracleInterpreter(vm, program);
+    OracleInterpreter interpreter = new OracleInterpreter(vm);
     log.debug("Setup initial state (heap=" + MemorySize.toString(vm.getHeapUnusedBytes()) + ")");
     interpreter.interpret(program.getConfiguration()); // Initialize the interpreter state
     Map<GID, Integer> frozenObjects = new HashMap<>();

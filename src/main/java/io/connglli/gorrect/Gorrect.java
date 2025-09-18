@@ -384,13 +384,13 @@ class ProgramSmithCommand extends ProgramSmithOptionsMixin implements GorrectSub
 
     // We run the oracle interpreter with an unlimited heap size to obtain the oracle state.
     JavaVM unlimitedJvm = new EpsilonVM(Long.MAX_VALUE);
-    OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(unlimitedJvm);
+    interpreter.interpret(program);
     GGraph oracleState = interpreter.getState();
 
     // Translate the Gorrect IR program to Java code and obtain the translator state.
-    JavaTranslator translator = new JavaTranslator(program);
-    translator.translate();
+    JavaTranslator translator = new JavaTranslator();
+    translator.translate(program);
     GGraph transState = translator.getState();
 
     Assert.set(

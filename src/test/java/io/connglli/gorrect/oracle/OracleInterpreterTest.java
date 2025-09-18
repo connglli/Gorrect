@@ -57,8 +57,8 @@ class OracleInterpreterTest {
     program.addInstruction(addRootObj);
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM);
+    interpreter.interpret(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -94,8 +94,8 @@ class OracleInterpreterTest {
     program.addInstruction(new GRemoveObjInstruction(r2));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM);
+    interpreter.interpret(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -138,8 +138,8 @@ class OracleInterpreterTest {
     program.addInstruction(new GAddStrongRefInstruction(o2, o1, false, e_o2_o1));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM);
+    interpreter.interpret(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -173,8 +173,8 @@ class OracleInterpreterTest {
             300L * 1024 * 1024, r1, GReference.Type.SOFT, false, o1, e_r1_o1));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM);
+    interpreter.interpret(program);
 
     GGraph finalState = interpreter.getState();
 
@@ -257,8 +257,8 @@ class OracleInterpreterTest {
     program.addInstruction(new GCloneObjInstruction(o2, o2c, "__cloned"));
 
     // Execute the program
-    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM, program);
-    interpreter.interpret();
+    OracleInterpreter interpreter = new OracleInterpreter(hotSpotVM);
+    interpreter.interpret(program);
 
     GGraph intermediateState = interpreter.getState();
     assertFalse(intermediateState.hasObject(o1), "Expected o1 to be unreachable");
@@ -287,8 +287,8 @@ class OracleInterpreterTest {
     // Remove reference
     newProgram.addInstruction(new GRemoveRefInstruction(new GID("ref-r2_o2")));
 
-    OracleInterpreter newInterpreter = new OracleInterpreter(hotSpotVM, newProgram);
-    newInterpreter.interpret();
+    OracleInterpreter newInterpreter = new OracleInterpreter(hotSpotVM);
+    newInterpreter.interpret(newProgram);
 
     GGraph finalState = newInterpreter.getState();
     stronglyReachable = finalState.getStronglyReachableObjects();
