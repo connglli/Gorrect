@@ -204,7 +204,9 @@ public class ProgramSmith {
     instWeights.put(GRunOutOfMemoryInstruction.class, 2);
     instWeights.put(GFragmentHeapInstruction.class, 2);
     instWeights.put(GAddRootObjInstruction.class, 50);
+    instWeights.put(GAddRootObjIfNotExistInstruction.class, 50);
     instWeights.put(GAddNonRootObjInstruction.class, 50);
+    instWeights.put(GAddNonRootObjIfNotExistInstruction.class, 50);
     instWeights.put(GAddAnonymRootInstruction.class, 20);
     instWeights.put(GMakeRootInstruction.class, 20);
     instWeights.put(GMakeNonRootInstruction.class, 20);
@@ -213,9 +215,13 @@ public class ProgramSmith {
     // It requires the object, all its referers and referents to be strongly reachable.
     instWeights.put(GCloneObjInstruction.class, 0);
     instWeights.put(GRemoveObjInstruction.class, 20);
+    instWeights.put(GRemoveObjIfExistsInstruction.class, 20);
     instWeights.put(GAddStrongRefInstruction.class, 50);
+    instWeights.put(GAddStrongRefIfNotExistInstruction.class, 50);
     instWeights.put(GAddSoftRefInstruction.class, 10);
+    instWeights.put(GAddSoftRefIfNotExistInstruction.class, 10);
     instWeights.put(GAddWeakRefInstruction.class, 10);
+    instWeights.put(GAddWeakRefIfNotExistInstruction.class, 10);
     instWeights.put(GAddFaninRefsInstruction.class, 5);
     instWeights.put(GAddFanoutRefsInstruction.class, 5);
     // FIXME: Currently, we disable replacing referents due to bugs in Java generation.
@@ -228,14 +234,20 @@ public class ProgramSmith {
     // TODO: Currently, we disable swapping referents due the the above issue.
     instWeights.put(GSwapReferentsInstruction.class, 0);
     instWeights.put(GSoftenRefInstruction.class, 5);
+    instWeights.put(GSoftenRefIfNotWeakInstruction.class, 5);
     instWeights.put(GStrengthenRefInstruction.class, 5);
+    instWeights.put(GStrengthenRefIfNotStrongInstruction.class, 5);
     instWeights.put(GRemoveRefInstruction.class, 30);
+    instWeights.put(GRemoveRefIfExistsInstruction.class, 30);
     instWeights.put(GRemoveAllReferentsInstruction.class, 30);
   }
 
   @Getter @NonNull private final Config config;
-  @NonNull private IdSmith objectIdSmith;
-  @NonNull private IdSmith referenceIdSmith;
+  @NonNull private final IdSmith objectIdSmith;
+  @NonNull private final IdSmith referenceIdSmith;
+
+  @NonNull private final IdSmith nonExistentObjectIdSmith = new IdSmith("ne_obj");
+  @NonNull private final IdSmith nonExistentReferenceIdSmith = new IdSmith("ne_ref");
 
   @Getter private final Stats stats = new Stats();
   @Getter private final int maxNumTrials = 320;
@@ -427,6 +439,24 @@ public class ProgramSmith {
     }
 
     @Override
+    public GInstruction visit(GAddRootObjIfNotExistInstruction instruction) {
+      GID rootId = null;
+      if (random.nextDouble() < 0.5) {
+        // Use an existing root object
+        rootId = currState().randomReachableObject();
+      }
+      if (rootId == null) {
+        rootId = objectIdSmith.next();
+      }
+      long rootSize = randomPadding(rootId);
+      if (rootSize < 0) {
+        log.debug("Cannot add root object due to insufficient memory.");
+        return null;
+      }
+      return new GAddRootObjIfNotExistInstruction(rootSize, rootId);
+    }
+
+    @Override
     public GInstruction visit(GAddNonRootObjInstruction unused) {
       // We restrict the referer to the new non-root object to be strongly reachable
       GID refererId = currState().randomStronglyReachableObject();
@@ -444,6 +474,34 @@ public class ProgramSmith {
       GReference.Type referenceType = randomReferenceType();
       boolean isVolatile = random.nextDouble() < config.volatileRefProb;
       return new GAddNonRootObjInstruction(
+          objectSize, refererId, referenceType, isVolatile, objectId, referenceId);
+    }
+
+    @Override
+    public GInstruction visit(GAddNonRootObjIfNotExistInstruction instruction) {
+      // We restrict the referer to the new non-root object to be strongly reachable
+      GID refererId = currState().randomStronglyReachableObject();
+      if (refererId == null) {
+        log.debug("Cannot add non-root object due to no strongly reachable objects.");
+        return null;
+      }
+      long objectSize = randomPadding(refererId);
+      if (objectSize < 0) {
+        log.debug("Cannot add non-root object due to insufficient memory.");
+        return null;
+      }
+      GID objectId = null;
+      if (random.nextDouble() < 0.5) {
+        // Use an existing object
+        objectId = currState().randomReachableObject();
+      }
+      if (objectId == null) {
+        objectId = objectIdSmith.next();
+      }
+      GID referenceId = referenceIdSmith.next(refererId, objectId);
+      GReference.Type referenceType = randomReferenceType();
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddNonRootObjIfNotExistInstruction(
           objectSize, refererId, referenceType, isVolatile, objectId, referenceId);
     }
 
@@ -539,6 +597,32 @@ public class ProgramSmith {
     }
 
     @Override
+    public GInstruction visit(GRemoveObjIfExistsInstruction instruction) {
+      // We restrict the object and all its referers to be strongly reachable
+      StateRandDecor s = currState();
+      GID objectId;
+      if (random.nextDouble() < 0.5) {
+        // Use a non-existing object
+        objectId = nonExistentObjectIdSmith.next();
+      } else {
+        objectId =
+            s.randomObject(
+                o ->
+                    !frozenObjects.containsKey(o.getId())
+                        && s.isStronglyReachable(o.getId())
+                        && s.getReferers(o.getId()).stream()
+                            .allMatch(or -> s.isStronglyReachable(or.getId())));
+      }
+      if (objectId == null) {
+        log.debug(
+            "Cannot remove an object due to no available candidates "
+                + "(strongly reachable and strongly-reachable referers).");
+        return null;
+      }
+      return new GRemoveObjIfExistsInstruction(objectId);
+    }
+
+    @Override
     public GInstruction visit(GAddStrongRefInstruction unused) {
       Pair<GID, GID> data = randomNewReference(GReference.Type.STRONG);
       if (data == null) {
@@ -547,6 +631,33 @@ public class ProgramSmith {
       GID referenceId = referenceIdSmith.next(data.a(), data.b());
       boolean isVolatile = random.nextDouble() < config.volatileRefProb;
       return new GAddStrongRefInstruction(data.a(), data.b(), isVolatile, referenceId);
+    }
+
+    @Override
+    public GInstruction visit(GAddStrongRefIfNotExistInstruction instruction) {
+      Pair<GID, GID> data = null;
+      if (random.nextDouble() < 0.5) {
+        // Use an existing reference
+        StateRandDecor s = currState();
+        GID referenceId =
+            s.randomReference(
+                r ->
+                    s.isStronglyReachable(r.getReferer())
+                        && s.isStronglyReachable(r.getReferent()));
+        if (referenceId != null) {
+          GReference reference = s.getReference(referenceId);
+          data = Pair.of(reference.getReferer(), reference.getReferent());
+        }
+      }
+      if (data == null) {
+        data = randomNewReference(GReference.Type.STRONG);
+      }
+      if (data == null) {
+        return null;
+      }
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddStrongRefIfNotExistInstruction(data.a(), data.b(), isVolatile, referenceId);
     }
 
     @Override
@@ -561,6 +672,33 @@ public class ProgramSmith {
     }
 
     @Override
+    public GInstruction visit(GAddSoftRefIfNotExistInstruction instruction) {
+      Pair<GID, GID> data = null;
+      if (random.nextDouble() < 0.5) {
+        // Use an existing reference
+        StateRandDecor s = currState();
+        GID referenceId =
+            s.randomReference(
+                r ->
+                    s.isStronglyReachable(r.getReferer())
+                        && s.isStronglyReachable(r.getReferent()));
+        if (referenceId != null) {
+          GReference reference = s.getReference(referenceId);
+          data = Pair.of(reference.getReferer(), reference.getReferent());
+        }
+      }
+      if (data == null) {
+        data = randomNewReference(GReference.Type.STRONG);
+      }
+      if (data == null) {
+        return null;
+      }
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddSoftRefIfNotExistInstruction(data.a(), data.b(), isVolatile, referenceId);
+    }
+
+    @Override
     public GInstruction visit(GAddWeakRefInstruction unused) {
       Pair<GID, GID> data = randomNewReference(GReference.Type.WEAK);
       if (data == null) {
@@ -569,6 +707,33 @@ public class ProgramSmith {
       GID referenceId = referenceIdSmith.next(data.a(), data.b());
       boolean isVolatile = random.nextDouble() < config.volatileRefProb;
       return new GAddWeakRefInstruction(data.a(), data.b(), isVolatile, referenceId);
+    }
+
+    @Override
+    public GInstruction visit(GAddWeakRefIfNotExistInstruction instruction) {
+      Pair<GID, GID> data = null;
+      if (random.nextDouble() < 0.5) {
+        // Use an existing reference
+        StateRandDecor s = currState();
+        GID referenceId =
+            s.randomReference(
+                r ->
+                    s.isStronglyReachable(r.getReferer())
+                        && s.isStronglyReachable(r.getReferent()));
+        if (referenceId != null) {
+          GReference reference = s.getReference(referenceId);
+          data = Pair.of(reference.getReferer(), reference.getReferent());
+        }
+      }
+      if (data == null) {
+        data = randomNewReference(GReference.Type.STRONG);
+      }
+      if (data == null) {
+        return null;
+      }
+      GID referenceId = referenceIdSmith.next(data.a(), data.b());
+      boolean isVolatile = random.nextDouble() < config.volatileRefProb;
+      return new GAddWeakRefIfNotExistInstruction(data.a(), data.b(), isVolatile, referenceId);
     }
 
     @Override
@@ -740,6 +905,35 @@ public class ProgramSmith {
     }
 
     @Override
+    public GInstruction visit(GSoftenRefIfNotWeakInstruction instruction) {
+      // We restrict the referer and referent to be strongly reachable
+      StateRandDecor s = currState();
+      GID referenceId = null;
+      if (random.nextDouble() < 0.5) {
+        // Use a weak reference directly
+        referenceId =
+            s.randomReference(
+                reference ->
+                    reference.getType() == GReference.Type.WEAK
+                        && s.isStronglyReachable(reference.getReferer())
+                        && s.isStronglyReachable(reference.getReferent()));
+      }
+      if (referenceId == null) {
+        referenceId =
+            s.randomReference(
+                reference ->
+                    reference.getType() != GReference.Type.WEAK
+                        && s.isStronglyReachable(reference.getReferer())
+                        && s.isStronglyReachable(reference.getReferent()));
+      }
+      if (referenceId == null) {
+        log.debug("Cannot soften a reference due to no suitable candidates.");
+        return null;
+      }
+      return new GSoftenRefIfNotWeakInstruction(referenceId);
+    }
+
+    @Override
     public GInstruction visit(GStrengthenRefInstruction unused) {
       // We restrict the referer and referent to be strongly reachable
       StateRandDecor s = currState();
@@ -758,6 +952,35 @@ public class ProgramSmith {
     }
 
     @Override
+    public GInstruction visit(GStrengthenRefIfNotStrongInstruction unused) {
+      // We restrict the referer and referent to be strongly reachable
+      StateRandDecor s = currState();
+      GID referenceId = null;
+      if (random.nextDouble() < 0.5) {
+        // Use a weak reference directly
+        referenceId =
+            s.randomReference(
+                reference ->
+                    reference.getType() == GReference.Type.STRONG
+                        && s.isStronglyReachable(reference.getReferer())
+                        && s.isStronglyReachable(reference.getReferent()));
+      }
+      if (referenceId == null) {
+        referenceId =
+            s.randomReference(
+                reference ->
+                    reference.getType() != GReference.Type.STRONG
+                        && s.isStronglyReachable(reference.getReferer())
+                        && s.isStronglyReachable(reference.getReferent()));
+      }
+      if (referenceId == null) {
+        log.debug("Cannot strengthen a reference due to no suitable candidates.");
+        return null;
+      }
+      return new GStrengthenRefIfNotStrongInstruction(referenceId);
+    }
+
+    @Override
     public GInstruction visit(GRemoveRefInstruction unused) {
       // We restrict the referer to be strongly reachable
       StateRandDecor s = currState();
@@ -768,6 +991,30 @@ public class ProgramSmith {
               reference ->
                   s.isStronglyReachable(reference.getReferer())
                       && !frozenObjects.containsKey(reference.getReferent()));
+      if (referenceId == null) {
+        log.debug("Cannot remove a reference due to no suitable candidates.");
+        return null;
+      }
+      return new GRemoveRefInstruction(referenceId);
+    }
+
+    @Override
+    public GInstruction visit(GRemoveRefIfExistsInstruction instruction) {
+      // We restrict the referer to be strongly reachable
+      StateRandDecor s = currState();
+      // Although it is allowed to remove a reference whose referent is a frozen object,
+      // we avoid doing so to try making the frozen object survive longer.
+      GID referenceId;
+      if (random.nextDouble() < 0.5) {
+        // Use a non-existing reference
+        referenceId = nonExistentReferenceIdSmith.next();
+      } else {
+        referenceId =
+            s.randomReference(
+                reference ->
+                    s.isStronglyReachable(reference.getReferer())
+                        && !frozenObjects.containsKey(reference.getReferent()));
+      }
       if (referenceId == null) {
         log.debug("Cannot remove a reference due to no suitable candidates.");
         return null;
@@ -888,8 +1135,15 @@ class MockInstructionSmith {
     mockInstructions.put(
         GAddRootObjInstruction.class, new GAddRootObjInstruction(0L, new GID("_")));
     mockInstructions.put(
+        GAddRootObjIfNotExistInstruction.class,
+        new GAddRootObjIfNotExistInstruction(0L, new GID("_")));
+    mockInstructions.put(
         GAddNonRootObjInstruction.class,
         new GAddNonRootObjInstruction(
+            0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
+    mockInstructions.put(
+        GAddNonRootObjIfNotExistInstruction.class,
+        new GAddNonRootObjIfNotExistInstruction(
             0L, new GID("_"), GReference.Type.STRONG, false, new GID("_"), new GID("_")));
     mockInstructions.put(GAddAnonymRootInstruction.class, new GAddAnonymRootInstruction(0L));
     mockInstructions.put(GMakeRootInstruction.class, new GMakeRootInstruction(new GID("_")));
@@ -899,14 +1153,25 @@ class MockInstructionSmith {
         GCloneObjInstruction.class, new GCloneObjInstruction(new GID("_"), new GID("_"), "0"));
     mockInstructions.put(GRemoveObjInstruction.class, new GRemoveObjInstruction(new GID("_")));
     mockInstructions.put(
+        GRemoveObjIfExistsInstruction.class, new GRemoveObjIfExistsInstruction(new GID("_")));
+    mockInstructions.put(
         GAddStrongRefInstruction.class,
         new GAddStrongRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
+    mockInstructions.put(
+        GAddStrongRefIfNotExistInstruction.class,
+        new GAddStrongRefIfNotExistInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     mockInstructions.put(
         GAddSoftRefInstruction.class,
         new GAddSoftRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     mockInstructions.put(
+        GAddSoftRefIfNotExistInstruction.class,
+        new GAddSoftRefIfNotExistInstruction(new GID("_"), new GID("_"), false, new GID("_")));
+    mockInstructions.put(
         GAddWeakRefInstruction.class,
         new GAddWeakRefInstruction(new GID("_"), new GID("_"), false, new GID("_")));
+    mockInstructions.put(
+        GAddWeakRefIfNotExistInstruction.class,
+        new GAddWeakRefIfNotExistInstruction(new GID("_"), new GID("_"), false, new GID("_")));
     mockInstructions.put(
         GAddFaninRefsInstruction.class,
         new GAddFaninRefsInstruction(
@@ -930,8 +1195,15 @@ class MockInstructionSmith {
         GSwapReferentsInstruction.class, new GSwapReferentsInstruction(new GID("_"), new GID("_")));
     mockInstructions.put(GSoftenRefInstruction.class, new GSoftenRefInstruction(new GID("_")));
     mockInstructions.put(
+        GSoftenRefIfNotWeakInstruction.class, new GSoftenRefIfNotWeakInstruction(new GID("_")));
+    mockInstructions.put(
         GStrengthenRefInstruction.class, new GStrengthenRefInstruction(new GID("_")));
+    mockInstructions.put(
+        GStrengthenRefIfNotStrongInstruction.class,
+        new GStrengthenRefIfNotStrongInstruction(new GID("_")));
     mockInstructions.put(GRemoveRefInstruction.class, new GRemoveRefInstruction(new GID("_")));
+    mockInstructions.put(
+        GRemoveRefIfExistsInstruction.class, new GRemoveRefIfExistsInstruction(new GID("_")));
     mockInstructions.put(
         GRemoveAllReferentsInstruction.class, new GRemoveAllReferentsInstruction(new GID("_")));
   }
@@ -968,6 +1240,10 @@ class StateRandDecor extends UnmodifiableGraph {
 
   GID randomRootObject() {
     return randomObject(GObject::isRoot);
+  }
+
+  GID randomReachableObject() {
+    return randomObject(o -> isReachable(o.getId()));
   }
 
   GID randomStronglyReachableObject() {

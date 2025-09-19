@@ -167,6 +167,10 @@ public class OracleHeap {
   // Reference Addition and Deletion
   // -========================================================================
 
+  /* package */ boolean hasReference(@NonNull GID referenceId) {
+    return graph.hasReference(referenceId);
+  }
+
   /* package */ boolean hasReference(
       @NonNull OracleObject referer, @NonNull OracleObject referent) {
     return graph.hasReference(referer.getId(), referent.getId());

@@ -61,6 +61,18 @@ class GeneratedReference {
     return heap.getObject(referentId);
   }
 
+  boolean isStrong() {
+    return type == GReference.Type.STRONG;
+  }
+
+  boolean isSoft() {
+    return type == GReference.Type.SOFT;
+  }
+
+  boolean isWeak() {
+    return type == GReference.Type.WEAK;
+  }
+
   void setReferent(@NonNull GeneratedObject referent) {
     this.referentId = referent.getId();
   }

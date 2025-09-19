@@ -150,12 +150,27 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GAddRootObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.allocRootWithoutInitializer(instruction.getObjectId(), instruction.getObjectSize());
       return null;
     }
 
+    @Override
+    public Void visit(GAddRootObjIfNotExistInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID objectId = instruction.getObjectId();
+      heap.doWithObjectNotExistCheck(
+          objectId,
+          unused -> {
+            heap.allocRootIfNotExistWithoutInitializer(objectId, instruction.getObjectSize());
+            return null;
+          });
+      return null;
+    }
+
+    @Override
     public Void visit(GAddNonRootObjInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
@@ -170,6 +185,29 @@ public class JavaTranslator {
     }
 
     @Override
+    public Void visit(GAddNonRootObjIfNotExistInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID objectId = instruction.getObjectId();
+      GID refererId = instruction.getRefererId();
+      GReference.Type referenceType = instruction.getReferenceType();
+      boolean isVolatile = instruction.getIsVolatile();
+      heap.doWithObjectNotExistCheck(
+          objectId,
+          unused -> {
+            GeneratedObject referer = heap.getObject(refererId);
+            heap.allocNonRootIfNotExistAndReference(
+                objectId,
+                instruction.getObjectSize(),
+                referer,
+                referenceType,
+                instruction.getReferenceId(),
+                isVolatile);
+            return null;
+          });
+      return null;
+    }
+
+    @Override
     public Void visit(GAddAnonymRootInstruction instruction) {
       instruction.checkValidity(getState());
       // We follow OracleInterpreter to compute the anonymous ID
@@ -178,12 +216,14 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GMakeRootInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getObjectId()).toRoot();
       return null;
     }
 
+    @Override
     public Void visit(GMakeNonRootInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getObjectId()).toNonRoot();
@@ -198,18 +238,19 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GCloneObjInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject object = heap.getObject(instruction.getObjectId());
 
-      try (GeneratedHeap.NonRootInPoolAllocator alloctor = heap.getNonRootInPoolAllocator()) {
-        GeneratedObject clone = alloctor.alloc(instruction.getCloneId(), object.getSize());
+      try (GeneratedHeap.NonRootInPoolAllocator alloc = heap.getNonRootInPoolAllocator()) {
+        GeneratedObject clone = alloc.alloc(instruction.getCloneId(), object.getSize());
         object
             .getReferers()
             .forEach(
                 referer -> {
                   GeneratedReference reference = heap.getReference(referer, object);
-                  alloctor.reference(
+                  alloc.reference(
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
                       referer,
                       clone,
@@ -221,7 +262,7 @@ public class JavaTranslator {
             .forEach(
                 referent -> {
                   GeneratedReference reference = heap.getReference(object, referent);
-                  alloctor.reference(
+                  alloc.reference(
                       new GID(reference.getId() + instruction.getReferenceSuffix()),
                       clone,
                       referent,
@@ -233,6 +274,7 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GRemoveObjInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getObjectId()).free();
@@ -240,6 +282,23 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GRemoveObjIfExistsInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID objectId = instruction.getObjectId();
+      if (heap.hasObject(objectId)) {
+        heap.doWithObjectExistsCheck(
+            objectId,
+            unused -> {
+              heap.getObject(instruction.getObjectId()).free();
+              heap.clean(/* appGCStmt= */ false);
+              return null;
+            });
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GAddStrongRefInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
@@ -248,6 +307,32 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GAddStrongRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID refererId = instruction.getRefererId();
+      GID referentId = instruction.getReferentId();
+      boolean isVolatile = instruction.getIsVolatile();
+      heap.doWithReferenceNotExistCheck(
+          refererId,
+          referentId,
+          GReference.Type.STRONG,
+          isVolatile,
+          unused -> {
+            GeneratedObject referer = heap.getObject(refererId);
+            GeneratedObject referent = heap.getObject(referentId);
+            heap.referenceIfNotExist(
+                instruction.getReferenceId(),
+                referer,
+                referent,
+                GReference.Type.STRONG,
+                isVolatile);
+            return null;
+          });
+      return null;
+    }
+
+    @Override
     public Void visit(GAddSoftRefInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
@@ -256,6 +341,28 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GAddSoftRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID refererId = instruction.getRefererId();
+      GID referentId = instruction.getReferentId();
+      boolean isVolatile = instruction.getIsVolatile();
+      heap.doWithReferenceNotExistCheck(
+          refererId,
+          referentId,
+          GReference.Type.SOFT,
+          isVolatile,
+          unused -> {
+            GeneratedObject referer = heap.getObject(refererId);
+            GeneratedObject referent = heap.getObject(referentId);
+            heap.referenceIfNotExist(
+                instruction.getReferenceId(), referer, referent, GReference.Type.SOFT, isVolatile);
+            return null;
+          });
+      return null;
+    }
+
+    @Override
     public Void visit(GAddWeakRefInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
@@ -264,6 +371,28 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GAddWeakRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID refererId = instruction.getRefererId();
+      GID referentId = instruction.getReferentId();
+      boolean isVolatile = instruction.getIsVolatile();
+      heap.doWithReferenceNotExistCheck(
+          refererId,
+          referentId,
+          GReference.Type.WEAK,
+          isVolatile,
+          unused -> {
+            GeneratedObject referer = heap.getObject(refererId);
+            GeneratedObject referent = heap.getObject(referentId);
+            heap.referenceIfNotExist(
+                instruction.getReferenceId(), referer, referent, GReference.Type.WEAK, isVolatile);
+            return null;
+          });
+      return null;
+    }
+
+    @Override
     public Void visit(GAddFaninRefsInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referent = heap.getObject(instruction.getReferentId());
@@ -278,6 +407,7 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GAddFanoutRefsInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedObject referer = heap.getObject(instruction.getRefererId());
@@ -295,6 +425,7 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GReplaceReferentInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId())
@@ -303,6 +434,7 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GSwapReferentsInstruction instruction) {
       instruction.checkValidity(getState());
       GeneratedReference ref1 = heap.getReference(instruction.getReferenceId1());
@@ -320,18 +452,41 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
     public Void visit(GSoftenRefInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId()).soften();
       return null;
     }
 
+    @Override
+    public Void visit(GSoftenRefIfNotWeakInstruction instruction) {
+      instruction.checkValidity(getState());
+      GeneratedReference reference = heap.getReference(instruction.getReferenceId());
+      if (!reference.isWeak()) {
+        reference.soften();
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GStrengthenRefInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId()).strengthen();
       return null;
     }
 
+    @Override
+    public Void visit(GStrengthenRefIfNotStrongInstruction instruction) {
+      instruction.checkValidity(getState());
+      GeneratedReference reference = heap.getReference(instruction.getReferenceId());
+      if (!reference.isStrong()) {
+        reference.strengthen();
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GRemoveRefInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getReference(instruction.getReferenceId()).unlink();
@@ -339,6 +494,27 @@ public class JavaTranslator {
       return null;
     }
 
+    @Override
+    public Void visit(GRemoveRefIfExistsInstruction instruction) {
+      instruction.checkValidity(getState());
+      GID referenceId = instruction.getReferenceId();
+      if (heap.hasReference(referenceId)) {
+        GeneratedReference reference = heap.getReference(referenceId);
+        heap.doWithReferenceExistsCheck(
+            reference.getReferer().getId(),
+            reference.getReferent().getId(),
+            reference.getType(),
+            reference.getIsVolatile(),
+            unused -> {
+              reference.unlink();
+              heap.clean(/* appGCStmt= */ false);
+              return null;
+            });
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GRemoveAllReferentsInstruction instruction) {
       instruction.checkValidity(getState());
       heap.getObject(instruction.getRefererId())

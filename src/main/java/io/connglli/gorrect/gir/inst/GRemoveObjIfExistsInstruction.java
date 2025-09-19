@@ -1,0 +1,55 @@
+/*
+ * MIT License
+ *
+ * Copyright (c) 2025 Cong Li (cong.li@inf.ethz.ch)
+ *
+ * Permission is hereby granted, free of charge, to any person obtaining a copy
+ * of this software and associated documentation files (the "Software"), to deal
+ * in the Software without restriction, including without limitation the rights
+ * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
+ * copies of the Software, and to permit persons to whom the Software is
+ * furnished to do so, subject to the following conditions:
+ *
+ * The above copyright notice and this permission notice shall be included in all
+ * copies or substantial portions of the Software.
+ *
+ * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+ * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+ * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+ * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+ * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
+ * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
+ * SOFTWARE.
+ */
+
+package io.connglli.gorrect.gir.inst;
+
+import io.connglli.gorrect.gir.GProgramVisitor;
+import io.connglli.gorrect.gir.inst.marks.GIRMarkReinterpretable;
+import io.connglli.gorrect.gir.model.GID;
+import lombok.*;
+import lombok.experimental.FieldDefaults;
+
+/**
+ * GRemoveObjIfExistsInstruction removes an object from the object graph if it exists in the graph.
+ * It also removes all references either where it is a referer or where it is a referent. This
+ * instruction requires the object to be reachable. Otherwise, an exception should be thrown. This
+ * instruction may lead to the unreachability of other objects. However, the instruction does not
+ * take care of them.
+ */
+@RequiredArgsConstructor
+@FieldDefaults(makeFinal = true, level = AccessLevel.PRIVATE)
+@Getter
+@EqualsAndHashCode(callSuper = true)
+@GIROpCode("remove-obj-ife")
+public class GRemoveObjIfExistsInstruction extends GInstruction implements GIRMarkReinterpretable {
+  /** The ID of the object to be removed from the graph. */
+  @GIRInput(0)
+  @NonNull
+  GID objectId;
+
+  @Override
+  public <T> T accept(GProgramVisitor<T> visitor) {
+    return visitor.visit(this);
+  }
+}

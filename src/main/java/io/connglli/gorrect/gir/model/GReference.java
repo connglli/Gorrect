@@ -39,6 +39,17 @@ public class GReference {
     SOFT,
     WEAK;
 
+    // Returns the resulting reachability when this type is followed by another type
+    public Type followedBy(Type other) {
+      if (this == STRONG) {
+        return other;
+      } else if (this == SOFT) {
+        return other == WEAK ? WEAK : SOFT;
+      } else {
+        return WEAK;
+      }
+    }
+
     public boolean strongerThanOrEqual(Type other) {
       if (this == STRONG) {
         return other == STRONG;

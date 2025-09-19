@@ -26,6 +26,9 @@ package io.connglli.gorrect.java;
 
 import com.palantir.javapoet.*;
 import io.connglli.gorrect.gir.model.GID;
+import io.connglli.gorrect.utility.Assert;
+import java.util.HashSet;
+import java.util.Set;
 import java.util.UUID;
 import javax.lang.model.element.Modifier;
 import lombok.Getter;
@@ -38,6 +41,7 @@ import lombok.RequiredArgsConstructor;
 final class GeneratedMainClass extends GeneratedClass {
   static final ClassName clazzName = ClassName.get("", "Main");
   static final String UUID_FIELD_NAME = "uuid";
+  static final String REACHABLE_OBJECTS_FIELD_NAME = "reachable_objects";
   static final String ROOT_REF_FIELD_NAME_PREFIX = "root_ref_to_";
 
   // Add an UUID to each case so that we can distinguish them easily.
@@ -53,6 +57,9 @@ final class GeneratedMainClass extends GeneratedClass {
   // The code generator for the main method.
   @Getter private final CodeGenerator codeGen = new CodeGenerator(mainMethodSpec);
 
+  // Keep track of all reachable objects.
+  private final Set<String> reachableObjects = new HashSet<>();
+
   GeneratedMainClass(GeneratedHeap heap) {
     super(heap, clazzName.canonicalName(), Modifier.PUBLIC, Modifier.FINAL);
     addField(
@@ -60,6 +67,40 @@ final class GeneratedMainClass extends GeneratedClass {
                 ClassName.get(String.class), UUID_FIELD_NAME, Modifier.PUBLIC, Modifier.STATIC)
             .initializer("$S", uuid)
             .build());
+    addField(
+        FieldSpec.builder(
+                ClassName.get(Set.class),
+                REACHABLE_OBJECTS_FIELD_NAME,
+                Modifier.PUBLIC,
+                Modifier.STATIC)
+            .initializer("new $T()", HashSet.class)
+            .build());
+  }
+
+  void doWithObjectReachabilityCheck(boolean exists, @NonNull GID gid, @NonNull Runnable action) {
+    if (exists) {
+      codeGen.beginControlFlow(
+          "if (%s.contains($S))".formatted(REACHABLE_OBJECTS_FIELD_NAME), gid.get());
+    } else {
+      codeGen.beginControlFlow(
+          "if (!%s.contains($S))".formatted(REACHABLE_OBJECTS_FIELD_NAME), gid.get());
+    }
+    action.run();
+    codeGen.endControlFlow();
+  }
+
+  void addReachableObject(@NonNull GID gid) {
+    Assert.set(
+        !reachableObjects.contains(gid.get()), "The object " + gid + " is already reachable.");
+    reachableObjects.add(gid.get());
+    codeGen.addStatement(REACHABLE_OBJECTS_FIELD_NAME + ".add($S)", gid.toString());
+  }
+
+  void removeReachableObject(@NonNull GID gid) {
+    Assert.set(
+        reachableObjects.contains(gid.get()), "The object " + gid + " is not reachable before.");
+    reachableObjects.remove(gid.get());
+    codeGen.addStatement(REACHABLE_OBJECTS_FIELD_NAME + ".remove($S)", gid.toString());
   }
 
   @Override

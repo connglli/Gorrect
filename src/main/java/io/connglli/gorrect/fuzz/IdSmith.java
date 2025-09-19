@@ -37,11 +37,11 @@ public class IdSmith {
 
   private long nextId = 0;
 
-  public GID next() {
+  public @NonNull GID next() {
     return new GID(prefix + (nextId++));
   }
 
-  public GID next(Object... args) {
+  public @NonNull GID next(Object... args) {
     GID gid = next();
     String suffix = Arrays.stream(args).map(Object::toString).collect(Collectors.joining("_"));
     return new GID(gid.get() + "___" + suffix);

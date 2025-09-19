@@ -48,6 +48,18 @@ public class OracleReference {
     reference.setType(type);
   }
 
+  public boolean isStrong() {
+    return reference.isStrong();
+  }
+
+  public boolean isSoft() {
+    return reference.isSoft();
+  }
+
+  public boolean isWeak() {
+    return reference.isWeak();
+  }
+
   public boolean isVolatile() {
     return reference.isVolatile();
   }

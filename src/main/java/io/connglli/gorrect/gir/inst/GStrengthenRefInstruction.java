@@ -31,7 +31,7 @@ import lombok.*;
 import lombok.experimental.FieldDefaults;
 
 /**
- * GStrengthRefInstruction strengthens the type of a reference by one level. This instruction
+ * GStrengthenRefInstruction strengthens the type of a reference by one level. This instruction
  * requires the referer and the referent to be reachable, the reference exists, and the reference is
  * not strong. Otherwise, an exception should be thrown.
  */

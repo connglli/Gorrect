@@ -187,6 +187,15 @@ public class OracleInterpreter {
     }
 
     @Override
+    public Void visit(GAddRootObjIfNotExistInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (!heap.hasObject(instruction.getObjectId())) {
+        heap.allocRootObject(instruction.getObjectId(), instruction.getObjectSize());
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GAddNonRootObjInstruction instruction) {
       instruction.checkValidity(heap.getGraph());
       OracleObject referentObject =
@@ -197,6 +206,22 @@ public class OracleInterpreter {
           referentObject,
           instruction.getReferenceType(),
           instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddNonRootObjIfNotExistInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (!heap.hasObject(instruction.getObjectId())) {
+        OracleObject referentObject =
+            heap.allocNonRootObject(instruction.getObjectId(), instruction.getObjectSize());
+        OracleObject refererObject = heap.getObject(instruction.getRefererId());
+        refererObject.reference(
+            instruction.getReferenceId(),
+            referentObject,
+            instruction.getReferenceType(),
+            instruction.getIsVolatile());
+      }
       return null;
     }
 
@@ -277,6 +302,23 @@ public class OracleInterpreter {
     }
 
     @Override
+    public Void visit(GRemoveObjIfExistsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (heap.hasObject(instruction.getObjectId())) {
+        if (frozenObjects.containsKey(instruction.getObjectId())) {
+          throw new IllegalStateException(
+              "Trying to remove a frozen object with id="
+                  + instruction.getObjectId()
+                  + ", steps="
+                  + frozenObjects.get(instruction.getObjectId()));
+        }
+        heap.getObject(instruction.getObjectId()).free();
+        heap.clean();
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GAddStrongRefInstruction instruction) {
       instruction.checkValidity(heap.getGraph());
       heap.getObject(instruction.getRefererId())
@@ -284,6 +326,19 @@ public class OracleInterpreter {
               instruction.getReferenceId(),
               heap.getObject(instruction.getReferentId()),
               instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddStrongRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (!heap.hasReference(instruction.getReferenceId())) {
+        heap.getObject(instruction.getRefererId())
+            .strongReference(
+                instruction.getReferenceId(),
+                heap.getObject(instruction.getReferentId()),
+                instruction.getIsVolatile());
+      }
       return null;
     }
 
@@ -299,12 +354,39 @@ public class OracleInterpreter {
     }
 
     @Override
+    public Void visit(GAddSoftRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (!heap.hasReference(instruction.getReferenceId())) {
+        heap.getObject(instruction.getRefererId())
+            .softReference(
+                instruction.getReferenceId(),
+                heap.getObject(instruction.getReferentId()),
+                instruction.getIsVolatile());
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GAddWeakRefInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
       heap.getObject(instruction.getRefererId())
           .weakReference(
               instruction.getReferenceId(),
               heap.getObject(instruction.getReferentId()),
               instruction.getIsVolatile());
+      return null;
+    }
+
+    @Override
+    public Void visit(GAddWeakRefIfNotExistInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (!heap.hasReference(instruction.getReferenceId())) {
+        heap.getObject(instruction.getRefererId())
+            .weakReference(
+                instruction.getReferenceId(),
+                heap.getObject(instruction.getReferentId()),
+                instruction.getIsVolatile());
+      }
       return null;
     }
 
@@ -349,9 +431,29 @@ public class OracleInterpreter {
     }
 
     @Override
+    public Void visit(GStrengthenRefIfNotStrongInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleReference reference = heap.getReference(instruction.getReferenceId());
+      if (!reference.isStrong()) {
+        reference.strengthen();
+      }
+      return null;
+    }
+
+    @Override
     public Void visit(GSoftenRefInstruction instruction) {
       instruction.checkValidity(heap.getGraph());
       heap.getReference(instruction.getReferenceId()).soften();
+      return null;
+    }
+
+    @Override
+    public Void visit(GSoftenRefIfNotWeakInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      OracleReference reference = heap.getReference(instruction.getReferenceId());
+      if (!reference.isWeak()) {
+        reference.soften();
+      }
       return null;
     }
 
@@ -379,6 +481,16 @@ public class OracleInterpreter {
       instruction.checkValidity(heap.getGraph());
       heap.getReference(instruction.getReferenceId()).unlink();
       heap.clean();
+      return null;
+    }
+
+    @Override
+    public Void visit(GRemoveRefIfExistsInstruction instruction) {
+      instruction.checkValidity(heap.getGraph());
+      if (heap.hasReference(instruction.getReferenceId())) {
+        heap.getReference(instruction.getReferenceId()).unlink();
+        heap.clean();
+      }
       return null;
     }
 

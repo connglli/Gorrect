@@ -61,7 +61,11 @@ public interface GProgramVisitor<T> {
 
   T visit(GAddRootObjInstruction instruction);
 
+  T visit(GAddRootObjIfNotExistInstruction instruction);
+
   T visit(GAddNonRootObjInstruction instruction);
+
+  T visit(GAddNonRootObjIfNotExistInstruction instruction);
 
   T visit(GAddAnonymRootInstruction instruction);
 
@@ -75,15 +79,23 @@ public interface GProgramVisitor<T> {
 
   T visit(GRemoveObjInstruction instruction);
 
+  T visit(GRemoveObjIfExistsInstruction instruction);
+
   // -=======================================================
   // Reference management instructions
   // -=======================================================
 
   T visit(GAddStrongRefInstruction instruction);
 
+  T visit(GAddStrongRefIfNotExistInstruction instruction);
+
   T visit(GAddSoftRefInstruction instruction);
 
+  T visit(GAddSoftRefIfNotExistInstruction instruction);
+
   T visit(GAddWeakRefInstruction instruction);
+
+  T visit(GAddWeakRefIfNotExistInstruction instruction);
 
   T visit(GAddFaninRefsInstruction instruction);
 
@@ -95,9 +107,15 @@ public interface GProgramVisitor<T> {
 
   T visit(GSoftenRefInstruction instruction);
 
+  T visit(GSoftenRefIfNotWeakInstruction instruction);
+
   T visit(GStrengthenRefInstruction instruction);
 
+  T visit(GStrengthenRefIfNotStrongInstruction instruction);
+
   T visit(GRemoveRefInstruction instruction);
+
+  T visit(GRemoveRefIfExistsInstruction instruction);
 
   T visit(GRemoveAllReferentsInstruction instruction);
 }

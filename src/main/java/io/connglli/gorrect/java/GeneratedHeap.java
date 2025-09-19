@@ -34,10 +34,12 @@ import io.connglli.gorrect.gir.model.visitor.GObjectBreadthFirstVisitor;
 import io.connglli.gorrect.gir.utility.UnmodifiableGraph;
 import io.connglli.gorrect.utility.Assert;
 import io.connglli.gorrect.utility.Logger;
+import io.connglli.gorrect.utility.Pair;
 import java.io.*;
 import java.lang.ref.SoftReference;
 import java.lang.ref.WeakReference;
 import java.util.*;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 import javax.lang.model.element.Modifier;
 import lombok.NonNull;
@@ -63,7 +65,9 @@ class GeneratedHeap {
 
   @NonNull private final GeneratedMainClass mainClazz;
 
-  @NonNull private final Map<GID, GeneratedObject> objects; // All generated objects
+  @NonNull
+  private final Map<GID, GeneratedObject> // All generated objects that are not freed yet,
+      objects; // including those unreachable ones that not yet moved to deadObjects)
 
   @NonNull
   private final Map<GID, GeneratedObject> // We do not allow dead objects to be alive again
@@ -112,7 +116,7 @@ class GeneratedHeap {
     return mainClazz.getUuid();
   }
 
-  ///  Get the state of the heap.
+  /// Get the state of the heap.
   GGraph getState(boolean clean) {
     GGraph graph = new GGraph();
     for (GeneratedObject obj : objects.values()) {
@@ -283,17 +287,15 @@ class GeneratedHeap {
   GeneratedObject allocRootWithInitializer(@NonNull GID rootId, long rootSize) {
     Assert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
     GeneratedObjectClass rootClazz = new GeneratedObjectClass(this, rootId, rootSize);
-    // Create a static field in the main class to reference the root object and at the same
-    // time, directly instantiate the root object immediately after the main class is loaded.
-    String fieldName = GeneratedMainClass.computeFieldName(rootClazz.getId());
-    mainClazz.addField(
-        FieldSpec.builder(
-                GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
-            .initializer("new $T()", rootClazz.clazzName)
-            .build());
-    return putObject(
-        new GeneratedObject(
-            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
+    // We initialize the root object when the main class is loaded
+    String fieldName = addRootRefField(rootId, rootClazz, true);
+    GeneratedObject rootObj =
+        putObject(
+            new GeneratedObject(
+                this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
+    // The root object is now reachable
+    mainClazz.addReachableObject(rootId);
+    return rootObj;
   }
 
   @NonNull
@@ -301,19 +303,38 @@ class GeneratedHeap {
   GeneratedObject allocRootWithoutInitializer(@NonNull GID rootId, long rootSize) {
     Assert.set(!hasObject(rootId), "The object with id %s already exists", rootId);
     GeneratedObjectClass rootClazz = new GeneratedObjectClass(this, rootId, rootSize);
-    // Create a static field in the main class to reference the root object but leave the
-    // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
-    String fieldName = GeneratedMainClass.computeFieldName(rootClazz.getId());
-    mainClazz.addField(
-        FieldSpec.builder(
-                GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
-            .initializer("null")
-            .build());
+    // We do not instantiate the root object when the main class is loaded
+    String fieldName = addRootRefField(rootId, null, true);
     // Instantiate the root object in the main method
     appendStatement(fieldName + " = new $T()", rootClazz.clazzName);
-    return putObject(
-        new GeneratedObject(
-            this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
+    GeneratedObject rootObj =
+        putObject(
+            new GeneratedObject(
+                this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
+    // The root object is now reachable
+    mainClazz.addReachableObject(rootId);
+    return rootObj;
+  }
+
+  @NonNull
+  @SuppressWarnings("UnusedReturnValue")
+  GeneratedObject allocRootIfNotExistWithoutInitializer(@NonNull GID rootId, long rootSize) {
+    GeneratedObjectClass rootClazz = new GeneratedObjectClass(this, rootId, rootSize);
+    // We do not instantiate the root object when the main class is loaded
+    String fieldName = addRootRefField(rootId, null, false);
+    // Instantiate the root object in the main method
+    appendStatement(fieldName + " = new $T()", rootClazz.clazzName);
+    if (hasObject(rootId)) {
+      // The object already exists, we don't need to update our state
+      return getObject(rootId);
+    }
+    GeneratedObject object =
+        putObject(
+            new GeneratedObject(
+                this, rootClazz, GObject.Type.GCROOT, fieldName, GReference.Type.STRONG, null));
+    // The root object is now reachable
+    mainClazz.addReachableObject(rootId);
+    return object;
   }
 
   NonRootInPoolAllocator getNonRootInPoolAllocator() {
@@ -345,9 +366,13 @@ class GeneratedHeap {
       appendStatement(
           OBJECT_POOL_NAME + ".put($S, new $T())", objectClazz.getId(), objectClazz.clazzName);
       allocatedObjects.add(objectId);
-      return putObject(object);
+      putObject(object);
+      // The object is now reachable
+      mainClazz.addReachableObject(objectId);
+      return object;
     }
 
+    @SuppressWarnings("UnusedReturnValue")
     @NonNull
     GeneratedReference reference(
         @NonNull GID referenceId,
@@ -386,14 +411,12 @@ class GeneratedHeap {
       @NonNull GReference.Type referenceType,
       @NonNull GID referenceId,
       @NonNull Boolean isVolatile) {
-
+    Assert.set(!hasObject(objectId), "The object with id %s already exists", objectId);
     ensureReachable(
         referer,
         GReference.Type.STRONG,
         "Allocating non-roots to a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
             .formatted(referer.getId(), referer.getJavaRefId()));
-
-    GeneratedClass refererClazz = referer.getClazz();
 
     GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
     GeneratedObject object = // The reachability will be updated after the pool is closed
@@ -403,65 +426,35 @@ class GeneratedHeap {
                 objectClazz,
                 GObject.Type.ORDINARY,
                 "",
-                null, // The reachability will be updated later
+                referer.getReachability().followedBy(referenceType),
                 referenceType));
 
-    String fieldName = GeneratedObject.computeFieldName(referenceType, objectClazz.getId());
-    Modifier[] fieldMods;
-    if (isVolatile) {
-      fieldMods = new Modifier[] {Modifier.PUBLIC, Modifier.VOLATILE};
-    } else {
-      fieldMods = new Modifier[] {Modifier.PUBLIC};
-    }
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, objectId, referenceType, isVolatile, true);
+    ClassName fieldType = fieldInfo.a();
+    String fieldName = fieldInfo.b();
+
     switch (referenceType) {
       case STRONG:
-        {
-          // Create a field in our class so that we can reference the object
-          refererClazz.addField(
-              FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, fieldMods)
-                  .initializer("null")
-                  .build());
-          // Reference the object object by our new field
-          appendStatement(
-              "%s.%s = new $T()".formatted(referer.getJavaDerefId(), fieldName),
-              objectClazz.clazzName);
-          break;
-        }
+        appendStatement(
+            "%s.%s = new $T()".formatted(referer.getJavaDerefId(), fieldName),
+            objectClazz.clazzName);
+        break;
 
-      case SOFT:
-        {
-          ClassName softRefClazz = ClassName.get(SoftReference.class);
-          // Create a field in our class so that we can reference the object
-          refererClazz.addField(
-              FieldSpec.builder(softRefClazz, fieldName, fieldMods).initializer("null").build());
-          // Reference the object object by our new field
-          appendStatement(
-              "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
-              softRefClazz,
-              objectClazz.clazzName,
-              objectClazz.clazzName);
-          break;
-        }
-
-      case WEAK:
-        {
-          ClassName weakRefClazz = ClassName.get(WeakReference.class);
-          // Create a field in our class so that we can reference the object
-          refererClazz.addField(
-              FieldSpec.builder(weakRefClazz, fieldName, fieldMods).initializer("null").build());
-          // Reference the object object by our new field
-          appendStatement(
-              "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
-              weakRefClazz,
-              objectClazz.clazzName,
-              objectClazz.clazzName);
-          break;
-        }
+      case SOFT, WEAK:
+        appendStatement(
+            "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
+            fieldType,
+            objectClazz.clazzName,
+            objectClazz.clazzName);
+        break;
 
       default:
         Assert.panic("Cannot reach here");
         break;
     }
+    // The object is now reachable
+    mainClazz.addReachableObject(objectId);
 
     putReference(
         new GeneratedReference(
@@ -475,6 +468,85 @@ class GeneratedHeap {
 
     // The reference relationship is changed, we should update the heap
     updateHeap();
+
+    return object;
+  }
+
+  @NonNull
+  @SuppressWarnings("UnusedReturnValue")
+  GeneratedObject allocNonRootIfNotExistAndReference(
+      @NonNull GID objectId,
+      long objectSize,
+      @NonNull GeneratedObject referer,
+      @NonNull GReference.Type referenceType,
+      @NonNull GID referenceId,
+      @NonNull Boolean isVolatile) {
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Allocating non-roots to a non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getJavaRefId()));
+
+    boolean objectAlreadyExists = hasObject(objectId);
+
+    GeneratedObject object;
+    if (!objectAlreadyExists) {
+      GeneratedObjectClass objectClazz = new GeneratedObjectClass(this, objectId, objectSize);
+      // The reachability will be updated after the pool is closed
+      object =
+          putObject(
+              new GeneratedObject(
+                  this,
+                  objectClazz,
+                  GObject.Type.ORDINARY,
+                  "",
+                  referer.getReachability().followedBy(referenceType),
+                  referenceType));
+    } else {
+      // The object already exists, we don't need to update our state
+      object = getObject(objectId);
+    }
+
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, objectId, referenceType, isVolatile, !objectAlreadyExists);
+    ClassName fieldType = fieldInfo.a();
+    String fieldName = fieldInfo.b();
+
+    switch (referenceType) {
+      case STRONG:
+        appendStatement(
+            "%s.%s = new $T()".formatted(referer.getJavaDerefId(), fieldName),
+            object.getClazz().clazzName);
+        break;
+
+      case SOFT, WEAK:
+        appendStatement(
+            "%s.%s = new $T<$T>(new $T())".formatted(referer.getJavaDerefId(), fieldName),
+            fieldType,
+            object.getClazz().clazzName,
+            object.getClazz().clazzName);
+        break;
+
+      default:
+        Assert.panic("Cannot reach here");
+        break;
+    }
+
+    if (!objectAlreadyExists) {
+      // The object is now reachable
+      mainClazz.addReachableObject(objectId);
+      putReference(
+          new GeneratedReference(
+              this,
+              referenceId,
+              fieldName,
+              referer.getId(),
+              object.getId(),
+              referenceType,
+              isVolatile));
+      // The reference relationship is changed, we should update the heap
+      updateHeap();
+    }
 
     return object;
   }
@@ -526,6 +598,7 @@ class GeneratedHeap {
       // Insert a GC call to try triggering the garbage collection
       appendStatement("ForceGC.tryGC()");
     }
+    updateHeap();
   }
 
   // Remove all unreachable and weakly reachable objects from the heap
@@ -546,6 +619,7 @@ class GeneratedHeap {
       // Insert a forced GC call to trigger collecting weakly reachable objects
       appendStatement("ForceGC.forceGC()");
     }
+    updateHeap();
   }
 
   // Remove all unreachable and weakly reachable and softly reachable objects from the heap
@@ -565,6 +639,7 @@ class GeneratedHeap {
       // Insert a forced GC call to trigger collecting weakly and softly reachable objects
       appendStatement("ForceGC.forceGCInMemoryPressure()");
     }
+    updateHeap();
   }
 
   // -========================================================================
@@ -577,19 +652,11 @@ class GeneratedHeap {
         GReference.Type.STRONG,
         "Making a non-strongly reachable object (id=%s, java_identifier=%s) root might introduce NullPointerExceptions"
             .formatted(object.getId(), object.getJavaRefId()));
-
     Assert.set(!object.isRoot(), "The object with id %s is already a root object", object.getId());
-    // Create a static field in the main class to reference the root object but leave the
-    // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
-    String fieldName = GeneratedMainClass.computeFieldName(object.getId());
-    // It is likely that the object is made root for a second time
-    if (!mainClazz.hasField(fieldName)) {
-      mainClazz.addField(
-          FieldSpec.builder(
-                  GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
-              .initializer("null")
-              .build());
-    }
+    // Since we're make a non-root object root, so we do not initialize the field when the main
+    // class is loaded. Also, it is likely that the object is made root for a second time so we do
+    // not enforce non-existence check, i.e., it's okay if the field already exists.
+    String fieldName = addRootRefField(object.getId(), null, false);
     // Transfer the ownership of the object to the main class
     appendStatement(fieldName + " = " + object.getJavaDerefId());
     object.setType(GObject.Type.GCROOT);
@@ -642,6 +709,12 @@ class GeneratedHeap {
     return new ArrayList<>(referents.get(referer.getId()));
   }
 
+  boolean hasReference(@NonNull GID referenceId) {
+    return referents.values().stream()
+        .flatMap(List::stream)
+        .anyMatch(ref -> ref.getId().equals(referenceId));
+  }
+
   boolean hasReference(@NonNull GeneratedObject referer, @NonNull GeneratedObject referent) {
     Assert.set(
         hasObject(referer.getId()), "The referer with id %s does not exist", referer.getId());
@@ -685,74 +758,31 @@ class GeneratedHeap {
       @NonNull GeneratedObject referent,
       @NonNull GReference.Type referenceType,
       @NonNull Boolean isVolatile) {
+    Assert.set(!hasReference(referenceId), "The reference with id %s already exists", referenceId);
     ensureReachable(
         referer,
         GReference.Type.STRONG,
         "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
             .formatted(referer.getId(), referer.getJavaRefId()));
 
-    String fieldName = GeneratedObject.computeFieldName(referenceType, referent.getId());
-    Modifier[] fieldMods;
-    if (isVolatile) {
-      fieldMods = new Modifier[] {Modifier.PUBLIC, Modifier.VOLATILE};
-    } else {
-      fieldMods = new Modifier[] {Modifier.PUBLIC};
-    }
-    GeneratedObjectClass refererClazz = referer.getClazz();
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, referent.getId(), referenceType, isVolatile, false);
+    ClassName fieldType = fieldInfo.a();
+    String fieldName = fieldInfo.b();
 
     switch (referenceType) {
       case STRONG:
-        {
-          // Create a field in our class so that we can reference the referent
-          // It is likely that the referer and the referent has been linked before
-          if (!refererClazz.hasField(fieldName)) {
-            refererClazz.addField(
-                FieldSpec.builder(GeneratedObjectBaseClass.clazzName, fieldName, fieldMods)
-                    .initializer("null")
-                    .build());
-          }
-          // Reference the referent object by our new field
-          appendStatement(
-              "%s.%s = %s"
-                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
-          break;
-        }
+        appendStatement(
+            "%s.%s = %s".formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
+        break;
 
-      case SOFT:
-        {
-          ClassName softRefClazz = ClassName.get(SoftReference.class);
-          // Create a field in our class so that we can reference the referent
-          // It is likely that the referer and the referent has been linked before
-          if (!refererClazz.hasField(fieldName)) {
-            refererClazz.addField(
-                FieldSpec.builder(softRefClazz, fieldName, fieldMods).initializer("null").build());
-          }
-          // Reference the referent object by our new field
-          appendStatement(
-              "%s.%s = new $T<$T>(%s)"
-                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
-              softRefClazz,
-              referent.getClazz().clazzName);
-          break;
-        }
-
-      case WEAK:
-        {
-          ClassName weakRefClazz = ClassName.get(WeakReference.class);
-          // Create a field in our class so that we can reference the referent
-          // It is likely that the referer and the referent has been linked before
-          if (!refererClazz.hasField(fieldName)) {
-            refererClazz.addField(
-                FieldSpec.builder(weakRefClazz, fieldName, fieldMods).initializer("null").build());
-          }
-          // Reference the referent object by our new field
-          appendStatement(
-              "%s.%s = new $T<$T>(%s)"
-                  .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
-              weakRefClazz,
-              referent.getClazz().clazzName);
-          break;
-        }
+      case SOFT, WEAK:
+        appendStatement(
+            "%s.%s = new $T<$T>(%s)"
+                .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
+            fieldType,
+            referent.getClazz().clazzName);
+        break;
 
       default:
         Assert.panic("Cannot reach here");
@@ -771,6 +801,66 @@ class GeneratedHeap {
                 referenceType,
                 isVolatile));
     updateHeap();
+
+    return reference;
+  }
+
+  @SuppressWarnings("UnusedReturnValue")
+  @NonNull
+  GeneratedReference referenceIfNotExist(
+      @NonNull GID referenceId,
+      @NonNull GeneratedObject referer,
+      @NonNull GeneratedObject referent,
+      @NonNull GReference.Type referenceType,
+      @NonNull Boolean isVolatile) {
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getJavaRefId()));
+
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, referent.getId(), referenceType, isVolatile, false);
+    ClassName fieldType = fieldInfo.a();
+    String fieldName = fieldInfo.b();
+
+    switch (referenceType) {
+      case STRONG:
+        appendStatement(
+            "%s.%s = %s".formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
+        break;
+
+      case SOFT, WEAK:
+        appendStatement(
+            "%s.%s = new $T<$T>(%s)"
+                .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
+            fieldType,
+            referent.getClazz().clazzName);
+        break;
+
+      default:
+        Assert.panic("Cannot reach here");
+        break;
+    }
+
+    GeneratedReference reference;
+    if (!hasReference(referer, referent)) {
+      // The reference relationship is changed, we should update the heap
+      reference =
+          putReference(
+              new GeneratedReference(
+                  this,
+                  referenceId,
+                  fieldName,
+                  referer.getId(),
+                  referent.getId(),
+                  referenceType,
+                  isVolatile));
+      updateHeap();
+    } else {
+      // The reference already exists, we don't need to update our state
+      reference = getReference(referenceId);
+    }
 
     return reference;
   }
@@ -887,6 +977,67 @@ class GeneratedHeap {
 
     // The reference relationship is changed, we should update the heap
     updateHeap();
+  }
+
+  // -========================================================================
+  // Heap Operations Guarded by Conditions
+  // -========================================================================
+
+  interface HeapOpBlock extends Function<GeneratedMainClass.CodeGenerator, Void> {}
+
+  void doWithObjectExistsCheck(@NonNull GID objectId, @NonNull HeapOpBlock block) {
+    doWithObjectExistenceCheck(true, objectId, block);
+  }
+
+  void doWithObjectNotExistCheck(@NonNull GID objectId, @NonNull HeapOpBlock block) {
+    doWithObjectExistenceCheck(false, objectId, block);
+  }
+
+  void doWithReferenceExistsCheck(
+      @NonNull GID refererId,
+      @NonNull GID referentId,
+      @NonNull GReference.Type referenceType,
+      boolean isVolatile,
+      @NonNull HeapOpBlock block) {
+    doWithReferenceExistenceCheck(true, refererId, referentId, referenceType, isVolatile, block);
+  }
+
+  void doWithReferenceNotExistCheck(
+      @NonNull GID refererId,
+      @NonNull GID referentId,
+      @NonNull GReference.Type referenceType,
+      boolean isVolatile,
+      @NonNull HeapOpBlock block) {
+    doWithReferenceExistenceCheck(false, refererId, referentId, referenceType, isVolatile, block);
+  }
+
+  private void doWithObjectExistenceCheck(
+      boolean exists, @NonNull GID objectId, @NonNull HeapOpBlock block) {
+    GeneratedMainClass.CodeGenerator codeGen = getCodeGen();
+    mainClazz.doWithObjectReachabilityCheck(exists, objectId, () -> block.apply(codeGen));
+  }
+
+  private void doWithReferenceExistenceCheck(
+      boolean exists,
+      @NonNull GID refererId,
+      @NonNull GID referentId,
+      @NonNull GReference.Type referenceType,
+      boolean isVolatile,
+      @NonNull HeapOpBlock block) {
+    Assert.set(hasObject(refererId), "The referer with id %s does not exist", refererId);
+    GeneratedObject referer = getObject(refererId);
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, referentId, referenceType, isVolatile, false);
+    GeneratedMainClass.CodeGenerator codeGen = getCodeGen();
+    if (exists) {
+      codeGen.beginControlFlow(
+          "if (%s.%s != null)".formatted(referer.getJavaDerefId(), fieldInfo.b()));
+    } else {
+      codeGen.beginControlFlow(
+          "if (%s.%s == null)".formatted(referer.getJavaDerefId(), fieldInfo.b()));
+    }
+    block.apply(codeGen);
+    codeGen.endControlFlow();
   }
 
   // -========================================================================
@@ -1054,6 +1205,9 @@ class GeneratedHeap {
     deadReferences.add(reference);
   }
 
+  // Update all generated objects' reachability and identifiers in the
+  // Java world according to the current heap state. This is typically called
+  // when the reference relationship among all generated objects is changed.
   private class HeapUpdater extends GObjectBreadthFirstVisitor {
 
     @NonNull private final GGraph state;
@@ -1068,10 +1222,10 @@ class GeneratedHeap {
       allocator = alloc;
     }
 
-    // Update the heap state
+    // Update the generated objects according to the current heap state
     void update() {
-      // Mark the reachability of all objects
-      markReachability();
+      // Update the reachability of all objects
+      updateReachability();
       // Update strongly reachable objects
       step = GReference.Type.STRONG;
       state.accept(this);
@@ -1085,8 +1239,8 @@ class GeneratedHeap {
       step = null;
     }
 
-    // Mark the reachability of all objects in the current state
-    private void markReachability() {
+    // Update the reachability of all objects in the current state
+    private void updateReachability() {
       // When there's an allocator, objects in the pool should be treated as roots
       if (allocator != null) {
         for (GID objId : allocator.allocatedObjects) {
@@ -1099,7 +1253,16 @@ class GeneratedHeap {
       Map<GID, GReference.Type> reachableObjects = state.markReachability();
       for (GID objId : objects.keySet()) {
         GeneratedObject obj = objects.get(objId);
+        boolean wasReachable = obj.isReachable();
         obj.setReachability(reachableObjects.getOrDefault(objId, null));
+        boolean isReachable = obj.isReachable();
+        if (wasReachable && !isReachable) {
+          // The object becomes unreachable
+          mainClazz.removeReachableObject(objId);
+        } else if (!wasReachable && isReachable) {
+          // The object becomes reachable
+          mainClazz.addReachableObject(objId);
+        }
       }
       // Revert the temporary roots back to ordinary objects
       if (allocator != null) {
@@ -1191,6 +1354,79 @@ class GeneratedHeap {
     new HeapUpdater(allocator).update();
   }
 
+  // Ensure the main class has a static field to reference the root object.
+  // If ensureNotExistBeforeAdding is true, we log an error if the field already exists.
+  // Return the field name.
+  private String addRootRefField(
+      @NonNull GID rootId, GeneratedObjectClass initClass, boolean ensureNotExistBeforeAdding) {
+    String fieldName = GeneratedMainClass.computeFieldName(rootId);
+    if (mainClazz.hasField(fieldName)) {
+      if (ensureNotExistBeforeAdding) {
+        log.error(
+            "The main class already has a field to reference the root object with id %s", rootId);
+      }
+      return fieldName;
+    }
+    if (initClass == null) {
+      // Create a static field in the main class to reference the root object but leave the
+      // field as uninstantiated (i.e., initialize to null) when the main class is loaded.
+      mainClazz.addField(
+          FieldSpec.builder(
+                  GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
+              .initializer("null")
+              .build());
+    } else {
+      // Create a static field in the main class to reference the root object and at the same
+      // time, directly instantiate the root object immediately after the main class is loaded.
+      mainClazz.addField(
+          FieldSpec.builder(
+                  GeneratedObjectBaseClass.clazzName, fieldName, Modifier.PUBLIC, Modifier.STATIC)
+              .initializer("new $T()", initClass.clazzName)
+              .build());
+    }
+    return fieldName;
+  }
+
+  // Ensure the referer class has a field to reference the referent object.
+  // If ensureNotExistBeforeAdding is true, we log an error if the field already exists.
+  // Return the field type and the field name.
+  private Pair<ClassName, String> addNonRootRefField(
+      @NonNull GeneratedObject referer,
+      @NonNull GID referentId,
+      @NonNull GReference.Type referenceType,
+      boolean isVolatile,
+      boolean ensureNotExistBeforeAdding) {
+    GeneratedObjectClass refererClazz = referer.getClazz();
+    String fieldName = GeneratedObject.computeFieldName(referenceType, referentId);
+    ClassName fieldType =
+        switch (referenceType) {
+          case STRONG -> GeneratedObjectBaseClass.clazzName;
+          case SOFT -> ClassName.get(SoftReference.class);
+          case WEAK -> ClassName.get(WeakReference.class);
+          default -> {
+            Assert.panic("Cannot reach here");
+            yield null; // Unreachable, but required by the compiler
+          }
+        };
+    if (refererClazz.hasField(fieldName)) {
+      if (ensureNotExistBeforeAdding) {
+        log.error(
+            "The referer %s already has a field to reference the referent %s",
+            referer.getId(), referentId);
+      }
+      return Pair.of(fieldType, fieldName);
+    }
+    Modifier[] fieldMods;
+    if (isVolatile) {
+      fieldMods = new Modifier[] {Modifier.PUBLIC, Modifier.VOLATILE};
+    } else {
+      fieldMods = new Modifier[] {Modifier.PUBLIC};
+    }
+    refererClazz.addField(
+        FieldSpec.builder(fieldType, fieldName, fieldMods).initializer("null").build());
+    return Pair.of(fieldType, fieldName);
+  }
+
   // Ensure the object is reachable with any reachability type
   private void ensureReachable(GeneratedObject object, String message) {
     if (object.getReachability() == null) {
@@ -1203,6 +1439,7 @@ class GeneratedHeap {
   }
 
   // Ensure the object is reachable with the expected reachability type
+  @SuppressWarnings("SameParameterValue")
   private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {
     if (object.getReachability() != type) {
       if (strict) {
@@ -1213,7 +1450,7 @@ class GeneratedHeap {
     }
   }
 
-  private static String getForceGCCode() {
+  private static @NonNull String getForceGCCode() {
     InputStream iss = GeneratedHeap.class.getClassLoader().getResourceAsStream("ForceGC.java");
     Assert.set(iss != null, "Cannot find ForceGC.java in the resources");
     try (BufferedReader reader = new BufferedReader(new InputStreamReader(iss))) {
