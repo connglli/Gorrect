@@ -252,6 +252,7 @@ class GeneratedHeap {
   // -========================================================================
 
   void initialize(GGraph initState) {
+    mainClazz.switchToInit();
     // Use the object pool to allocate objects during heap state initialization to avoid being
     // collected by the garbage collector.
     try (NonRootInPoolAllocator allocator = getNonRootInPoolAllocator()) {
@@ -276,6 +277,8 @@ class GeneratedHeap {
             reference.getId(), referer, referent, reference.getType(), reference.isVolatile());
       }
     }
+    mainClazz.switchToMain();
+    mainClazz.callInit();
   }
 
   // -========================================================================

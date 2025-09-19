@@ -46,8 +46,14 @@ final class GeneratedMainClass extends GeneratedClass {
 
   // Add an UUID to each case so that we can distinguish them easily.
   @Getter private final String uuid = UUID.randomUUID().toString();
-  // The main method of the main class. It is used to initialize the heap state and execute the
-  // heap manipulation sequence and finally waits for heap dumping.
+  // The initialize method of the main class. It is used to initialize the heap state only.
+  private final MethodSpec.Builder initMethodSpec =
+      MethodSpec.methodBuilder("init")
+          .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
+          .returns(void.class)
+          .addException(Exception.class);
+  // The main method of the main class. It is used to initialize the heap state by calling
+  // initialize and execute the heap manipulation sequence and finally waits for heap dumping.
   private final MethodSpec.Builder mainMethodSpec =
       MethodSpec.methodBuilder("main")
           .addModifiers(Modifier.PUBLIC, Modifier.STATIC)
@@ -55,7 +61,11 @@ final class GeneratedMainClass extends GeneratedClass {
           .addParameter(String[].class, "args")
           .addException(Exception.class);
   // The code generator for the main method.
-  @Getter private final CodeGenerator codeGen = new CodeGenerator(mainMethodSpec);
+  private final CodeGenerator mainCodeGen = new CodeGenerator(mainMethodSpec);
+  // The code generator for the init method.
+  private final CodeGenerator initCodeGen = new CodeGenerator(initMethodSpec);
+  // The current code generator. It is either mainCodeGen or initCodeGen.
+  @Getter private CodeGenerator codeGen = mainCodeGen;
 
   // Keep track of all reachable objects.
   private final Set<String> reachableObjects = new HashSet<>();
@@ -75,6 +85,18 @@ final class GeneratedMainClass extends GeneratedClass {
                 Modifier.STATIC)
             .initializer("new $T()", HashSet.class)
             .build());
+  }
+
+  void callInit() {
+    codeGen.addStatement("init()");
+  }
+
+  void switchToInit() {
+    codeGen = initCodeGen;
+  }
+
+  void switchToMain() {
+    codeGen = mainCodeGen;
   }
 
   void doWithObjectReachabilityCheck(boolean exists, @NonNull GID gid, @NonNull Runnable action) {
@@ -106,6 +128,7 @@ final class GeneratedMainClass extends GeneratedClass {
   @Override
   TypeSpec build() {
     addMethod(mainMethodSpec.build());
+    addMethod(initMethodSpec.build());
     return super.build();
   }
 
