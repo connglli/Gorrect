@@ -97,10 +97,9 @@ public enum SupportedGCs {
                 Long.highestOneBit(
                     Math.clamp((long) (heapCapacity * 0.03125), GRANULE_SIZE, GRANULE_SIZE * 16));
             if (pageMediumSizeMax > PAGE_SMALL_SIZE) {
-              // Any other sizes larger than medium size will be treated as large sizes.
-              // Let's merely add one more.
-              long pageLargeSize = pageMediumSizeMax * 8;
-              return new long[] {PAGE_SMALL_SIZE, pageMediumSizeMax, pageLargeSize};
+              // Any other sizes larger than medium size will be treated as large sizes,
+              // but let's not add too many sizes to avoid complexity and avoid OOM.
+              return new long[] {PAGE_SMALL_SIZE, pageMediumSizeMax};
             } else {
               return new long[] {PAGE_SMALL_SIZE};
             }
