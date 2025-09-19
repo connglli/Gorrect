@@ -500,6 +500,8 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
         }
       }
       optExtraOpts = parsedOpts.toArray(new String[0]);
+    } else {
+      optExtraOpts = new String[0];
     }
 
     if (optOutputDir.exists()) {
@@ -571,10 +573,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
     command.addAll(Arrays.stream(optExtraOpts).toList());
     command.add("-Xmx" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
     command.add("-Xms" + MemorySize.toString(jvm.getHeapCapacity(), 0, true));
-    if (jvm instanceof HotSpotVM) {
-      // TODO: Move this to SupportedGCs as for example .logOptions
-      command.add("-Xlog:gc+init=info::tags");
-    }
+    command.addAll(List.of(argUseGc.getLoggingOptions("stderr")));
     command.add("--version");
     try {
       new ProcessExecutor()
@@ -590,7 +589,7 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       }
       return output;
     } catch (Exception e) {
-      throw new IllegalArgumentException(oss.toString());
+      throw new IllegalArgumentException(oss.toString(), e);
     }
   }
 }
