@@ -251,6 +251,7 @@ class GeneratedHeap {
   // Initialization and Setup
   // -========================================================================
 
+  /// Initialize the heap with the given init state.
   void initialize(GGraph initState) {
     mainClazz.switchToInit();
     // Use the object pool to allocate objects during heap state initialization to avoid being
@@ -285,6 +286,8 @@ class GeneratedHeap {
   // Object Allocation and Free
   // -========================================================================
 
+  /// Allocate a root object with the given id and size, and instantiate it when the main class is
+  /// loaded. Note that, this method asserts the object does not exist yet before allocating it.
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocRootWithInitializer(@NonNull GID rootId, long rootSize) {
@@ -301,6 +304,9 @@ class GeneratedHeap {
     return rootObj;
   }
 
+  /// Allocate a root object with the given id and size. It would not be instantiated (or remains
+  /// null) when the main class is loaded. Note that, this method asserts that if the object does
+  /// not exists before allocating it.
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocRootWithoutInitializer(@NonNull GID rootId, long rootSize) {
@@ -319,6 +325,11 @@ class GeneratedHeap {
     return rootObj;
   }
 
+  /// Allocate a root object with the given id and size if it does not exist yet. It would not be
+  /// instantiated (or remains null) when the main class is loaded. Note that, if the object already
+  /// exists, it would not be instantiated again, and the existing object would be returned.
+  /// However, in either case, an instantiation statement would be written out (but won't be
+  /// executed at runtime since the object already exists in the heap).
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocRootIfNotExistWithoutInitializer(@NonNull GID rootId, long rootSize) {
@@ -340,10 +351,14 @@ class GeneratedHeap {
     return object;
   }
 
+  /// Return a NonRootInPoolAllocator to allocate non-root objects in the object pool.
   NonRootInPoolAllocator getNonRootInPoolAllocator() {
     return new NonRootInPoolAllocator();
   }
 
+  /// A helper class to allocate non-root objects in the object pool. This class exists to make some
+  /// non-root as root temporarily so that they won't be garbage collected during heap
+  /// initialization or some non-root allocations.
   class NonRootInPoolAllocator implements AutoCloseable {
     private final List<GID> allocatedObjects = new ArrayList<>();
 
@@ -383,20 +398,19 @@ class GeneratedHeap {
         @NonNull GeneratedObject referent,
         @NonNull GReference.Type referenceType,
         @NonNull Boolean isVolatile) {
-      GeneratedReference reference =
-          GeneratedHeap.this.reference(referenceId, referer, referent, referenceType, isVolatile);
       // After referencing, the reachability of the objects might change.
       // So we need to patch it back to avoid our allocated objects (and its referents)
       // from being set as non-strongly reachable.
-      updateHeap(this);
-      return reference;
+      return GeneratedHeap.this.reference(
+          referenceId, referer, referent, referenceType, isVolatile, this);
     }
 
     public void clear() {
+      allocatedObjects.clear();
       // We clear the pool to release all the strong references
       appendStatement(OBJECT_POOL_NAME + ".clear()");
       // The reference relationship is changed, we should update the heap
-      updateHeap(this);
+      updateHeap();
     }
 
     @Override
@@ -405,6 +419,8 @@ class GeneratedHeap {
     }
   }
 
+  /// Allocate a non-root object with the given id and size, and reference it from the given
+  /// referer. Note that, this method asserts the object does not exist yet before allocating it.
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocNonRootAndReference(
@@ -475,6 +491,11 @@ class GeneratedHeap {
     return object;
   }
 
+  /// Allocate a non-root object with the given id and size if it does not exist yet, and reference
+  /// it from the given referer. Note that, if the object already exists, it would not be allocated
+  /// again, and the existing object would be returned. However, in either case, a reference
+  /// statement would be written out (but won't be executed at runtime since the object already
+  /// exists in the heap).
   @NonNull
   @SuppressWarnings("UnusedReturnValue")
   GeneratedObject allocNonRootIfNotExistAndReference(
@@ -554,6 +575,9 @@ class GeneratedHeap {
     return object;
   }
 
+  /// Free the given object from the heap. Note that, this method asserts the object exists
+  /// object before freeing it. Freeing an object also means free everything that it references
+  /// and is referenced by it.
   void freeObject(@NonNull GeneratedObject object) {
     object
         .getReferents()
@@ -584,7 +608,7 @@ class GeneratedHeap {
     moveObjectToDead(object);
   }
 
-  // Remove all unreachable objects from the heap
+  /// Remove all unreachable objects from the heap
   public void clean(boolean appGCStmt) {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getReachableObjects();
@@ -604,7 +628,7 @@ class GeneratedHeap {
     updateHeap();
   }
 
-  // Remove all unreachable and weakly reachable objects from the heap
+  /// Remove all unreachable and weakly reachable objects from the heap
   public void compact(boolean appGCStmt) {
     GGraph state = getState();
     Map<GID, GReference.Type> reachability = state.markReachability();
@@ -625,7 +649,7 @@ class GeneratedHeap {
     updateHeap();
   }
 
-  // Remove all unreachable and weakly reachable and softly reachable objects from the heap
+  /// Remove all unreachable and weakly reachable and softly reachable objects from the heap
   public void stressCompact(boolean appGCStmt) {
     GGraph state = getState();
     Set<GID> reachableObjects = state.getStronglyReachableObjects();
@@ -649,6 +673,8 @@ class GeneratedHeap {
   // Object Role Transition
   // -========================================================================
 
+  /// Make a non-root object root. Note that, this method asserts the object exists and is not yet
+  /// a root before making it root.
   void makeRoot(@NonNull GeneratedObject object) {
     ensureReachable(
         object,
@@ -667,6 +693,8 @@ class GeneratedHeap {
     updateHeap();
   }
 
+  /// Make a root object non-root. Note that, this method asserts the object exists and is a root
+  /// before making it non-root.
   void makeNonRoot(@NonNull GeneratedObject root) {
     Assert.set(root.isRoot(), "The object with id %s is not yet a root object", root.getId());
     String fieldName = GeneratedMainClass.computeFieldName(root.getId());
@@ -754,6 +782,9 @@ class GeneratedHeap {
     return null; // Unreachable, but required by the compiler
   }
 
+  /// Add a reference from the given referer to the given referent with the given type. Note that,
+  /// this method asserts the reference does not exist yet before adding it and the referer and
+  /// referent are both existed objects in the heap.
   @NonNull
   GeneratedReference reference(
       @NonNull GID referenceId,
@@ -761,53 +792,14 @@ class GeneratedHeap {
       @NonNull GeneratedObject referent,
       @NonNull GReference.Type referenceType,
       @NonNull Boolean isVolatile) {
-    Assert.set(!hasReference(referenceId), "The reference with id %s already exists", referenceId);
-    ensureReachable(
-        referer,
-        GReference.Type.STRONG,
-        "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
-            .formatted(referer.getId(), referer.getJavaRefId()));
-
-    Pair<ClassName, String> fieldInfo =
-        addNonRootRefField(referer, referent.getId(), referenceType, isVolatile, false);
-    ClassName fieldType = fieldInfo.a();
-    String fieldName = fieldInfo.b();
-
-    switch (referenceType) {
-      case STRONG:
-        appendStatement(
-            "%s.%s = %s".formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
-        break;
-
-      case SOFT, WEAK:
-        appendStatement(
-            "%s.%s = new $T<$T>(%s)"
-                .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
-            fieldType,
-            referent.getClazz().clazzName);
-        break;
-
-      default:
-        Assert.panic("Cannot reach here");
-        break;
-    }
-
-    // The reference relationship is changed, we should update the heap
-    GeneratedReference reference =
-        putReference(
-            new GeneratedReference(
-                this,
-                referenceId,
-                fieldName,
-                referer.getId(),
-                referent.getId(),
-                referenceType,
-                isVolatile));
-    updateHeap();
-
-    return reference;
+    return reference(referenceId, referer, referent, referenceType, isVolatile, null);
   }
 
+  /// Add a reference from the given referer to the given referent with the given type if the
+  /// reference does not exist. Note that, the referer and referent are both existed objects in the
+  /// heap. If the reference already exists, it would not be added again, and the existing reference
+  /// would be returned. However, in either case, a reference statement would be written out (but
+  /// won't be executed at runtime since the reference already exists in the heap).
   @SuppressWarnings("UnusedReturnValue")
   @NonNull
   GeneratedReference referenceIfNotExist(
@@ -868,6 +860,8 @@ class GeneratedHeap {
     return reference;
   }
 
+  /// Change the referent of the given reference to the new referent. Note that, this method asserts
+  /// the reference exists and the new referent is an existed object in the heap.
   void redirect(GeneratedReference reference, GeneratedObject newReferent) {
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
@@ -917,6 +911,8 @@ class GeneratedHeap {
     updateHeap();
   }
 
+  /// Change the type of the given reference to its stronger type. Note that, this method asserts
+  /// the reference exists and the referent is an existed object in the heap.
   void strengthen(GeneratedReference reference) {
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
@@ -938,6 +934,8 @@ class GeneratedHeap {
     updateHeap();
   }
 
+  /// Change the type of the given reference to its weaker type. Note that, this method asserts
+  /// the reference exists and the referent is an existed object in the heap.
   void soften(GeneratedReference reference) {
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
@@ -959,6 +957,8 @@ class GeneratedHeap {
     updateHeap();
   }
 
+  /// Unlink the given reference from the heap. Note that, this method asserts the reference exists
+  /// and the referer and referent are both existed objects in the heap.
   void unlink(@NonNull GeneratedReference reference) {
     GeneratedObject referer = reference.getReferer();
     GeneratedObject referent = reference.getReferent();
@@ -982,20 +982,84 @@ class GeneratedHeap {
     updateHeap();
   }
 
+  @NonNull
+  private GeneratedReference reference(
+      @NonNull GID referenceId,
+      @NonNull GeneratedObject referer,
+      @NonNull GeneratedObject referent,
+      @NonNull GReference.Type referenceType,
+      @NonNull Boolean isVolatile,
+      NonRootInPoolAllocator allocator) {
+    Assert.set(!hasReference(referenceId), "The reference with id %s already exists", referenceId);
+    ensureReachable(
+        referer,
+        GReference.Type.STRONG,
+        "Adding referents to the non-strongly reachable object (id=%s, java_identifier=%s) might introduce NullPointerExceptions"
+            .formatted(referer.getId(), referer.getJavaRefId()));
+
+    Pair<ClassName, String> fieldInfo =
+        addNonRootRefField(referer, referent.getId(), referenceType, isVolatile, false);
+    ClassName fieldType = fieldInfo.a();
+    String fieldName = fieldInfo.b();
+
+    switch (referenceType) {
+      case STRONG:
+        appendStatement(
+            "%s.%s = %s".formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()));
+        break;
+
+      case SOFT, WEAK:
+        appendStatement(
+            "%s.%s = new $T<$T>(%s)"
+                .formatted(referer.getJavaDerefId(), fieldName, referent.getJavaDerefId()),
+            fieldType,
+            referent.getClazz().clazzName);
+        break;
+
+      default:
+        Assert.panic("Cannot reach here");
+        break;
+    }
+
+    // The reference relationship is changed, we should update the heap
+    GeneratedReference reference =
+        putReference(
+            new GeneratedReference(
+                this,
+                referenceId,
+                fieldName,
+                referer.getId(),
+                referent.getId(),
+                referenceType,
+                isVolatile));
+    updateHeap(allocator);
+
+    return reference;
+  }
+
   // -========================================================================
   // Heap Operations Guarded by Conditions
   // -========================================================================
 
   interface HeapOpBlock extends Function<GeneratedMainClass.CodeGenerator, Void> {}
 
+  /// Execute the given block with checking that the object does exist.
+  /// Note, in either case (exists or not), the block will be executed to generate code.
+  /// However, for non-existence case, code generated by the block will not be executed.
   void doWithObjectExistsCheck(@NonNull GID objectId, @NonNull HeapOpBlock block) {
     doWithObjectExistenceCheck(true, objectId, block);
   }
 
+  /// Execute the given block with checking that the object does not exist.
+  /// Note, in either case (exists or not), the block will be executed to generate code.
+  /// However, for non-existence case, code generated by the block will not be executed.
   void doWithObjectNotExistCheck(@NonNull GID objectId, @NonNull HeapOpBlock block) {
     doWithObjectExistenceCheck(false, objectId, block);
   }
 
+  /// Execute the given block with checking that the reference does exist.
+  /// Note, in either case (exists or not), the block will be executed to generate code.
+  /// However, for non-existence case, code generated by the block will not be executed.
   void doWithReferenceExistsCheck(
       @NonNull GID refererId,
       @NonNull GID referentId,
@@ -1005,6 +1069,9 @@ class GeneratedHeap {
     doWithReferenceExistenceCheck(true, refererId, referentId, referenceType, isVolatile, block);
   }
 
+  /// Execute the given block with checking that the reference does not exist.
+  /// Note, in either case (exists or not), the block will be executed to generate code.
+  /// However, for non-existence case, code generated by the block will not be executed.
   void doWithReferenceNotExistCheck(
       @NonNull GID refererId,
       @NonNull GID referentId,
@@ -1047,9 +1114,9 @@ class GeneratedHeap {
   // Oracle Checking and Generation
   // -========================================================================
 
-  // Generate the oracle state check at the end of the main method to ensure that the heap
-  // state of the generated Java code after execution matches the oracle state.
-  // Note, this is a softer check compared to the one in JavaOracle.
+  /// Generate the oracle state check at the end of the main method to ensure that the heap
+  /// state of the generated Java code after execution matches the oracle state.
+  /// Note, this is a softer check compared to the one in JavaOracle.
   void appendOracleCheck(@NonNull GGraph oracleState) {
     // Update the heap to ensure the state is up-to-date
     updateHeap();
