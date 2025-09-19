@@ -139,28 +139,28 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   @CommandLine.Option(
       names = {"--min-roots"},
       paramLabel = "number",
-      description = "Minimum number of root objects",
+      description = "Minimum number of root objects for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinRoots = 1;
 
   @CommandLine.Option(
       names = {"--max-roots"},
       paramLabel = "number",
-      description = "Maximum number of root objects",
+      description = "Maximum number of root objects for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxRoots = 3;
 
   @CommandLine.Option(
       names = {"--min-nroots"},
       paramLabel = "number",
-      description = "Minimum number of non-root objects",
+      description = "Minimum number of non-root objects for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinNonRoots = 2;
 
   @CommandLine.Option(
       names = {"--max-nroots"},
       paramLabel = "number",
-      description = "Maximum number of non-root objects",
+      description = "Maximum number of non-root objects for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxNonRoots = 5;
 
@@ -181,14 +181,14 @@ abstract class GraphSmithOptionsMixin extends GorrectSubCommandOptionsMixin {
   @CommandLine.Option(
       names = {"--min-refs"},
       paramLabel = "number",
-      description = "Minimum number of references",
+      description = "Minimum number of references for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMinReferences = 15;
 
   @CommandLine.Option(
       names = {"--max-refs"},
       paramLabel = "number",
-      description = "Maximum number of references",
+      description = "Maximum number of references for the initial state",
       showDefaultValue = CommandLine.Help.Visibility.ALWAYS)
   protected int optMaxReferences = 25;
 
