@@ -530,7 +530,14 @@ public class JavaFuzzer {
         if (failure.strict) {
           generateBugReport(ps, (Oracle.ValidationResult) failure.failure);
         } else {
-          generateBugReport(ps, (JavaExecutor.Result) failure.failure);
+          JavaExecutor.Result result = (JavaExecutor.Result) failure.failure;
+          // For execution timeout and compilation timeout, we do not keep them
+          if (result.exitCode() == JavaExecutor.ExitCode.EXECUTION_TIMEOUT
+              || result.exitCode() == JavaExecutor.ExitCode.COMPILATION_TIMEOUT) {
+            io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(Path.of(workdir));
+          } else {
+            generateBugReport(ps, result);
+          }
         }
       } catch (FileNotFoundException e) {
         log.warning("Worker failed to create the bug report file: %s", e.getMessage());
