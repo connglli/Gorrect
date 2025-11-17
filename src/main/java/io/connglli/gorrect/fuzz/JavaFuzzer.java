@@ -392,10 +392,11 @@ public class JavaFuzzer {
           try {
             log.error(e);
           } catch (AssertionError ex) {
-            // Remove to avoid occupying too much disk space
-            // FIXME: Find a good way to retain this information for debugging
-            io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
+            // pass
           }
+          // Remove to avoid occupying too much disk space
+          // FIXME: Find a good way to retain this information for debugging
+          io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
           continue;
         }
         try {
