@@ -86,8 +86,13 @@ public final class HostJVM {
     String version = getJavaVersion();
     if (version.startsWith("1.")) {
       return Integer.parseInt(version.substring(2, 3)); // Java 1.x versions
-    } else {
+    } else if (version.contains(".")) {
       return Integer.parseInt(version.split("\\.")[0]); // Java 9 and above
+    } else if (version.contains("-internal")) {
+      return Integer.parseInt(version.split("-")[0].split("\\.")[0]); // Trunk versions
+    } else {
+      Assert.panic("Unrecognized java.version format: " + version);
+      return -1; // Cannot reach here, but needed for compilation
     }
   }
 
@@ -95,9 +100,14 @@ public final class HostJVM {
     String version = getJavaVersion();
     if (version.startsWith("1.")) {
       return Integer.parseInt(version.substring(2, 3)); // Java 1.x versions
-    } else {
+    } else if (version.contains(".")) {
       String[] parts = version.split("\\.");
       return parts.length > 1 ? Integer.parseInt(parts[1]) : 0; // Java 9 and above
+    } else if (version.contains("-internal")) {
+      return 0; // Trunk versions
+    } else {
+      Assert.panic("Unrecognized java.version format: " + version);
+      return -1; // Cannot reach here, but needed for compilation
     }
   }
 
