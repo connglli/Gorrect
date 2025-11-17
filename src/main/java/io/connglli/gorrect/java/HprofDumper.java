@@ -72,8 +72,12 @@ public class HprofDumper extends InputStream {
       try {
         Thread.sleep(5L);
       } catch (InterruptedException e) {
-        log.error(
-            "Thread interrupted while waiting for the generated java process to start: %s", e);
+        try {
+          log.error(
+              "Thread interrupted while waiting for the generated java process to start: %s", e);
+        } catch (AssertionError ex) {
+          // pass
+        }
         closed = true;
         return -1; // EOF if interrupted
       }
