@@ -1431,10 +1431,10 @@ class GeneratedHeap {
       @NonNull GID rootId, GeneratedObjectClass initClass, boolean ensureNotExistBeforeAdding) {
     String fieldName = GeneratedMainClass.computeFieldName(rootId);
     if (mainClazz.hasField(fieldName)) {
-      if (ensureNotExistBeforeAdding) {
-        log.error(
-            "The main class already has a field to reference the root object with id %s", rootId);
-      }
+      Assert.set(
+          !ensureNotExistBeforeAdding,
+          "The main class already has a field to reference the root object with id %s",
+          rootId);
       return fieldName;
     }
     if (initClass == null) {
@@ -1479,11 +1479,11 @@ class GeneratedHeap {
           }
         };
     if (refererClazz.hasField(fieldName)) {
-      if (ensureNotExistBeforeAdding) {
-        log.error(
-            "The referer %s already has a field to reference the referent %s",
-            referer.getId(), referentId);
-      }
+      Assert.set(
+          !ensureNotExistBeforeAdding,
+          "The referer %s already has a field to reference the referent %s",
+          referer.getId(),
+          referentId);
       return Pair.of(fieldType, fieldName);
     }
     Modifier[] fieldMods;
@@ -1501,7 +1501,7 @@ class GeneratedHeap {
   private void ensureReachable(GeneratedObject object, String message) {
     if (object.getReachability() == null) {
       if (strict) {
-        log.error(message);
+        Assert.panic(message);
       } else {
         log.warning(message);
       }
@@ -1513,7 +1513,7 @@ class GeneratedHeap {
   private void ensureReachable(GeneratedObject object, GReference.Type type, String message) {
     if (object.getReachability() != type) {
       if (strict) {
-        log.error(message);
+        Assert.panic(message);
       } else {
         log.warning(message);
       }

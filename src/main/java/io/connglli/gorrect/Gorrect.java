@@ -536,14 +536,12 @@ class FuzzCommand extends ProgramSmithOptionsMixin implements GorrectSubCommand 
       String testLog = testJVM(jvm);
       log.info("Success\n" + testLog);
     } catch (Exception e) {
-      log.error(
+      Assert.panic(
           "Error: The specified JVM configuration is invalid. See below message:\n"
               + e.getMessage());
     }
 
-    if (!optOutputDir.mkdir()) {
-      log.error("Failed to create the output directory: " + optOutputDir);
-    }
+    Assert.set(optOutputDir.mkdir(), "Failed to create the output directory: " + optOutputDir);
 
     // Start the fuzzer
     new JavaFuzzer(

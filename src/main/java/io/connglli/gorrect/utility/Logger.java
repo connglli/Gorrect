@@ -137,6 +137,15 @@ public class Logger {
   }
 
   // - ===========================================
+  // - Logging with Assertion (Panic)
+  // - ===========================================
+
+  public void panic(Throwable t) {
+    error(t);
+    Assert.panic("");
+  }
+
+  // - ===========================================
   // - Logging Methods
   // - ===========================================
 
@@ -151,12 +160,10 @@ public class Logger {
         log(Level.SEVERE, "    at " + e.toString());
       }
     }
-    Assert.panic("");
   }
 
   public void error(String message, Object... args) {
     log(Level.SEVERE, safeFormat(message, args));
-    Assert.panic(safeFormat(message, args));
   }
 
   public void warning(String message, Object... args) {

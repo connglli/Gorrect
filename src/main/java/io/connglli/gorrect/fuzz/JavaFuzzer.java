@@ -267,11 +267,7 @@ public class JavaFuzzer {
       log.info("Shutting down the fuzzer ...");
     } catch (Exception e) {
       log.info(Logger.AnsiColor.RED, "The fuzzer has encountered an unexpected error; see below");
-      try {
-        log.error(e);
-      } catch (AssertionError ex) {
-        // pass
-      }
+      log.error(e);
       log.info("Shutting down the fuzzer ...");
       workers.close();
     }
@@ -320,6 +316,7 @@ public class JavaFuzzer {
       } catch (IOException e) {
         log.error("Failed to create the working and bugs directory; see below");
         log.error(e);
+        Assert.panic(e.getMessage());
         return;
       }
       // Initialize the random seed for this worker
@@ -333,11 +330,7 @@ public class JavaFuzzer {
       } catch (Throwable e) {
         recoverLogging();
         log.warning("Worker has encountered an error: %s", e.getMessage());
-        try {
-          log.error(e);
-        } catch (AssertionError ex) {
-          // pass
-        }
+        log.error(e);
         log.warning("Worker is shutting down due to the error");
       }
 
@@ -389,11 +382,7 @@ public class JavaFuzzer {
           recoverLogging();
           log.warning(
               "Worker encountered errors during fuzzing at iteration %d: %s", i, e.getMessage());
-          try {
-            log.error(e);
-          } catch (AssertionError ex) {
-            // pass
-          }
+          log.error(e);
           // Remove to avoid occupying too much disk space
           // FIXME: Find a good way to retain this information for debugging
           io.connglli.gorrect.utility.Files.deleteFileTreeIfExists(testPath);
@@ -457,7 +446,7 @@ public class JavaFuzzer {
       if (oracleState.equals(transState)) {
         log.info("Good: The state of the Java translator matches the Oracle interpreter state.");
       } else {
-        log.error("BAD: There must be a bug in the Java translator due to state mismatch!");
+        Assert.panic("BAD: There must be a bug in the Java translator due to state mismatch!");
       }
 
       // Export the Java program to a file and execute it

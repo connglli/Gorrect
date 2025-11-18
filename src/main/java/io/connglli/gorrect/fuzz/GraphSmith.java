@@ -271,14 +271,9 @@ public class GraphSmith {
           "Adjusting object padding (%s bytes) to be smaller than the minimum size (%s bytes)",
           Formats.toCommaString(paddingSize), Formats.toCommaString(config.minObjSizeBytes));
     }
-    if (paddingSize < 0 || objectSize > vm.getHeapUnusedBytes()) {
-      log.error(
-          "Too many objects allocated, making heap out of memory. Try increasing the heap size or decreasing the number of objects.");
-    }
-    if (paddingSize < 0) {
-      Assert.panic(
-          "Too many objects allocated, making heap out of memory. Try increasing the heap size or decreasing the number of objects.");
-    }
+    Assert.set(
+        paddingSize >= 0 && objectSize <= vm.getHeapUnusedBytes(),
+        "Too many objects allocated, making heap out of memory. Try increasing the heap size or decreasing the number of objects.");
     if (type == GObject.Type.GCROOT) {
       return heap.allocRootObject(id, paddingSize);
     } else {
@@ -287,11 +282,9 @@ public class GraphSmith {
   }
 
   private boolean nextReference(OracleHeap heap, List<OracleObject> objects) {
-    if (heap.getLvm().getHeapUnusedBytes() == 0) {
-      log.error(
-          "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
-      return false;
-    }
+    Assert.set(
+        heap.getLvm().getHeapUnusedBytes() != 0,
+        "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
 
     int u = random.nextInt(objects.size());
     int v = random.nextInt(objects.size());
@@ -326,10 +319,9 @@ public class GraphSmith {
   }
 
   private void enforceReachabilityFromRoots(OracleHeap heap) {
-    if (heap.getLvm().getHeapUnusedBytes() == 0) {
-      log.error(
-          "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
-    }
+    Assert.set(
+        heap.getLvm().getHeapUnusedBytes() != 0,
+        "Cannot add any references, heap is out of memory. Try increasing the heap size or decreasing the number of objects.");
 
     GGraph graph = heap.getState(false);
     List<GID> reachable = new ArrayList<>(graph.getReachableObjects());

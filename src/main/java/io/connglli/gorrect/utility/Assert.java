@@ -33,6 +33,10 @@ public class Assert {
   }
 
   public static void panic(String message, Object... args) {
-    throw new AssertionError(message.formatted(args));
+    if (args.length == 0) {
+      throw new AssertionError(message);
+    } else {
+      throw new AssertionError(message.formatted(args));
+    }
   }
 }
