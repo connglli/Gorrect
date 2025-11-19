@@ -1,9 +1,22 @@
 # Gorrect
 
-## Approach
+Garbage collection is one of the foundational components of language virtual machines (LVMs). Its implementations are
+sophisticated, and ensuring their long-term correctness is inherently challenging. We are working on a project aimed at
+validating the correctness of LVM's GC implementations. However, GC behavior is emergent: it results from the
+interaction between mutator actions (application code manipulating object graphs) and collector actions (heap traversal
+and reclamation). This makes correctness validation non-trivial.
 
-The draft idea on validating the correctness of the implementations of the GC in an LVM is based on *Object Graph* and
-manipulations on it:
+Our goal is to build a test-generation framework—conceptually similar to fuzzing—that can automatically produce a large
+number of GC-relevant test cases. These test cases should accurately model GC-meaningful heap behavior so that we can
+determine, for each generated program, the *expected* object state. Ideally, the generator should be GC-agnostic so that
+the same tests can be applied across multiple collectors (e.g., G1, Shenandoah, ZGC); but in practice, it also engages a
+lot of details such as region size to trigger diverse GC operations.
+
+To achieve this, we maintain a minimal and clean conceptual model of the heap, tracking all allocated objects and their
+expected liveness. The core idea is to model and manipulate an *object graph*—the essential structure that both mutator
+threads and GC threads interact with.
+
+## Approach
 
 1. Initialize a graph G = (V, E): Nodes represent objects, edges represent references.
 2. Generate manipulation sequence t: A sequence of operations: add_node, remove_node, add_edge, remove_edge, where edges
@@ -34,7 +47,8 @@ Each node has the following attributes:
     * It is also difficult to determine if an object is humongous or not as different GCs have different
       implementations.
 * **Age**: The age of the object.
-    * This attribute is optional as it can be indicated from the number of GC cycles.
+    * This attribute is optional as it can be indicated from the number of GC cycles. However, this attribute is
+      possibly useful when we want to model generational GCs.
     * It is also difficult to determine the age of an object as different GCs have different implementations.
 
 Each edge has the following attributes:
@@ -45,6 +59,7 @@ Each edge has the following attributes:
 * **Target**: The ID of the referent object.
 * **Volatile**: Indicate if this reference is volatile or not.
     * This attribute has no influence on the graph model and only useful when translating the graph into some VM code
+    * It decides the visibility and ordering of the reference access in a multi-thread environment.
 
 There're some other features that can be added to the graph model, such as:
 
