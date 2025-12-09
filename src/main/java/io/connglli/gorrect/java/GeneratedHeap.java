@@ -1099,12 +1099,26 @@ class GeneratedHeap {
     Pair<ClassName, String> fieldInfo =
         addNonRootRefField(referer, referentId, referenceType, isVolatile, false);
     GeneratedMainClass.CodeGenerator codeGen = getCodeGen();
+    // TODO: Find a better way to check the existence of a reference
+    String deref = referenceType == GReference.Type.STRONG ? "" : ".get()";
     if (exists) {
       codeGen.beginControlFlow(
-          "if (%s.%s != null)".formatted(referer.getJavaDerefId(), fieldInfo.b()));
+          "if (%s.%s != null && %s.%s%s != null)"
+              .formatted(
+                  referer.getJavaDerefId(),
+                  fieldInfo.b(),
+                  referer.getJavaDerefId(),
+                  fieldInfo.b(),
+                  deref));
     } else {
       codeGen.beginControlFlow(
-          "if (%s.%s == null)".formatted(referer.getJavaDerefId(), fieldInfo.b()));
+          "if (%s.%s == null || %s.%s%s == null)"
+              .formatted(
+                  referer.getJavaDerefId(),
+                  fieldInfo.b(),
+                  referer.getJavaDerefId(),
+                  fieldInfo.b(),
+                  deref));
     }
     block.apply(codeGen);
     codeGen.endControlFlow();
@@ -1156,9 +1170,10 @@ class GeneratedHeap {
       GeneratedObject obj = getObject(objId);
       appendStatement(
           """
-          assert %s == null : "The %s-reachable object with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+          assert %s != null && %s == null : "The %s-reachable object with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
           """
-              .formatted(obj.getJavaRefId(), GReference.Type.WEAK, obj.getId()));
+              .formatted(
+                  obj.getJavaRefId(), obj.getJavaDerefId(), GReference.Type.WEAK, obj.getId()));
     }
 
     // See the matrix in JavaOracle for the expected relationship between referers and referents.
@@ -1188,19 +1203,23 @@ class GeneratedHeap {
       } else if (oracleReferentReach == GReference.Type.WEAK) {
         appendStatement(
             """
-            assert %s == null : "The %s-reachable referent with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+            assert %s != null && %s == null : "The %s-reachable referent with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
             """
                 .formatted(
                     getObject(oracleReferent).getJavaRefId(),
+                    getObject(oracleReferent).getJavaDerefId(),
                     GReference.Type.WEAK,
                     oracleReferent));
       } else if (oracleRefererReach == GReference.Type.WEAK) {
         appendStatement(
             """
-            assert %s == null : "The %s-reachable referer with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
+            assert %s != null && %s == null : "The %s-reachable referer with ID %s (in the oracle state) was found in the runtime state while it shouldn't exist"\
             """
                 .formatted(
-                    getObject(oracleReferer).getJavaRefId(), GReference.Type.WEAK, oracleReferer));
+                    getObject(oracleReferer).getJavaRefId(),
+                    getObject(oracleReferer).getJavaDerefId(),
+                    GReference.Type.WEAK,
+                    oracleReferer));
       }
     }
   }
