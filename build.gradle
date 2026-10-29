@@ -1,0 +1,33 @@
+plugins {
+    id 'base'
+}
+
+ext {
+    engineJavaVersion = 21
+    targetJavaVersion = 17
+}
+
+allprojects {
+    group = 'io.connglli.gorrect'
+    version = '0.1.0-SNAPSHOT'
+}
+
+subprojects {
+    plugins.withId('java') {
+        java {
+            toolchain.languageVersion = JavaLanguageVersion.of(rootProject.engineJavaVersion)
+        }
+
+        tasks.withType(JavaCompile).configureEach {
+            options.release = project.name == 'engine' ? rootProject.engineJavaVersion : rootProject.targetJavaVersion
+            options.encoding = 'UTF-8'
+            options.compilerArgs.addAll(['-Xlint:all', '-Werror'])
+        }
+    }
+}
+
+['assemble', 'check', 'clean'].each { taskName ->
+    tasks.named(taskName) {
+        dependsOn subprojects.collect { "${it.path}:${taskName}" }
+    }
+}

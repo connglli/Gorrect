@@ -48,3 +48,5 @@ venv/
 
 ### Gorrect ###
 generated/
+runs/
+profiles/local/

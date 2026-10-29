@@ -33,7 +33,7 @@ The runner launches the target with the compiled case and manages its lifetime. 
 | `protocol` | Java 17 | Shared commands, records, schemas, and Java codecs |
 | `native` | C++17 | JNI entry points and JVMTI observation inside the target JVM |
 
-Gradle builds the Java units and invokes CMake for the native library. Toolchains and dependency versions are pinned. The shared runtime, protocol, and ordinary generated programs compile with `--release 17` so that they cannot accidentally depend on newer Java APIs.
+Gradle builds the Java units and invokes CMake for the native library. The wrapper pins Gradle; compiler language levels and dependency versions are explicit in the build. The runtime, protocol, and ordinary generated programs compile with `--release 17` to exclude newer Java APIs. Java and C++ compiler warnings fail the build.
 
 The engine and runtime depend on the protocol. The runtime has no dependency on the engine, GIR interpreter, or oracle. The native library implements the observation record format defined by the protocol.
 

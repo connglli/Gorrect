@@ -58,7 +58,7 @@ Before extending the design, ask whether the mechanism is necessary, whether a s
 1. Run the formatting, compiler, and test checks relevant to the change. Report failures and checks that could not run.
 2. Run the existing pre-commit hooks on changed files. Preserve both the `pre-commit` and `commit-msg` hook stages and their configuration.
 3. Review the diff and `git status` for unintended changes and generated artifacts.
-4. Ask the user to review changes before committing, unless the user has already authorized the commit in the session.
+4. Stage all changes and ask the user to review changes before committing, unless the user has already authorized the commit in the session.
 5. Use a Conventional Commit message with a title of at most 50 characters and a body that explains intent and design impact when needed. Follow [commit attribution](#commit-attribution) for agent co-author trailers.
 
 ## Commit attribution
