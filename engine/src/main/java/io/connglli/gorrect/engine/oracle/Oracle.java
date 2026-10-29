@@ -27,7 +27,8 @@ public final class Oracle {
     var machine = new GraphMachine(program, limits);
     execute(program.body(), machine);
     machine.leaveScope();
-    return new OracleResult(machine.snapshot(), machine.checkpoints(), machine.steps());
+    return new OracleResult(
+        machine.snapshot(), machine.checkpoints(), machine.steps(), machine.events());
   }
 
   private static void execute(List<Instruction> instructions, GraphMachine machine) {
@@ -35,14 +36,14 @@ public final class Oracle {
       switch (instruction) {
         case Instruction.Operation operation -> machine.apply(operation);
         case Instruction.Scope scope -> {
-          machine.step();
+          machine.step(scope.id(), false);
           scoped(scope.body(), machine);
         }
         case Instruction.Repeat repeat -> {
-          machine.step();
+          machine.step(repeat.id(), false);
           for (long iteration = 0; iteration < repeat.count(); iteration++) {
             // Empty bodies must still consume budget to bound loop execution.
-            machine.step();
+            machine.step(repeat.id(), true);
             scoped(repeat.body(), machine);
           }
         }

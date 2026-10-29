@@ -1,0 +1,19 @@
+gir 1;
+shape N object 2 1;
+object 1 N [2, null] [7];
+object 2 N [1, null] [9];
+root main = 1;
+
+program {
+  before: checkpoint;
+  scope {
+    read-root parent N main;
+    read-ref child N parent 0;
+    read-data saved child 0;
+    write-data child 0 42;
+    allocate fresh N;
+    write-data fresh 0 saved;
+    write-ref parent 1 fresh;
+  }
+  after: checkpoint;
+}

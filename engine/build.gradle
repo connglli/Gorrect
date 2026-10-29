@@ -1,12 +1,36 @@
 plugins {
-    id 'java-library'
+    id 'application'
+}
+
+application {
+    mainClass = 'io.connglli.gorrect.engine.cli.Main'
+    applicationName = 'gorrect'
 }
 
 dependencies {
     implementation project(':protocol')
+    implementation 'com.google.code.gson:gson:2.14.0'
     testImplementation platform('org.junit:junit-bom:6.1.3')
     testImplementation 'org.junit.jupiter:junit-jupiter'
     testRuntimeOnly 'org.junit.platform:junit-platform-launcher'
+}
+
+configurations {
+    nativeObserver { canBeConsumed = false; canBeResolved = true }
+}
+
+dependencies { nativeObserver project(path: ':native', configuration: 'observerLibrary') }
+
+distributions {
+    main {
+        contents {
+            into('support') {
+                from({ project(':runtime').tasks.named('jar').get() }) { rename { 'runtime.jar' } }
+                from({ project(':protocol').tasks.named('jar').get() }) { rename { 'protocol.jar' } }
+                from(configurations.nativeObserver)
+            }
+        }
+    }
 }
 
 dependencyLocking {
@@ -16,6 +40,7 @@ dependencyLocking {
 tasks.named('test') {
     useJUnitPlatform()
     exclude '**/ObserverArtifactsTest.class'
+    exclude '**/RunEngineTest.class'
 }
 
 def observerIntegration = tasks.register('observerIntegration', Test) {
@@ -36,6 +61,24 @@ def observerIntegration = tasks.register('observerIntegration', Test) {
 }
 
 tasks.named('check') { dependsOn observerIntegration }
+
+def sequentialIntegration = tasks.register('sequentialIntegration', Test) {
+    group = 'verification'
+    description = 'Runs generated cases, offline verification, replay, and process failure checks.'
+    dependsOn tasks.named('installDist')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/RunEngineTest.class'
+    inputs.dir(layout.buildDirectory.dir('install/gorrect/support'))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    [17, 21].each { feature ->
+        def launcher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(feature) }
+        doFirst { systemProperty "gorrect.java${feature}", launcher.get().executablePath.asFile.absolutePath }
+    }
+    systemProperty 'gorrect.support', layout.buildDirectory.dir('install/gorrect/support').get().asFile.absolutePath
+}
+tasks.named('check') { dependsOn sequentialIntegration }
 
 tasks.named('processTestResources') {
     from(rootProject.file('docs/gir.md')) {
