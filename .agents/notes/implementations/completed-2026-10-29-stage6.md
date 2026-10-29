@@ -18,4 +18,4 @@ The selected HotSpot fastdebug target passes the two-acquisition design example 
 
 ## Limits
 
-Reference histories combined with parallel blocks or array shapes remain unsupported. Checkpoints require reference bindings to have ended and cannot occur inside acquisition bodies. No reclamation, deterministic processing completion, finalization, or resurrection assertion is supported. The generator's reference diversity follows in stage 10; contended and reference/concurrency combinations follow in stage 7. Effectiveness at finding real GC bugs remains unestablished.
+Reference histories combined with parallel blocks or array shapes remain unsupported. Checkpoints require reference bindings to have ended and cannot occur inside acquisition bodies. No reclamation, deterministic processing completion, finalization, or resurrection assertion is supported. The generator's reference diversity follows in stage 11; contended and reference/concurrency combinations follow in stage 7. Effectiveness at finding real GC bugs remains unestablished.
