@@ -41,3 +41,9 @@ artifacts {
 tasks.named('assemble') {
     dependsOn buildNative
 }
+
+def checkNative = tasks.register('checkNative', Exec) {
+    dependsOn buildNative
+    commandLine 'ctest', '--test-dir', cmakeDirectory.get().asFile, '--build-config', 'RelWithDebInfo', '--output-on-failure'
+}
+tasks.named('check') { dependsOn checkNative }

@@ -8,6 +8,7 @@ Give each fact one authoritative home and link to it elsewhere.
 
 * [design.md](./design.md) holds the conceptual model and validation workflow, including reference handling, concurrency, JIT stress, and the JVM integration boundary.
 * [gir.md](./gir.md) defines GIR syntax and shared execution and oracle rules; [Instruction.java](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) defines each instruction's contract.
+* [observation.md](./observation.md) defines capture coverage, observer effects, logical projection, and the snapshot wire format.
 * [implementation.md](./implementation.md) holds component and language boundaries, the build layout, runtime and observer responsibilities, JVM integrations, protocols, and run artifacts.
 * [README.md](../README.md) introduces the project and directs readers to its documentation and working entry points.
 * [AGENTS.md](../AGENTS.md) holds the project context, engineering practices, and contributor workflow.

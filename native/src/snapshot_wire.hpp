@@ -1,0 +1,130 @@
+#pragma once
+
+#include <cstdint>
+#include <string>
+#include <utility>
+#include <vector>
+
+namespace gorrect {
+
+// Wire data owns copied values only: no JNI references or dereferenceable object addresses.
+// Mirrors SnapshotCodec; the shared golden fixture checks the cross-language contract.
+constexpr std::uint32_t snapshot_magic = 0x47525331;
+constexpr std::uint32_t snapshot_version = 1;
+constexpr std::uint64_t snapshot_end = 0x454e44534e415031ULL;
+
+struct FieldInfo {
+  std::int32_t index, modifiers;
+  std::string name, descriptor;
+};
+
+struct ClassInfo {
+  std::int32_t id, kind;
+  std::string signature;
+  std::vector<FieldInfo> fields;
+};
+
+struct ArrayIdentity {
+  std::int64_t tag;
+  std::string shape;
+  std::int32_t worker, site;
+  std::int64_t occurrence;
+};
+
+struct MethodInfo {
+  std::int64_t token;
+  std::string owner, name, descriptor;
+};
+
+// Numeric kind and cell meanings are defined in docs/observation.md.
+struct Record {
+  std::int64_t kind, a, b, c, d, e, f, g;
+};
+
+struct Snapshot {
+  std::int64_t run = 0, checkpoint = 0;
+  std::int32_t status = 0, error = 0;
+  std::int64_t capabilities = 0;
+  std::int64_t starts_before = 0, finishes_before = 0, starts_after = 0, finishes_after = 0;
+  std::vector<ClassInfo> classes;
+  std::vector<ArrayIdentity> arrays;
+  std::vector<MethodInfo> methods;
+  std::vector<Record> records;
+};
+
+class WireWriter {
+  std::vector<std::uint8_t> bytes_;
+
+public:
+  void integer(std::uint32_t value) {
+    for (int shift = 24; shift >= 0; shift -= 8)
+      bytes_.push_back((value >> shift) & 0xff);
+  }
+  void number(std::uint64_t value) {
+    for (int shift = 56; shift >= 0; shift -= 8)
+      bytes_.push_back((value >> shift) & 0xff);
+  }
+  void string(const std::string &value) {
+    integer(static_cast<std::uint32_t>(value.size()));
+    bytes_.insert(bytes_.end(), value.begin(), value.end());
+  }
+  std::vector<std::uint8_t> finish() { return std::move(bytes_); }
+};
+
+// Serialization allocates and must run outside the heap walk, including for partial captures.
+inline std::vector<std::uint8_t> encode(const Snapshot &snapshot) {
+  WireWriter out;
+  out.integer(snapshot_magic);
+  out.integer(snapshot_version);
+  out.number(snapshot.run);
+  out.number(snapshot.checkpoint);
+  out.integer(snapshot.status);
+  out.integer(snapshot.error);
+  out.number(snapshot.capabilities);
+  out.number(snapshot.starts_before);
+  out.number(snapshot.finishes_before);
+  out.number(snapshot.starts_after);
+  out.number(snapshot.finishes_after);
+  out.integer(static_cast<std::uint32_t>(snapshot.classes.size()));
+  for (const auto &type : snapshot.classes) {
+    out.integer(type.id);
+    out.integer(type.kind);
+    out.string(type.signature);
+    out.integer(static_cast<std::uint32_t>(type.fields.size()));
+    for (const auto &field : type.fields) {
+      out.integer(field.index);
+      out.integer(field.modifiers);
+      out.string(field.name);
+      out.string(field.descriptor);
+    }
+  }
+  out.integer(static_cast<std::uint32_t>(snapshot.arrays.size()));
+  for (const auto &array : snapshot.arrays) {
+    out.number(array.tag);
+    out.string(array.shape);
+    out.integer(array.worker);
+    out.integer(array.site);
+    out.number(array.occurrence);
+  }
+  out.integer(static_cast<std::uint32_t>(snapshot.methods.size()));
+  for (const auto &method : snapshot.methods) {
+    out.number(method.token);
+    out.string(method.owner);
+    out.string(method.name);
+    out.string(method.descriptor);
+  }
+  out.integer(static_cast<std::uint32_t>(snapshot.records.size()));
+  for (const auto &record : snapshot.records) {
+    out.number(record.kind);
+    out.number(record.a);
+    out.number(record.b);
+    out.number(record.c);
+    out.number(record.d);
+    out.number(record.e);
+    out.number(record.f);
+    out.number(record.g);
+  }
+  out.number(snapshot_end);
+  return out.finish();
+}
+} // namespace gorrect

@@ -43,11 +43,11 @@ Verified round trips, forward references, aliases, cycles, self-references, reta
 
 ## 3. Prove observation and root handling
 
-Goal: establish that the proposed observer can supply trustworthy evidence without retaining the workload.
+Status: complete for the prototype's named-root profile. The [observation contract](../../../docs/observation.md) defines raw capture, Java/C++ encoding, field metadata, logical projection, and unsupported coverage. Native callbacks use bounded preallocated storage and weak tags. Ordinary identities are read from object fields at observation time; published arrays use an explicit diagnostic binding that can force materialization.
 
-Use small Java fixtures to prototype the native observer, logical-to-physical identity mapping, layout metadata, roots, fields, arrays, and payload capture. Define the initial snapshot record format and cross-language fixtures. Preserve raw records and diagnose unexpected roots. Test interpreted and compiled execution, scoped local references, and capture without an implicit collection. Check which observations remain meaningful when optimizations remove physical allocations.
+Verified JDK 17/21 integration, cycles, aliases, fields, arrays, payloads, retained raw origins, explicit buffer exhaustion, and rejection of corrupted or missing evidence. The selected HotSpot and OpenJ9 targets pass named-root graph verification in interpreted and compilation-focused modes. Weak references to captured nodes and tagged arrays clear after release. Allocation probes compare no-agent, tagging, and post-walk execution; the temporary-object probe remains eliminated on HotSpot and has comparable allocation with and without the agent on OpenJ9.
 
-Complete when the prototype captures the required relationships on HotSpot and has an OpenJ9 compatibility probe. Demonstrate that observer bookkeeping does not introduce persistent strong roots, buffer exhaustion is explicit, and missing or unsupported observations cannot pass verification. If a required JVM or capability is unavailable, record the gap and leave that portability check open. Resolve failures here before depending on the observer throughout the engine.
+Portability limits remain explicit: the selected OpenJ9 compiled-local probe preserves the object across GC and capture but omits its root-origin callback. HotSpot reports the origin, while its heap walk may materialize eliminated objects. General GIR local-binding projection is not implemented; obligations requiring it return inconclusive. Stage 4 must establish binding evidence or report the affected cases unsupported, and must not infer liveness failures from missing physical roots.
 
 ## 4. Deliver profiles and the sequential CLI
 
