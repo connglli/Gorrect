@@ -1,6 +1,6 @@
 # Implementation architecture
 
-This document defines the components, language baselines, execution boundaries, and data flow for Gorrect. [design.md](./design.md) defines the Object Graph Verification methodology and GIR semantics.
+This document defines the components, language baselines, execution boundaries, and data flow for Gorrect. [design.md](./design.md) defines the methodology; [gir.md](./gir.md) specifies the implemented language.
 
 ## Architecture
 
@@ -45,11 +45,11 @@ The engine groups its subsystems into Java packages. Each package has one respon
 
 ### GIR frontend and model
 
-The GIR frontend contains the grammar, parser, formatter, and validator. Its output is an immutable abstract syntax tree containing the initial graph, method bodies, worker entry points, control flow, and stable operation identities.
+The GIR frontend parses, formats, and validates the [versioned language](./gir.md). Its immutable syntax tree contains graph declarations, typed bindings, structured control flow, and stable operation identities.
 
 Validation checks object shapes, slot accesses, value types, scope, and synchronization structure before execution. The generator evaluates a candidate's preconditions and state change before accepting it. Rejecting a candidate leaves the graph and generation bookkeeping unchanged.
 
-The host model stores numeric object identities, slots, values, and root lifetimes. Its objects are descriptions of the target graph. No engine object is used as a target workload object, and semantic state belongs to one case or verification run.
+The host model stores [logical identities](./gir.md#instructions), slots, values, and root lifetimes. Its immutable snapshots describe the target graph. No engine object is used as a target workload object, and semantic state belongs to one case or verification run.
 
 ### Oracle and verifier
 
