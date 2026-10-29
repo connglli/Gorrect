@@ -1,6 +1,6 @@
 # Implementation plan
 
-This proposal divides the [implementation architecture](../../../docs/implementation.md) into eleven stages. The [design](../../../docs/design.md) owns the methodology; this note owns the proposed work order and completion checks. Each stage can contain several focused commits. A stage is complete when its checks pass, including the relevant failure cases.
+This proposal divides the [implementation architecture](../../../docs/implementation.md) into twelve stages. The [design](../../../docs/design.md) owns the methodology; this note owns the proposed work order and completion checks. Each stage can contain several focused commits. A stage is complete when its checks pass, including the relevant failure cases.
 
 ## Development JVMs
 
@@ -27,7 +27,8 @@ gorrect fuzz --profile hotspot-g1.json \
 * Stage 4 delivers `probe`, `run`, `verify`, and `replay` for sequential strong-reference cases.
 * Stage 5 delivers a minimal `fuzz` command for concurrent and JIT stress.
 * Stages 8 and 9 extend the same interface across HotSpot collectors and OpenJ9.
-* Stages 10 and 11 deliver parallel campaigns and automated failure reduction.
+* Stage 10 reviews and refactors project-wide code and documentation quality.
+* Stages 11 and 12 deliver parallel campaigns and automated failure reduction.
 
 ## 1. Establish the build and compatibility checks
 
@@ -99,7 +100,17 @@ Build on stage 3's probe. Implement the OpenJ9 driver, runtime bridge, collector
 
 Complete when common strong-reference, concurrent, JIT, and supported conditional-reference cases run on declared OpenJ9 profiles. `probe` must report requirements the selected build cannot establish. Any discovered assumption in the shared semantic contracts needs a separately reviewed correction.
 
-## 10. Expand stress generation and campaign execution
+## 10. Refactor code and documentation quality
+
+Goal: refactor the whole project using practices from exemplary Java open-source projects.
+
+Review mature projects' contribution guides and representative code, then select references and record the applicable conventions. Audit all modules, tests, and build support for code smells: duplication, oversized classes or methods, unclear naming, awkward APIs, and exception or resource-handling problems. Refactor in small, behavior-preserving steps.
+
+Rewrite Javadoc to specify contracts and comments to explain necessary reasoning, following the [documentation standard](../../../docs/AGENTS.md). Add focused automated checks where they prevent recurring problems.
+
+Complete when the conventions are applied consistently, identified smells are resolved or justified, and formatting, warning checks, tests, and supported-target regressions pass. Preserve GIR semantics, observation guarantees, CLI behavior, and reproducible artifacts.
+
+## 11. Expand stress generation and campaign execution
 
 Goal: extend `fuzz` to diverse workloads and parallel campaigns.
 
@@ -107,7 +118,7 @@ Expand generation with varied shapes, arrays, cycles, shared targets, allocation
 
 Complete when seeds reproduce GIR inputs and retained artifacts explain each result. Concurrent jobs must isolate state, output, and deadlines; interruption must retain completed and partial runs. Crashes, timeouts, inconclusive checks, and unmet stress requirements remain visible. Rejected generation candidates must leave model state and bookkeeping consistent with the generation contract.
 
-## 11. Reduce failures and validate the complete workflow
+## 12. Reduce failures and validate the complete workflow
 
 Goal: expose `reduce` and produce compact, credible reproducers.
 
