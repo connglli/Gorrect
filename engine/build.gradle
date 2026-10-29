@@ -83,6 +83,9 @@ def sequentialIntegration = tasks.register('sequentialIntegration', Test) {
 tasks.named('check') { dependsOn sequentialIntegration }
 
 tasks.named('processTestResources') {
+    from(rootProject.file('examples/references.gir')) {
+        into 'cases'
+    }
     from(rootProject.file('docs/gir.md')) {
         into 'docs'
     }

@@ -69,11 +69,11 @@ Verified a clean build, 180 Java tests, native checks, strict Javadoc, and JDK 1
 
 ## 6. Implement conditional reference histories
 
-Goal: check programs whose behavior depends on soft or weak reference acquisition.
+Status: complete for sequential ordinary-object reference histories. [GIR](../../../docs/gir.md#reference-histories) defines initial wrappers, fresh incarnations, single-read acquisition scopes, clearing observations, explicit clear, and queue polls. A bounded frontier validates recorded choices before interpreting their consequences. Capture reads inherited referent fields without strengthening; primitive recorders retain no workload objects.
 
-Specify the supported clearing transition model before implementing the history checker. Add wrapper incarnation identities, single-read conditional acquisition, scoped strong results, clearing observations, and queue events where supported. Keep clearing, enqueueing, and physical reclamation distinct. Start with a small exhaustive reference model, then use bounded search or an external SMT solver where necessary. Add profiles for the evidence required by reclamation-sensitive checks.
+Verified the design's two-acquisition example on JDK 17/21 and the selected HotSpot fastdebug target, with offline checking and exact-class replay. Independent exhaustive small-graph enumeration agrees with the production clearing search. Tests cover connected referents, mixed strengths, multiple wrappers, replacement, protected referents, surviving fields, impossible choices, delayed/duplicate queue delivery, damaged evidence, search limits, and conditional failure classification. The full build, strict Javadoc, hooks, and concurrent JIT regression case pass.
 
-Complete when the conditional-access example in the design works end to end. Compare the production checker with exhaustive enumeration of small histories. Exercise connected referents, multiple wrappers, wrapper replacement, protected referents, surviving strong fields, and impossible acquisition sequences. Invalid histories must fail; legal policy variation must pass. Missing guarantees, unsupported semantics, and exhausted checking budgets must produce an inconclusive check.
+Reference histories with parallel blocks or array shapes, live-binding checkpoints, and reclamation/completion assertions remain unsupported. Missing coverage and exhausted search are inconclusive. [Stage 6 notes](./completed-2026-10-29-stage6.md) record the checks and remaining boundaries.
 
 ## 7. Support contended concurrent histories
 

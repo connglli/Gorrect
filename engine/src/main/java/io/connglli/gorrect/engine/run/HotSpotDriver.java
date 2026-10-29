@@ -66,6 +66,8 @@ final class HotSpotDriver {
                 profile.jit() != null && target.getProperty("jit.problem", "unavailable").isEmpty();
             case "gc-during-workers" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
             case "concurrent-overlap" -> true;
+            case "reference-histories", "reference-queues" ->
+                (bits & HeapSnapshot.REFERENCE_FIELDS) != 0;
             default -> false;
           };
       if (!available && !unmet.contains(requirement)) unmet.add(requirement);

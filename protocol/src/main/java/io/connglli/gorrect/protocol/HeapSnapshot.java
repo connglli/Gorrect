@@ -24,6 +24,7 @@ public record HeapSnapshot(
   public static final long GC_EVENTS = 2;
   public static final long COMPILATION_EVENTS = 4;
   public static final long COMPILATION_OVERFLOW = 8;
+  public static final long REFERENCE_FIELDS = 16;
 
   /** Capture completion only; COMPLETE does not establish GIR binding coverage. */
   public enum Status {
@@ -36,7 +37,9 @@ public record HeapSnapshot(
     OBJECT,
     REFERENCE_ARRAY,
     DATA_ARRAY,
-    ROOTS
+    ROOTS,
+    SOFT_REFERENCE,
+    WEAK_REFERENCE
   }
 
   public HeapSnapshot {

@@ -1,6 +1,6 @@
 # Running Gorrect
 
-The CLI supports sequential and conflict-free concurrent [GIR](./gir.md) on HotSpot Serial GC, JDK 17 and newer. It retains generated Java, executable classes, and observations for verification and replay. Other collector integrations and contended histories remain implementation work.
+The CLI supports sequential reference histories and conflict-free concurrent strong [GIR](./gir.md) on HotSpot Serial GC, JDK 17+. Other collectors, OpenJ9, and contended histories remain planned work.
 
 ## Build and configure
 
@@ -12,9 +12,7 @@ mkdir -p profiles/local
 cp profiles/hotspot-serial.example.json profiles/local/hotspot-serial.json
 ```
 
-Edit `java` in the copied profile to select the target executable. Paths resolve relative to the profile file; an absolute path is also accepted. The example's support paths assume that copy location and a Linux build. Select the corresponding native library on another operating system. Local profiles and run directories are excluded from Git.
-
-The engine and compiler use the engine's JDK independently of the target. Generated programs compile with `--release 17`. The target need not provide a compiler.
+Set `java` in the copied profile to the target executable. Paths are absolute or relative to the profile. The example assumes that copy location and a Linux build; adjust the native library for another OS. Local profiles and runs are ignored by Git. The engine uses its own JDK and compiler; the target needs no compiler.
 
 ## Commands
 
@@ -28,17 +26,19 @@ engine/build/install/gorrect/bin/gorrect replay runs/cycle --repeat 3 --out runs
 engine/build/install/gorrect/bin/gorrect fuzz --profile profiles/local/hotspot-serial.json --workload concurrent --workers 4 --duration 1m --seed 42
 ```
 
-`probe` runs a built-in graph check and reports the actual VM, collectors, and observer capability bits. Profiles requesting concurrent or JIT coverage also exercise those conditions. A capability flag alone does not prove that compilation or a collection occurred.
-
-`run` derives the oracle, emits direct Java operations, compiles them, and launches a separate target process. A Unix domain socket carries control messages; its temporary directory keeps long run paths out of the OS socket-path limit and is removed on completion or failure. The engine checks target identity and requirements before releasing execution. At each checkpoint, the target writes a snapshot and waits for acknowledgement. Completion requires the scalar trace, every expected checkpoint, and the final observation after the outer GIR scope ends.
-
-`verify` re-derives expectations from saved GIR and checks the retained executable identities, trace, and observations. It needs neither the original profile file nor the target installation. `replay` copies the saved classes and bundled support artifacts without recompiling, restores the recorded profile settings and launch environment, and records changed installation artifacts. Each repetition gets a fresh run token and directory.
+| Command | Purpose |
+| --- | --- |
+| `probe` | Run a built-in check and report the actual VM, collectors, and capabilities. Reference requirements select a reference case; concurrent/JIT requirements select a worker case. |
+| `run` | Generate Java from a GIR case, compile it, execute it on the target, and verify the observations. |
+| `verify` | Check saved GIR, executable identities, and evidence without the original profile file or target installation. |
+| `replay` | Reuse saved classes and bundled support without recompiling. Restore recorded settings/environment, report changed installation artifacts, and create a fresh run per repetition. |
+| `fuzz` | Generate seeded cases and execute one target JVM at a time. |
 
 Output directories must not exist. Without `--out`, execution commands create a fresh directory under `runs/`. Profile fields have no CLI overrides.
 
-`fuzz` generates seeded cases and runs one target JVM at a time. `--workers` selects threads within a case; `--workload` selects `concurrent` or `concurrent-jit`. The latter requires profile JIT controls and compiled-frame evidence. The campaign freezes profile settings and records each case's seed, generator version, GIR, and ordinary run bundle under `cases/`. Replay and verification use those bundles directly. `campaign.json` retains the outcomes and unmet requirements.
+For `fuzz`, `--workers` selects threads per case; `--workload` selects `concurrent` or `concurrent-jit`. The latter requires profile JIT controls and compiled-frame evidence. A campaign freezes profile settings, saves seeds, generator versions, and run bundles under `cases/`, and records outcomes in `campaign.json`.
 
-`--duration` bounds the campaign's active compilation and target execution; input preparation and artifact retention finish outside those waits. A partial final case has outcome `CAMPAIGN_LIMIT`, distinct from a target timeout. The campaign stops on a violation, crash, execution failure, or unsupported case. It returns an inconclusive status if no case completed; completed cases must satisfy their requirements for a successful campaign status.
+`--duration` bounds active compilation and target execution; preparation and artifact retention can finish later. A partial final case has outcome `CAMPAIGN_LIMIT`. Campaigns stop on violations, execution failures, or unsupported cases. Success requires at least one completed case; every completed case must satisfy the oracle and its requirements.
 
 ## Profiles
 
@@ -53,15 +53,15 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | `support` | Paths named `runtime`, `protocol`, and `observer`, plus optional `whitebox`. Copies enter the run bundle. |
 | `vmArgs` | Optional VM argument array. Collector selection, agents, classpath, entry point, and crash destination belong to the driver. Use one array element per argument. |
 | `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. The resolved launch environment is retained. |
-| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `compilation-events`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings` and `gc-completion` remain unsupported. |
-| `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, and `traceEvents`. Startup fits within the run deadline; compilation has a separate deadline. |
+| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `compilation-events`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `gc-completion`, and `reference-reclamation` remain unsupported. |
+| `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound simultaneous clearing states and cumulative search work. Startup fits within the run deadline; compilation has a separate deadline. |
 | `jit` | Optional HotSpot controls: `level`, `warmupRounds`, and `deadlineMillis`. Requires `support.whitebox`; the driver supplies bootstrap and WhiteBox flags. |
 
-Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized VM and collector names do not imply implemented integration. Unsupported selections or requirements produce an explicit unsupported result.
+Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
 
-Checkpoints with live GIR reference bindings are unsupported because their captured roots cannot yet be mapped to binding IDs. Put checkpoints after those bindings end. Scalar bindings can remain live. Arrays use diagnostic native identity bindings; ordinary identities come from immutable fields read during capture. These limits follow the [observation contract](./observation.md).
+Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. The [observation contract](./observation.md) defines identity capture and its effects.
 
-For JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client for the selected target. `warmupRounds` counts modeled visits to each parallel block; the runtime requests installation before later visits. It executes no additional graph mutations for warm-up. The generator emits enough visits for this prefix within its checking budget. Compilation level is an installation request; actual compiled frames require separate evidence.
+For JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. `warmupRounds` counts modeled visits to each parallel block before installation requests; warm-up adds no unmodeled mutations. Compilation level requests installation; actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
 
 For the JDK 21 test-library layout, set `JDK_TEST_LIB` to the target source tree's `test/lib` directory and build a client with the engine JDK:
 
@@ -71,15 +71,13 @@ javac --release 17 -d build/whitebox-classes "$JDK_TEST_LIB/jdk/test/whitebox/Wh
 jar --create --file build/whitebox.jar -C build/whitebox-classes .
 ```
 
-Set `support.whitebox` to this JAR, relative to the local profile or as an absolute path. The client is external to Gorrect; its checksum and the actual target identity enter each bundle.
+Set `support.whitebox` to the JAR path. Each bundle records its checksum and the target identity.
 
 ## Artifacts and results
 
-The [run layout](./implementation.md#artifacts-and-results) includes the resolved profile, original profile data, compiler and installation identities, launch command and environment, generated source and layout, exact classes, copied support libraries, raw snapshots, and logs. `traces/` contains the control transcript, scalar trace, worker evidence, and JFR witnesses when enabled. `execution.json` records execution; `result.json` records verification. Failed runs keep partial artifacts.
+Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements.
 
-Control frames and traces carry a format version and run identity. Checkpoint messages also identify the operation and visit. [ControlMessage](../protocol/src/main/java/io/connglli/gorrect/protocol/ControlMessage.java), [ExecutionTrace](../protocol/src/main/java/io/connglli/gorrect/protocol/ExecutionTrace.java), and [ExecutionEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/ExecutionEvidence.java) define the encodings. Workers append to separate primitive buffers within the total `traceEvents` bound; serialization follows joins. Expected events come from the oracle, and cross-worker file order does not imply an execution order.
-
-Results keep execution outcome, semantic verdict, and unmet requirements separate. A complete conflicting graph or scalar trace is a violation. Incomplete capture coverage is inconclusive. Structural damage and altered executable inputs are extraction errors. Compilation failure, startup failure, workload exceptions, crashes, protocol errors, and deadlines retain separate outcomes. A confirmed violation remains visible when another checkpoint is inconclusive.
+A conflicting graph, scalar read, or impossible reference choice is a violation. Incomplete coverage or exhausted search is inconclusive; malformed evidence or altered executables is an extraction error. A rejected conditional precondition is an invalid workload when its recorded prefix establishes a legal path; otherwise the runtime failure remains. A confirmed violation stays visible alongside inconclusive checkpoints.
 
 | Exit status | Meaning |
 | --- | --- |

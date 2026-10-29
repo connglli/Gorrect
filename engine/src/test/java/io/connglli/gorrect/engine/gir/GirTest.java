@@ -237,7 +237,7 @@ class GirTest {
   }
 
   @Test
-  void programmaticInputsCannotEnableUnsupportedReferenceSemantics() {
+  void programmaticReferencesUseTheHistoryOracle() {
     var base = GirParser.parse(HEADER + "program {}");
     var object = base.objects().getFirst();
     for (var kind : List.of(Value.ReferenceKind.SOFT, Value.ReferenceKind.WEAK)) {
@@ -245,7 +245,8 @@ class GirTest {
           new GirProgram.InitialObject(
               object.id(), object.shape(), List.of(new Value.Reference(kind, null)), object.data());
       var program = new GirProgram(1, base.shapes(), List.of(changed), base.roots(), base.body());
-      assertThrows(GirException.class, () -> GirValidator.validate(program));
+      GirValidator.validate(program);
+      assertThrows(GirException.class, () -> Oracle.interpret(program));
     }
   }
 

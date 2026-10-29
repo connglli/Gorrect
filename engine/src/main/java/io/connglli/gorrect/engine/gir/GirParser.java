@@ -114,6 +114,17 @@ public final class GirParser {
             case "write-root" -> new Instruction.WriteRoot(id, name(), operand());
             case "read-ref" -> new Instruction.ReadReference(id, name(), name(), name(), integer());
             case "write-ref" -> new Instruction.WriteReference(id, name(), integer(), operand());
+            case "write-soft" ->
+                new Instruction.WriteReference(
+                    id, name(), integer(), operand(), Value.ReferenceKind.SOFT);
+            case "write-weak" ->
+                new Instruction.WriteReference(
+                    id, name(), integer(), operand(), Value.ReferenceKind.WEAK);
+            case "acquire" ->
+                new Instruction.Acquire(id, name(), name(), name(), integer(), block(depth + 1));
+            case "clear-ref" -> new Instruction.ClearReference(id, name(), integer());
+            case "is-cleared" -> new Instruction.ReferenceState(id, name(), name(), integer());
+            case "poll-queue" -> new Instruction.PollQueue(id);
             case "read-data" -> new Instruction.ReadData(id, name(), name(), integer());
             case "write-data" -> new Instruction.WriteData(id, name(), integer(), operand());
             case "release" -> new Instruction.Release(id, name());
@@ -168,6 +179,13 @@ public final class GirParser {
   }
 
   private Value.Reference reference() {
+    if (current.text().equals("soft") || current.text().equals("weak")) {
+      var kind = next().text().equals("soft") ? Value.ReferenceKind.SOFT : Value.ReferenceKind.WEAK;
+      expect("(");
+      ObjectId target = take("null") ? null : ObjectId.initial(number());
+      expect(")");
+      return new Value.Reference(kind, target);
+    }
     return take("null") ? Value.Reference.NULL : Value.Reference.strong(ObjectId.initial(number()));
   }
 

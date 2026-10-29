@@ -11,6 +11,10 @@ final class TraceRecorder {
   private final long[] values, rounds;
   private int count;
 
+  int size() {
+    return count;
+  }
+
   TraceRecorder(int worker, int capacity) {
     this.worker = worker;
     operations = new int[capacity];

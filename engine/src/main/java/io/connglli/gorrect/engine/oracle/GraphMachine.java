@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.model.HeapObject;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -38,6 +39,7 @@ final class GraphMachine {
   private long steps;
   private long slots;
   private long snapshotCells;
+  private long wrappers;
 
   /**
    * A {@code null} value reserves a released binding's name. Live null handles use {@link
@@ -125,9 +127,21 @@ final class GraphMachine {
     for (var initial : program.objects()) {
       var shape = shape(initial.shape());
       if (shape.slots() > limits.slots() - slots) limit("initial slots");
+      var references = new ArrayList<Value.Reference>();
+      for (int index = 0; index < initial.references().size(); index++) {
+        var value = initial.references().get(index);
+        if (value.kind() != Value.ReferenceKind.STRONG) {
+          if ((long) program.objects().size() + wrappers >= limits.objects())
+            limit("initial reference wrappers");
+          value =
+              new Value.Reference(
+                  value.kind(), value.target(), new WrapperId(0, 0, initial.id(), index));
+          wrappers++;
+        }
+        references.add(value);
+      }
       objects.put(
-          ObjectId.initial(initial.id()),
-          new HeapObject(shape, initial.references(), initial.data()));
+          ObjectId.initial(initial.id()), new HeapObject(shape, references, initial.data()));
       slots += shape.slots();
     }
     program.roots().forEach(root -> roots.put(root.name(), root.value()));
@@ -154,6 +168,10 @@ final class GraphMachine {
 
   List<ExecutionTrace.Event> events() {
     return List.copyOf(events);
+  }
+
+  ExecutionTrace.Event lastEvent() {
+    return events.getLast();
   }
 
   long steps() {
@@ -190,6 +208,8 @@ final class GraphMachine {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), true);
         var value = target.object().references().get(op.index());
+        if (value.kind() != Value.ReferenceKind.STRONG)
+          throw new GirException("Soft/weak slots require acquire");
         requireShape(value, shape(op.shape()));
         bind(op.name(), op.id(), value);
         access(new Slot(target.id(), null, true, op.index()), false);
@@ -197,13 +217,40 @@ final class GraphMachine {
       case Instruction.WriteReference op -> {
         var target = target(op.owner(), op.index(), true);
         var value = reference(op.value());
+        long occurrence = 0;
+        if (op.kind() != Value.ReferenceKind.STRONG) {
+          if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
+          occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
+          value =
+              new Value.Reference(
+                  op.kind(), value.target(), new WrapperId(worker, op.id(), occurrence, -1));
+        }
         var references = new ArrayList<>(target.object().references());
         references.set(op.index(), value);
         objects.put(
             target.id(),
             new HeapObject(target.object().shape(), references, target.object().data()));
         access(new Slot(target.id(), null, true, op.index()), true);
+        if (op.kind() != Value.ReferenceKind.STRONG) {
+          wrappers++;
+          occurrences.put(op.id(), occurrence);
+        }
       }
+      case Instruction.ClearReference op -> {
+        var target = target(op.owner(), op.index(), true);
+        var value = target.object().references().get(op.index());
+        if (value.kind() == Value.ReferenceKind.STRONG)
+          throw new GirException("clear-ref requires a soft/weak slot");
+        var references = new ArrayList<>(target.object().references());
+        references.set(op.index(), new Value.Reference(value.kind(), null, value.wrapper()));
+        objects.put(
+            target.id(),
+            new HeapObject(target.object().shape(), references, target.object().data()));
+      }
+      case Instruction.ReferenceState ignored ->
+          throw new GirException("Reference state requires a recorded history");
+      case Instruction.PollQueue ignored ->
+          throw new GirException("Queue polling requires a recorded history");
       case Instruction.ReadData op -> {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), false);
@@ -253,7 +300,7 @@ final class GraphMachine {
   private void allocate(Instruction.Allocate op) {
     requireDeclaration(op.name());
     var shape = shape(op.shape());
-    if (objects.size() >= limits.objects()) limit("objects");
+    if (objects.size() + wrappers >= limits.objects()) limit("objects");
     if (shape.slots() > limits.slots() - slots) limit("slots");
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
     var id = new ObjectId(worker, op.id(), occurrence);
@@ -312,6 +359,33 @@ final class GraphMachine {
     return value;
   }
 
+  Value.Reference referenceSlot(String owner, int index) {
+    var target = target(owner, index, true);
+    return target.object().references().get(index);
+  }
+
+  void bindAcquired(Instruction.Acquire operation, ObjectId target) {
+    requireDeclaration(operation.name());
+    requireShape(Value.Reference.strong(target), shape(operation.shape()));
+    enterScope();
+    bind(operation.name(), operation.id(), Value.Reference.strong(target));
+  }
+
+  void referenceState(Instruction.ReferenceState operation, boolean cleared) {
+    requireDeclaration(operation.name());
+    referenceSlot(operation.owner(), operation.index());
+    requireStep();
+    bind(operation.name(), operation.id(), new Value.Scalar(cleared ? 1 : 0));
+    marker(operation.id(), ExecutionTrace.Kind.REFERENCE_STATE, cleared ? 1 : 0);
+  }
+
+  void chargeSnapshot(Graph graph) {
+    long cells = 1L + graph.objects().size() + graph.roots().size() + graph.handles().size();
+    for (var object : graph.objects().values()) cells += object.shape().slots();
+    if (cells > limits.snapshotCells() - snapshotCells) limit("snapshot cells");
+    snapshotCells += cells;
+  }
+
   private Shape shape(String name) {
     var shape = shapes.get(name);
     if (shape == null) throw new GirException("Unknown shape " + name);
@@ -349,10 +423,7 @@ final class GraphMachine {
   /** Captures required obligations and charges their cumulative snapshot budget. */
   Graph snapshot() {
     var graph = graph().required();
-    long cells = 1L + graph.objects().size() + graph.roots().size() + graph.handles().size();
-    for (var object : graph.objects().values()) cells += object.shape().slots();
-    if (cells > limits.snapshotCells() - snapshotCells) limit("snapshot cells");
-    snapshotCells += cells;
+    chargeSnapshot(graph);
     return graph;
   }
 

@@ -1,10 +1,8 @@
 # Implementation architecture
 
-This document defines the components, language baselines, execution boundaries, and data flow for Gorrect. [design.md](./design.md) defines the methodology; [gir.md](./gir.md) specifies the implemented language.
-
 ## Architecture
 
-The engine runs in its own JVM and launches a separate target JVM for each test run. The engine derives expectations from GIR; the target executes generated Java and supplies observations.
+The Java 21 engine derives expectations from GIR and launches a separate JDK 17+ target. Generated Java executes the workload; target helpers return observations for verification.
 
 ```text
 +----------------------------------------+                  +----------------------------------------------+
@@ -22,104 +20,70 @@ The engine runs in its own JVM and launches a separate target JVM for each test 
 +----------------------------------------+                  +----------------------------------------------+
 ```
 
-The runner launches the target with the compiled case and manages its lifetime. The runtime and observer produce trace, snapshot, and evidence files that the verifier reads. The protocol is a shared library and data contract, not another process.
+The protocol is a shared library and file format. The runner manages the target process and its control connection.
 
 ## Languages and build units
 
 | Unit | Language | Responsibility |
 | --- | --- | --- |
-| `engine` | Java 21 | GIR tools, oracle, generation, Java emission, JVM drivers, run management, reduction, and command line |
-| `runtime` | Java 17 | Target-side workers, recording, checkpoints, and VM control bridges |
-| `protocol` | Java 17 | Shared commands, records, schemas, and Java codecs |
-| `native` | C++17 | JNI entry points and JVMTI observation inside the target JVM |
+| `engine` | Java 21 | GIR, oracle, generation, Java emission, JVM drivers, runner, and CLI |
+| `runtime` | Java 17 | Workers, recording, checkpoints, and VM controls |
+| `protocol` | Java 17 | Commands, records, and Java codecs |
+| `native` | C++17 | JNI entry points and JVMTI observation |
 
-Gradle builds the Java units and invokes CMake for the native library. The wrapper pins Gradle; compiler language levels and dependency versions are explicit in the build. The runtime, protocol, and ordinary generated programs compile with `--release 17` to exclude newer Java APIs. Java and C++ compiler warnings fail the build.
+Gradle builds Java and invokes CMake for native code. The wrapper and dependencies are pinned; compiler warnings fail the build. Runtime, protocol, and generated programs use `--release 17`. The engine supplies the compiler independently of the target installation.
 
-The engine and runtime depend on the protocol. The runtime has no dependency on the engine, GIR interpreter, or oracle. The native library implements the observation record format defined by the protocol.
-
-The engine uses a stable JDK independently of the selected target. Target-specific support libraries must match the target profile's compatibility requirements. Native libraries are built for the target operating system and architecture.
+Engine and runtime depend on protocol; runtime has no engine or oracle dependency. The native library implements the protocol's snapshot encoding and must match the target OS and architecture. External VM support libraries must match the target's APIs.
 
 ## Engine
 
-The engine groups its subsystems into Java packages. Each package has one responsibility; these subsystems share a process rather than communicating as separate services.
-
 ### GIR frontend and model
 
-The GIR frontend parses, formats, and validates the [versioned language](./gir.md). Its immutable syntax tree contains graph declarations, typed bindings, structured control flow, and stable operation identities.
-
-Validation checks object shapes, slot accesses, value types, scope, and synchronization structure before execution. The generator evaluates a candidate's preconditions and state change before accepting it. Rejecting a candidate leaves the graph and generation bookkeeping unchanged.
-
-The host model stores [logical identities](./gir.md#identities-and-access), slots, values, and root lifetimes. Its immutable snapshots describe the target graph. Parallel phases are exact only after concrete slot-access checks establish independence; aliases do not create separate slots. Semantic state belongs to one case or verification run.
+The frontend parses, formats, and statically validates [GIR](./gir.md). Its immutable syntax describes declarations, bindings, and structured control flow. A case-local host model stores logical objects, roots, and handles; heap writes replace immutable records so retained checkpoints remain unchanged. Execution checks dynamic preconditions such as null owners and target shapes.
 
 ### Oracle and verifier
 
-The oracle interprets validated GIR and derives the permitted behavior. The verifier compares that behavior with trace events and snapshots. Their expected state is independent of generated Java layouts and target runtime bookkeeping.
+The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle records concrete slot accesses while interpreting each parallel phase and rejects cross-worker conflicts before target execution. The verifier compares its obligations with recorded reads and snapshots.
 
-Exact obligations use graph algorithms. Supported nondeterministic histories use a bounded history checker. Where constraint solving is required, Java code emits SMT-LIB queries, a standard solver input format, to an external solver process. The solver has a separate deadline, and an undecided query produces an inconclusive check.
+Reference histories use a bounded frontier of cleared, pending, and delivered wrapper sets. Legal GC transitions expand it; validated choices and snapshots filter it. Ordinary payload state is shared across surviving possibilities. Detached wrappers may be retained without creating strong referent roots. Search exhaustion is inconclusive. Contended histories remain planned work.
 
-Trace events are matched to the original GIR operations and control flow. A missing event, invalid branch, incomplete snapshot, or unsupported semantic profile cannot be treated as a successful verification.
+### Generation and emission
 
-### Generator, emitter, and reducer
+The seeded generator constructs valid GIR. The emitter translates the same syntax into a node class per shape, direct field/array accesses, reusable worker methods, and layout metadata. It maintains no second simulated heap. The engine compiles the source against the target runtime and retains the exact classes.
 
-The generator produces initial graphs and GIR programs. The Java emitter consumes the same validated GIR as the oracle and emits source plus a layout description. The emitter does not maintain a second simulated heap.
-
-Generated node classes are shared by objects with the same shape. Field names follow slot positions, independently of their targets. Ordinary accesses become direct Java field or array operations; volatile and atomic accesses use the corresponding declarations or VarHandles.
-
-The engine invokes `javac` with the target runtime on the classpath and retains the source, compiler settings, and exact class files. Generated methods and loops perform workload operations directly, allowing them to be compiled by the target JIT.
-
-The reducer operates on GIR and execution settings. Each candidate must remain valid and reproduce the relevant outcome, including any required concurrency or compilation condition.
+The planned reducer will simplify GIR and execution settings while preserving the failure and any required stress conditions.
 
 ## Target runtime
 
-The runtime supplies worker coordination, synchronization, phase transitions, scalar trace buffers, checkpoint requests, and access to VM controls. It calls generated worker methods rather than interpreting GIR in their hot loops.
+The runtime coordinates workers, barriers, checkpoints, recording, and VM controls. Generated methods perform ordinary allocations and mutations in Java; native calls occur at observation and control points. Java locals represent handles, with reachability fences preserving GIR lifetimes.
 
-The execution phases include graph construction, warm-up, concurrent stress, worker quiescence, and observation. A checkpoint identifies the participating workers and any collection or reference-processing requirements. Worker quiescence and collector completion are tracked separately.
+Each worker appends operation, visit, phase, and scalar values to a private primitive buffer. Storage is bounded by the profile's trace limit; planned counts reserve capacity without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Reference cases add sparse identity observations keyed to main-trace positions, with syntax bounds covering either acquisition outcome. Recorders retain no workload objects.
 
-Temporary handles can be emitted as Java locals in compiled frames or as explicitly published roots. Their required lifetimes follow GIR scopes. The recorder stores primitive identities and values so that telemetry does not retain workload objects.
-
-Each worker records operation, group visit, phase, and scalar data in its own primitive buffer. The total allocation is bounded by the profile's trace limit; planned counts size storage without supplying expected payloads. Only appended events are serialized. Start, barrier, phase-start, end, and caller join markers establish the control structure without a shared lock or global sequence counter on ordinary mutations. Buffer exhaustion stops execution explicitly.
-
-Native calls and control traffic occur at the observation and coordination points that need them. Ordinary allocations and reference writes remain Java operations. Logical object identities are assigned in Java and associated with native snapshot identities during observation where possible.
+Start, barrier, phase-start, end, and join markers establish worker control flow without a global sequence counter or a shared recorder lock. Per-worker order is meaningful; cross-worker file order is not.
 
 ## Native observer
 
-The C++ library uses JNI to expose observation requests and JVMTI to inspect the target under the [observation contract](./observation.md). It receives layout descriptions, not the expected graph. Class metadata identifies fields and array elements without guessing object headers or field offsets.
+JNI exposes capture requests; JVMTI heap callbacks fill bounded native buffers using VM field metadata and emitted layout roles. They receive no expected graph, perform no JNI calls, allocation, or locking, and retain no persistent strong references to workload objects. C++ exceptions are contained at JNI boundaries.
 
-Heap callbacks capture object identities, references, relevant roots, sizes, and requested data into bounded native storage. The engine decodes the capture into a logical graph and retains both forms. Unknown fields, schema mismatches, and incomplete captures are explicit results rather than silently discarded records.
-
-Heap callbacks obey JVMTI's callback restrictions and do not call Java. The observer avoids persistent strong JNI references to workload objects. Native failures are reported through the runtime or protocol; C++ exceptions must not escape JNI or JVMTI entry points.
-
-The observer records compilation and collection events where available. Their coverage and heap-walk effects are specified in the [observation contract](./observation.md#coverage-and-observer-effects); JVM integrations supply additional evidence required by the case.
+The engine projects raw records under the [observation contract](./observation.md), preserving raw evidence for diagnosis. That contract defines supported layouts, incomplete captures, GC/compilation counter coverage, and heap-walk effects.
 
 ## JVM integration
 
-A JVM integration has a host driver and a target-side control bridge.
+An integration has a host driver and target-side control bridge. The driver resolves the [profile](./usage.md#profiles), launches the target, and confirms the actual VM, collector, and capabilities before releasing execution. The bridge implements collection and compilation requests. VM-specific APIs and frame interpretation stay behind this boundary; another integration must supply equivalent evidence or report an unmet requirement.
 
-The host driver reads a target profile specifying the executable, collector, VM arguments and environment, support artifacts, required capabilities, and per-run limits. It probes the JVM and prepares the launch configuration, including the runtime bridge, native observer, and logging settings.
+HotSpot uses an optional external WhiteBox client for full collection and method installation. JFR stack witnesses establish compiled execution independently of installation queries. Frame matching checks generated class, method, descriptor, thread, worker, visit, phase, and collection-request identity. Counter summaries retain one completed collection request per phase; missing frames or recording loss cannot satisfy the [stress requirements](./gir.md#stress-requirements).
 
-The target-side bridge implements collection and compilation requests, queries, and phase controls. HotSpot uses an optional external WhiteBox client for full collection and requested method installation. JFR stack witnesses supply compiled-frame evidence independently of installation queries. Compiler levels, APIs, and frame interpretation stay inside the integration; another JVM must supply equivalent evidence or report the requirement unmet.
-
-Commands select the profile with `--profile`; profile fields have no CLI equivalents or overrides. CLI options control generation and campaigns. The integration verifies the actual collector and capabilities against case and profile requirements, reporting unsupported requirements without substitution or weaker checks.
-
-The implemented commands and profile format are specified in [usage.md](./usage.md).
-
-The common observer is reused where it satisfies the target's observation contract. A JVM that needs another observation implementation must still produce the same protocol records. Adding a JVM extends its integration without changing GIR or the oracle's validation rules.
+Commands select `--profile`; its fields have no CLI overrides. An integration can replace the observer while preserving GIR semantics and the common protocol.
 
 ## Runner and protocol
 
-The runner owns process startup, phase and run deadlines, control communication, output capture, termination, and artifact retention. A campaign can run several target JVM jobs; each job has its own generated worker threads. These two forms of parallelism have separate limits.
+The runner enforces startup, compilation, and run deadlines, captures output, terminates processes, and retains partial artifacts. The engine and target exchange versioned control frames over a Unix domain socket. Its short temporary path is independent of the run directory and is removed on success or failure. Bulk traces and snapshots are files.
 
-The engine and runtime exchange versioned control messages over a Unix domain socket, separate from JVM stdout and stderr. Messages identify the run, capabilities, requested phase, checkpoint, completion, or failure. Bulk trace and snapshot data are files rather than per-operation control messages.
-
-The protocol unit owns message and record definitions and their Java codecs. Records carry sufficient identity and completion information to detect missing data or a file from another run. Readers reject malformed data and incompatible versions.
-
-Collection and compilation requests are paired with evidence. The runtime reports observed progress, and the engine checks the conditions required by the case. Flags and warm-up counts alone do not establish those conditions.
-
-Worker evidence validates group visits, completed joins, thread identities, and phase boundaries. The VM integration decodes raw stack records into frame facts. JFR witness version 1 identifies generated methods by class, name, descriptor, worker, visit, phase, thread, and collection-request ordinal. Counter summaries retain one completed collection request per phase; missing frames or bounded-recording loss cannot satisfy the corresponding [stress requirements](./gir.md#stress-requirements).
+Frames identify the run and checkpoint operation/visit. The target writes a snapshot and waits for acknowledgement at each checkpoint; completion requires every expected checkpoint and the final observation after outer-scope release. Version, identity, bounds, and completion checks detect malformed, missing, or mixed-run evidence. The [protocol module](../protocol/src/main/java/io/connglli/gorrect/protocol/) owns the codecs.
 
 ## Artifacts and results
 
-Each run retains its inputs and observations under a separate run directory:
+Each run uses a separate directory:
 
 ```text
 runs/<run-id>/
@@ -135,16 +99,10 @@ runs/<run-id>/
     result.json
 ```
 
-GIR is the authoritative program representation. The manifest records the target profile, seeds, target and compiler identities, launch settings, capability requirements, and artifact provenance. Generated source, class files, and layout descriptions are retained so that replay can reuse the exact executable case.
+The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. Generated source, classes, layouts, and copied support libraries preserve the executable case. Replay uses those bytes and settings; offline verification derives obligations from saved GIR without a target installation.
 
-Results separate execution outcome, semantic verdict, and stress coverage. A completed run can satisfy its checked invariants while missing a required compilation condition. A crash or timeout retains its logs and partial artifacts even when verification cannot finish.
-
-Verification of saved artifacts uses the engine's oracle without the original target process or generator state. Timing-sensitive reproduction can repeat a case with its recorded synchronization and scheduling constraints.
+`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for reference cases, and JFR witnesses when enabled. `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
 
 ## Checks
 
-Java tests cover GIR parsing and formatting, validation, graph operations, oracle decisions, emission, and protocol handling. Native tests cover isolated decoding and record production where useful. Shared fixtures check compatibility between the Java and C++ protocol implementations.
-
-Integration tests compile and execute generated Java on JDK 17 and 21, then verify observations. They exercise independent mutators, barriers, locals retained across collection and calls, compiled-frame interpretation, and capability reporting. Conditional references and contended atomics require the checks for their later profiles.
-
-The checker is also exercised with deliberately corrupted graphs, traces, and missing evidence. Process tests cover compilation failure, startup failure, runtime crashes, deadlines, incomplete artifacts, and replay. Compatibility checks include the JDK 17 target boundary and the declared JVM profiles.
+Java tests cover the frontend, model, oracle, emission, and codecs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, native capture, offline verification, and replay. Independent exhaustive small-graph models check the reference frontier. Corrupted evidence and injected process failures test classification and retained diagnostics.

@@ -10,14 +10,21 @@ import io.connglli.gorrect.engine.gir.GirFormatter;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
+import io.connglli.gorrect.engine.gir.ReferenceProgram;
+import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
+import io.connglli.gorrect.engine.oracle.HistoryLimits;
+import io.connglli.gorrect.engine.oracle.HistoryOracle;
 import io.connglli.gorrect.engine.oracle.Oracle;
 import io.connglli.gorrect.engine.oracle.OracleLimitException;
+import io.connglli.gorrect.engine.oracle.OracleLimits;
 import io.connglli.gorrect.engine.oracle.OracleResult;
+import io.connglli.gorrect.engine.oracle.ReferencePlan;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import io.connglli.gorrect.protocol.ReferenceHistory;
 import io.connglli.gorrect.protocol.SnapshotCodec;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
@@ -41,6 +48,23 @@ public final class RunEngine {
   private static final String PROBE =
       "gir 1; shape Probe object 1 1; object 1 Probe [1] [42]; root main = 1; program { checkpoint;"
           + " }";
+  private static final String REFERENCE_PROBE =
+      """
+      gir 1; shape Probe object 2 1;
+      object 1 Probe [soft(1), weak(1)] [42]; root main = 1;
+      program {
+        scope {
+          read-root owner Probe main;
+          acquire held Probe owner 0 { collect; }
+          is-cleared cleared owner 1; write-data owner 0 cleared;
+          clear-ref owner 1;
+          acquire absent Probe owner 1 { write-data absent 0 99; }
+          poll-queue;
+          write-weak owner 1 owner;
+        }
+        checkpoint;
+      }
+      """;
 
   private RunEngine() {}
 
@@ -79,7 +103,14 @@ public final class RunEngine {
       throw new IOException("Invalid profile: " + exception.getMessage(), exception);
     }
     if (text == null) {
-      text = PROBE;
+      text =
+          profile.requirements().stream()
+                  .anyMatch(
+                      requirement ->
+                          requirement.equals("reference-histories")
+                              || requirement.equals("reference-queues"))
+              ? REFERENCE_PROBE
+              : PROBE;
       if (profile.jit() != null
           || profile.requirements().stream().anyMatch(GirValidator.STRESS_REQUIREMENTS::contains)) {
         var generated =
@@ -153,7 +184,24 @@ public final class RunEngine {
     RunReport result;
     try {
       var program = GirParser.parse(text);
-      var oracle = Oracle.interpret(program);
+      boolean references = ReferenceProgram.usesReferences(program);
+      if (references
+          && (ReferenceProgram.hasParallel(program)
+              || program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT)))
+        return finish(
+            directory,
+            manifest,
+            new RunReport(
+                RunReport.Outcome.UNSUPPORTED,
+                ExactVerifier.Verdict.INCONCLUSIVE,
+                List.of(
+                    "Reference histories currently require sequential ordinary-object programs"),
+                List.of()));
+      manifest.addProperty("referenceHistory", references);
+      var oracle =
+          references
+              ? ReferencePlan.plan(program, OracleLimits.DEFAULT)
+              : Oracle.interpret(program);
       var unsupported = new ArrayList<>(HotSpotDriver.unsupported(profile));
       if (program.requirements().contains("compiled-execution") && profile.jit() == null)
         unsupported.add("compiled-execution requires profile JIT control and a WhiteBox client");
@@ -180,6 +228,8 @@ public final class RunEngine {
         recorderCounts.forEach(
             (worker, count) -> recorderPlan.append(worker).append('=').append(count).append('\n'));
         Files.writeString(directory.resolve("generated/recorders.properties"), recorderPlan);
+        if (references)
+          Files.writeString(directory.resolve("generated/references.properties"), "enabled=true\n");
         if (profile.jit() != null)
           Files.writeString(
               directory.resolve("generated/jit.properties"),
@@ -389,6 +439,11 @@ public final class RunEngine {
             RunReport.Outcome.PROTOCOL_ERROR, "Invalid target capability report: " + exception);
       }
       manifest.add("target", JsonFiles.GSON.toJsonTree(target));
+      if (manifest.has("referenceHistory")
+          && manifest.get("referenceHistory").getAsBoolean()
+          && (Long.parseLong(target.getProperty("observer.capabilities"))
+                  & io.connglli.gorrect.protocol.HeapSnapshot.REFERENCE_FIELDS)
+              == 0) unmet.add("reference-histories");
       if (!unmet.isEmpty())
         return new RunReport(
             RunReport.Outcome.UNSUPPORTED, ExactVerifier.Verdict.INCONCLUSIVE, unmet, List.of());
@@ -488,12 +543,20 @@ public final class RunEngine {
       var execution =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("execution.json")), RunReport.class);
-      if (execution.execution() != RunReport.Outcome.COMPLETED) return execution;
+      if (execution.execution() != RunReport.Outcome.COMPLETED) {
+        report = diagnoseReferenceFailure(directory, manifest, execution);
+        JsonFiles.write(directory.resolve("result.json"), report);
+        return report;
+      }
       Artifacts.check(directory, manifest);
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
-      var oracle = Oracle.interpret(program);
+      boolean references = ReferenceProgram.usesReferences(program);
+      var oracle =
+          references
+              ? ReferencePlan.plan(program, OracleLimits.DEFAULT)
+              : Oracle.interpret(program);
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
@@ -502,6 +565,43 @@ public final class RunEngine {
       unmet.addAll(HotSpotDriver.requirements(profile, target(directory)));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
+      if (references) {
+        controls(directory, run, oracle);
+        var observations = new ArrayList<HistoryOracle.Observation>();
+        for (int index = 1; index <= oracle.checkpoints().size() + 1; index++) {
+          var projection = SnapshotProjector.project(snapshot(directory, run, index), layout);
+          observations.add(
+              new HistoryOracle.Observation(projection.graph(), projection.problems()));
+        }
+        var history = ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run);
+        if (!history.complete()) throw new IOException("Reference history is incomplete");
+        var result =
+            HistoryOracle.check(
+                program,
+                trace,
+                history,
+                observations,
+                new HistoryLimits(
+                    profile.limits().historyStates(), profile.limits().historyTransitions()));
+        problems.addAll(result.problems());
+        if (result.execution() != null) {
+          var coverage =
+              StressVerifier.verify(directory, run, program, result.execution(), profile);
+          for (String requirement : coverage.unmet())
+            if (!unmet.contains(requirement)) unmet.add(requirement);
+          problems.addAll(coverage.problems());
+        }
+        report =
+            new RunReport(
+                result.invalidWorkload()
+                    ? RunReport.Outcome.INVALID_WORKLOAD
+                    : RunReport.Outcome.COMPLETED,
+                result.verdict(),
+                unmet,
+                problems);
+        JsonFiles.write(directory.resolve("result.json"), report);
+        return report;
+      }
       var stress = StressVerifier.verify(directory, run, program, oracle, profile);
       for (String requirement : stress.unmet())
         if (!unmet.contains(requirement)) unmet.add(requirement);
@@ -509,34 +609,13 @@ public final class RunEngine {
       boolean violated =
           !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
-      var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
-      if (JsonFiles.number(JsonFiles.required(transcript, "version")) != 1
-          || JsonFiles.number(JsonFiles.required(transcript, "run")) != run)
-        throw new IOException("Control transcript identity mismatch");
-      var messages =
-          JsonFiles.GSON.fromJson(
-              JsonFiles.required(transcript, "messages"), ControlMessage[].class);
-      if (messages.length != oracle.checkpoints().size() + 3
-          || messages[0].kind() != ControlMessage.Kind.HELLO
-          || messages[0].sequence() != 0
-          || messages[messages.length - 1].kind() != ControlMessage.Kind.COMPLETE
-          || messages[messages.length - 1].sequence() != oracle.checkpoints().size() + 1L)
-        throw new IOException("Control transcript is incomplete");
-      for (var message : messages)
-        if (message.run() != run) throw new IOException("Control transcript contains another run");
+      controls(directory, run, oracle);
       boolean inconclusive = false;
       for (int i = 0; i <= oracle.checkpoints().size(); i++) {
         var visit =
             i < oracle.checkpoints().size()
                 ? oracle.checkpoints().get(i)
                 : new OracleResult.Checkpoint(0, 1, oracle.finalGraph());
-        var message = messages[i + 1];
-        if (message.kind() != ControlMessage.Kind.CHECKPOINT
-            || message.run() != run
-            || message.sequence() != i + 1L
-            || message.operation() != visit.operation()
-            || message.occurrence() != visit.occurrence())
-          throw new IOException("Control checkpoint identity mismatch");
         var snapshot = snapshot(directory, run, i + 1L);
         if (profile.requirements().contains("compilation-events")
             && (snapshot.capabilities()
@@ -568,9 +647,84 @@ public final class RunEngine {
       throws IOException {
     JsonFiles.write(directory.resolve("manifest.json"), manifest);
     JsonFiles.write(directory.resolve("execution.json"), execution);
-    if (execution.execution() == RunReport.Outcome.COMPLETED) return verify(directory);
+    if (execution.execution() == RunReport.Outcome.COMPLETED
+        || execution.execution() == RunReport.Outcome.RUNTIME_ERROR) return verify(directory);
     JsonFiles.write(directory.resolve("result.json"), execution);
     return execution;
+  }
+
+  private static RunReport diagnoseReferenceFailure(
+      Path directory, JsonObject manifest, RunReport execution) {
+    if (execution.execution() != RunReport.Outcome.RUNTIME_ERROR
+        || !manifest.has("referenceHistory")
+        || !manifest.get("referenceHistory").getAsBoolean()) return execution;
+    try {
+      Artifacts.check(directory, manifest);
+      long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
+      var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+      var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
+      var layout =
+          JsonFiles.GSON.fromJson(
+              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      var observations = new ArrayList<HistoryOracle.Observation>();
+      for (int index = 1;
+          Files.exists(directory.resolve("snapshots/" + index + ".gsnap"));
+          index++) {
+        var projection = SnapshotProjector.project(snapshot(directory, run, index), layout);
+        observations.add(new HistoryOracle.Observation(projection.graph(), projection.problems()));
+      }
+      var result =
+          HistoryOracle.checkFailure(
+              program,
+              ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run),
+              ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run),
+              observations,
+              new HistoryLimits(
+                  profile.limits().historyStates(), profile.limits().historyTransitions()));
+      if (result.invalidWorkload()) {
+        var report =
+            new RunReport(
+                RunReport.Outcome.INVALID_WORKLOAD,
+                ExactVerifier.Verdict.INCONCLUSIVE,
+                execution.unmetRequirements(),
+                result.problems());
+        return report;
+      }
+    } catch (IOException | RuntimeException ignored) {
+      // Partial failure artifacts cannot establish a legal path or override the execution error.
+    }
+    return execution;
+  }
+
+  private static ControlMessage[] controls(Path directory, long run, OracleResult oracle)
+      throws IOException {
+    var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
+    if (JsonFiles.number(JsonFiles.required(transcript, "version")) != 1
+        || JsonFiles.number(JsonFiles.required(transcript, "run")) != run)
+      throw new IOException("Control transcript identity mismatch");
+    var messages =
+        JsonFiles.GSON.fromJson(JsonFiles.required(transcript, "messages"), ControlMessage[].class);
+    if (messages.length != oracle.checkpoints().size() + 3
+        || messages[0].kind() != ControlMessage.Kind.HELLO
+        || messages[0].sequence() != 0
+        || messages[messages.length - 1].kind() != ControlMessage.Kind.COMPLETE
+        || messages[messages.length - 1].sequence() != oracle.checkpoints().size() + 1L)
+      throw new IOException("Control transcript is incomplete");
+    for (var message : messages)
+      if (message.run() != run) throw new IOException("Control transcript contains another run");
+    for (int index = 0; index <= oracle.checkpoints().size(); index++) {
+      var expected =
+          index < oracle.checkpoints().size()
+              ? oracle.checkpoints().get(index)
+              : new OracleResult.Checkpoint(0, 1, oracle.finalGraph());
+      var message = messages[index + 1];
+      if (message.kind() != ControlMessage.Kind.CHECKPOINT
+          || message.sequence() != index + 1L
+          || message.operation() != expected.operation()
+          || message.occurrence() != expected.occurrence())
+        throw new IOException("Control checkpoint identity mismatch");
+    }
+    return messages;
   }
 
   private static JsonObject manifest(Path directory) throws IOException {

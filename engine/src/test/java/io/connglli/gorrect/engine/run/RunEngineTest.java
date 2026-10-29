@@ -253,6 +253,7 @@ class RunEngineTest {
     assertSocketRemoved(directory.resolve("injected"));
     assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, result.verdict());
     assertTrue(Files.isRegularFile(directory.resolve("injected/traces/control.json")));
+    assertTrue(Files.isRegularFile(directory.resolve("injected/result.json")));
   }
 
   @Test
@@ -366,6 +367,146 @@ class RunEngineTest {
     Path profile = directory.resolve("profile.json");
     JsonFiles.write(profile, object);
     return profile;
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {17, 21})
+  void verifiesConditionalReferencesWithoutStrengtheningCapture(int feature) throws IOException {
+    var program =
+        """
+        gir 1; shape N object 3 1;
+        object 1 N [soft(2), weak(2), null] [0];
+        object 2 N [3, null, null] [7]; object 3 N [null, null, null] [9];
+        root main = 1; root protected = 2; root saved = null;
+        program {
+          scope {
+            read-root owner N main;
+            acquire held N owner 0 {
+              read-ref child N held 0; write-root saved child; collect;
+              is-cleared state owner 1; write-data owner 0 state;
+            }
+            clear-ref owner 0;
+            acquire absent N owner 0 { write-data absent 0 99; }
+            repeat 3 {
+              write-weak owner 2 owner;
+              acquire self N owner 2 { write-data self 0 42; }
+              clear-ref owner 2; poll-queue;
+            }
+          }
+          checkpoint;
+          write-root protected null; collect; poll-queue; checkpoint;
+        }
+        """;
+    Path output = directory.resolve("references"), selected = profile(feature);
+    assertPass(RunEngine.run(input(program), selected, output));
+    assertPass(RunEngine.verify(output));
+    assertPass(RunEngine.replay(output, directory.resolve("reference-replay")));
+    String source = Files.readString(output.resolve("generated/Case.java"));
+    assertTrue(source.contains(".get();"));
+    assertTrue(source.contains("Reference.reachabilityFence"));
+    long run = JsonFiles.read(output.resolve("manifest.json")).get("run").getAsLong();
+    var history =
+        io.connglli.gorrect.protocol.ReferenceHistory.read(
+            output.resolve("traces/references.ghistory"), run);
+    var acquisitions =
+        history.events().stream()
+            .filter(e -> e.kind() == io.connglli.gorrect.protocol.ReferenceHistory.Kind.ACQUIRE)
+            .toList();
+    assertNotNull(acquisitions.getFirst().target());
+    assertNull(acquisitions.get(1).target());
+    assertEquals(
+        3,
+        history.events().stream()
+            .filter(e -> e.kind() == io.connglli.gorrect.protocol.ReferenceHistory.Kind.INSTALL)
+            .map(e -> e.wrapper())
+            .distinct()
+            .count());
+    Path damaged = copy(output, "reference-damage");
+    var events = new ArrayList<>(history.events());
+    var first = events.getFirst();
+    events.set(
+        0,
+        new io.connglli.gorrect.protocol.ReferenceHistory.Event(
+            first.sequence(),
+            first.kind(),
+            first.strength(),
+            first.wrapper(),
+            new io.connglli.gorrect.protocol.ReferenceHistory.Target(0, 0, 99)));
+    new io.connglli.gorrect.protocol.ReferenceHistory(run, true, events)
+        .write(damaged.resolve("traces/references.ghistory"));
+    assertEquals(ExactVerifier.Verdict.VIOLATED, RunEngine.verify(damaged).verdict());
+    Path missing = copy(output, "reference-gap");
+    Files.delete(missing.resolve("traces/references.ghistory"));
+    assertEquals(RunReport.Outcome.EXTRACTION_ERROR, RunEngine.verify(missing).execution());
+    Path partial = copy(output, "reference-incomplete");
+    new io.connglli.gorrect.protocol.ReferenceHistory(run, false, history.events())
+        .write(partial.resolve("traces/references.ghistory"));
+    assertEquals(RunReport.Outcome.EXTRACTION_ERROR, RunEngine.verify(partial).execution());
+    try (var input = getClass().getResourceAsStream("/cases/references.gir")) {
+      String example =
+          new String(
+              java.util.Objects.requireNonNull(input).readAllBytes(),
+              java.nio.charset.StandardCharsets.UTF_8);
+      assertPass(RunEngine.run(input(example), selected, directory.resolve("reference-example")));
+    }
+  }
+
+  @Test
+  void reportsReferenceSearchLimitsAndUnsupportedCombinations() throws IOException {
+    Path selected = profile(21);
+    String references =
+        "gir 1; shape N object 1 0; object 1 N [weak(2)] []; object 2 N [null] []; root r = 1;"
+            + " program { checkpoint; }";
+    var raw = JsonFiles.read(selected);
+    raw.getAsJsonObject("limits").addProperty("historyStates", 1);
+    JsonFiles.write(selected, raw);
+    var limited = RunEngine.run(input(references), selected, directory.resolve("reference-bound"));
+    assertEquals(RunReport.Outcome.COMPLETED, limited.execution());
+    assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, limited.verdict());
+    String parallel = references.replace("checkpoint;", "parallel { worker a {} worker b {} }");
+    assertEquals(
+        RunReport.Outcome.UNSUPPORTED,
+        RunEngine.run(input(parallel), selected, directory.resolve("parallel-references"))
+            .execution());
+    raw.add("requirements", JsonFiles.GSON.toJsonTree(List.of("reference-reclamation")));
+    JsonFiles.write(selected, raw);
+    assertEquals(
+        RunReport.Outcome.UNSUPPORTED,
+        RunEngine.run(input(references), selected, directory.resolve("reclamation")).execution());
+  }
+
+  @Test
+  void identifiesInvalidPreconditionsOnAValidatedConditionalPath() throws IOException {
+    String program =
+        """
+        gir 1; shape N object 1 1; object 1 N [weak(1)] [0]; root r = 1;
+        program {
+          read-root owner N r;
+          acquire held N owner 0 {
+            write-ref held 0 null;
+            read-ref absent N held 0;
+            write-data absent 0 7;
+          }
+        }
+        """;
+    Path output = directory.resolve("invalid-reference-path");
+    var result = RunEngine.run(input(program), profile(21), output);
+    assertEquals(RunReport.Outcome.INVALID_WORKLOAD, result.execution(), result.toString());
+    assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, result.verdict());
+    assertEquals(RunReport.Outcome.INVALID_WORKLOAD, RunEngine.verify(output).execution());
+  }
+
+  @Test
+  void probesReferenceCaptureWhenTheProfileRequiresIt() throws IOException {
+    Path selected = profile(21);
+    var raw = JsonFiles.read(selected);
+    raw.add(
+        "requirements",
+        JsonFiles.GSON.toJsonTree(List.of("reference-histories", "reference-queues")));
+    JsonFiles.write(selected, raw);
+    Path output = directory.resolve("reference-probe");
+    assertPass(RunEngine.probe(selected, output));
+    assertTrue(Files.exists(output.resolve("traces/references.ghistory")));
   }
 
   @ParameterizedTest

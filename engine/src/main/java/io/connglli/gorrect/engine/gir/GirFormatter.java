@@ -62,6 +62,22 @@ public final class GirFormatter {
     String label = labels.get(instruction.id());
     String prefix = label == null ? "" : label + ": ";
     switch (instruction) {
+      case Instruction.Acquire acquire -> {
+        line(
+            indent,
+            prefix
+                + "acquire "
+                + acquire.name()
+                + " "
+                + acquire.shape()
+                + " "
+                + acquire.owner()
+                + " "
+                + acquire.index()
+                + " {");
+        acquire.body().forEach(child -> instruction(child, indent + 1));
+        line(indent, "}");
+      }
       case Instruction.Parallel parallel -> {
         line(indent, prefix + "parallel {");
         for (var worker : parallel.workers()) {
@@ -93,7 +109,18 @@ public final class GirFormatter {
       case Instruction.ReadReference op ->
           "read-ref " + op.name() + " " + op.shape() + " " + op.owner() + " " + op.index();
       case Instruction.WriteReference op ->
-          "write-ref " + op.owner() + " " + op.index() + " " + operand(op.value());
+          (op.kind() == Value.ReferenceKind.STRONG
+                  ? "write-ref "
+                  : op.kind() == Value.ReferenceKind.SOFT ? "write-soft " : "write-weak ")
+              + op.owner()
+              + " "
+              + op.index()
+              + " "
+              + operand(op.value());
+      case Instruction.ClearReference op -> "clear-ref " + op.owner() + " " + op.index();
+      case Instruction.ReferenceState op ->
+          "is-cleared " + op.name() + " " + op.owner() + " " + op.index();
+      case Instruction.PollQueue ignored -> "poll-queue";
       case Instruction.ReadData op ->
           "read-data " + op.name() + " " + op.owner() + " " + op.index();
       case Instruction.WriteData op ->
@@ -114,7 +141,11 @@ public final class GirFormatter {
   }
 
   private static String reference(Value.Reference reference) {
-    return reference.target() == null ? "null" : Long.toString(reference.target().occurrence());
+    String target =
+        reference.target() == null ? "null" : Long.toString(reference.target().occurrence());
+    return reference.kind() == Value.ReferenceKind.STRONG
+        ? target
+        : (reference.kind() == Value.ReferenceKind.SOFT ? "soft(" : "weak(") + target + ")";
   }
 
   private void line(int indent, String value) {

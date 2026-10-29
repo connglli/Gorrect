@@ -25,6 +25,15 @@ public record Graph(
    *     or non-strong references
    */
   public Graph required() {
+    return reachable(false);
+  }
+
+  /** Obligations after a history selects which soft/weak referents remain accessible. */
+  public Graph accessible() {
+    return reachable(true);
+  }
+
+  private Graph reachable(boolean includeReferences) {
     var queue = new ArrayDeque<ObjectId>();
     roots.values().forEach(value -> enqueue(value, queue));
     handles.values().forEach(value -> enqueue(value, queue));
@@ -39,7 +48,14 @@ public record Graph(
         throw new IllegalArgumentException("Invalid model slots for " + id);
       }
       required.put(id, object);
-      object.references().forEach(value -> enqueue(value, queue));
+      object
+          .references()
+          .forEach(
+              value -> {
+                if (includeReferences && value.kind() != Value.ReferenceKind.STRONG) {
+                  if (value.target() != null) queue.addLast(value.target());
+                } else enqueue(value, queue);
+              });
     }
     return new Graph(required, roots, handles);
   }

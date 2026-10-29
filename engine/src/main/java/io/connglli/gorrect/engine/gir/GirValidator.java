@@ -25,10 +25,15 @@ public final class GirValidator {
   private int nextOperation = 1;
   private int nextWorker = 1;
   private int workerDepth = -1;
+  private int acquireDepth;
   public static final Set<String> STRESS_REQUIREMENTS =
       Set.of("concurrent-overlap", "compiled-execution", "gc-during-workers");
 
-  private record Binding(Shape shape, boolean live) {}
+  private record Binding(Shape shape, boolean live, boolean pinned) {
+    Binding(Shape shape, boolean live) {
+      this(shape, live, false);
+    }
+  }
 
   private GirValidator() {}
 
@@ -72,6 +77,8 @@ public final class GirValidator {
       name(root.name());
       if (!roots.add(root.name())) fail("Duplicate root " + root.name());
       initialReference(root.value(), ids);
+      if (root.value().kind() != Value.ReferenceKind.STRONG)
+        fail("Named roots require strong references");
     }
     block(program.body(), 0);
     var labels = new HashSet<String>();
@@ -85,23 +92,41 @@ public final class GirValidator {
   }
 
   private static void initialReference(Value.Reference value, Set<ObjectId> ids) {
-    if (value.kind() != Value.ReferenceKind.STRONG)
-      fail("Executable GIR requires strong references");
+    if (value.wrapper() != null) fail("Wrapper identities are assigned by the implementation");
     if (value.target() != null && !ids.contains(value.target())) {
       fail("Unknown initial reference target " + value.target());
     }
   }
 
   private void block(List<Instruction> instructions, int depth) {
+    block(instructions, depth, null, null);
+  }
+
+  private void block(
+      List<Instruction> instructions, int depth, String acquired, Shape acquiredShape) {
     if (depth > MAX_NESTING) fail("GIR nesting limit exceeded");
     scopes.push(new HashMap<>());
     try {
+      if (acquired != null) {
+        declare(acquired, acquiredShape);
+        scopes.peek().put(acquired, new Binding(acquiredShape, true, true));
+      }
       for (var instruction : instructions) {
         // Reparsing assigns these indices; accepting gaps would change allocation identities.
         if (instruction.id() != nextOperation++) {
           fail("Internal instruction IDs must follow source order");
         }
         switch (instruction) {
+          case Instruction.Acquire acquire -> {
+            slot(acquire.owner(), acquire.index(), true);
+            var shape = shape(acquire.shape());
+            acquireDepth++;
+            try {
+              block(acquire.body(), depth + 1, acquire.name(), shape);
+            } finally {
+              acquireDepth--;
+            }
+          }
           case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
           case Instruction.Scope scope -> block(scope.body(), depth + 1);
           case Instruction.Repeat repeat -> {
@@ -114,6 +139,8 @@ public final class GirValidator {
               fail("Barriers must be direct worker statements");
             if (operation instanceof Instruction.Checkpoint && workerDepth >= 0)
               fail("Worker checkpoints are unsupported; observe after join");
+            if (operation instanceof Instruction.Checkpoint && acquireDepth > 0)
+              fail("Observe after acquisition scopes have ended");
             operation(operation);
           }
         }
@@ -169,7 +196,14 @@ public final class GirValidator {
       case Instruction.WriteReference op -> {
         slot(op.owner(), op.index(), true);
         operand(op.value(), true);
+        if (op.kind() == null) fail("Missing reference kind");
       }
+      case Instruction.ClearReference op -> slot(op.owner(), op.index(), true);
+      case Instruction.ReferenceState op -> {
+        slot(op.owner(), op.index(), true);
+        declare(op.name(), null);
+      }
+      case Instruction.PollQueue ignored -> {}
       case Instruction.ReadData op -> {
         slot(op.owner(), op.index(), false);
         declare(op.name(), null);
@@ -182,6 +216,7 @@ public final class GirValidator {
         var binding = scopes.peek().get(op.name());
         if (binding == null || !binding.live())
           fail("Release requires a live local binding " + op.name());
+        if (binding.pinned()) fail("Acquired references remain strong until scope exit");
         scopes.peek().put(op.name(), new Binding(binding.shape(), false));
       }
       case Instruction.Checkpoint ignored -> {}

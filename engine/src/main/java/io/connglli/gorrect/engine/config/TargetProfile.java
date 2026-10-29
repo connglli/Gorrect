@@ -37,7 +37,13 @@ public record TargetProfile(
   public record Jit(int level, int warmupRounds, int deadlineMillis) {}
 
   public record Limits(
-      int startupSeconds, int runSeconds, int compileSeconds, int records, int traceEvents) {}
+      int startupSeconds,
+      int runSeconds,
+      int compileSeconds,
+      int records,
+      int traceEvents,
+      int historyStates,
+      int historyTransitions) {}
 
   public TargetProfile {
     vmArgs = List.copyOf(vmArgs);
@@ -158,20 +164,32 @@ public record TargetProfile(
                   "compilation-events",
                   "local-bindings",
                   "compiled-execution",
-                  "gc-completion")
+                  "gc-completion",
+                  "reference-histories",
+                  "reference-queues",
+                  "reference-reclamation")
               .contains(requirement)
           && !Set.of("concurrent-overlap", "gc-during-workers").contains(requirement))
         throw new IllegalArgumentException("Unknown requirement " + requirement);
     JsonObject limits = object.has("limits") ? object.getAsJsonObject("limits") : new JsonObject();
     JsonFiles.fields(
-        limits, "startupSeconds", "runSeconds", "compileSeconds", "records", "traceEvents");
+        limits,
+        "startupSeconds",
+        "runSeconds",
+        "compileSeconds",
+        "records",
+        "traceEvents",
+        "historyStates",
+        "historyTransitions");
     var bounds =
         new Limits(
             limit(limits, "startupSeconds", 10, 3600),
             limit(limits, "runSeconds", 30, 86400),
             limit(limits, "compileSeconds", 30, 3600),
             limit(limits, "records", 100_000, 1_000_000),
-            limit(limits, "traceEvents", 100_000, 1_000_000));
+            limit(limits, "traceEvents", 100_000, 1_000_000),
+            limit(limits, "historyStates", 4096, 1_000_000),
+            limit(limits, "historyTransitions", 100_000, 10_000_000));
     if (bounds.startupSeconds() > bounds.runSeconds())
       throw new IllegalArgumentException("Startup deadline exceeds run deadline");
     return new TargetProfile(

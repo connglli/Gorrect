@@ -5,6 +5,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.Operand;
+import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
@@ -33,13 +34,20 @@ public final class JavaEmitter {
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private final List<Instruction.Worker> workers = new ArrayList<>();
   private int worker;
+  private final boolean references;
 
   private JavaEmitter(GirProgram program) {
     this.program = program;
+    references = ReferenceProgram.usesReferences(program);
   }
 
   public static Emission emit(GirProgram program) {
     GirValidator.validate(program);
+    if (ReferenceProgram.usesReferences(program)
+        && (ReferenceProgram.hasParallel(program)
+            || program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT)))
+      throw new io.connglli.gorrect.engine.gir.GirException(
+          "Reference emission requires a sequential ordinary-object program");
     return new JavaEmitter(program).emit();
   }
 
@@ -48,9 +56,32 @@ public final class JavaEmitter {
     line("import io.connglli.gorrect.runtime.WorkerContext;");
     line("import io.connglli.gorrect.runtime.observe.NativeObserver;");
     line("import io.connglli.gorrect.protocol.HeapSnapshot;");
+    line("import io.connglli.gorrect.protocol.ReferenceHistory;");
     line("public final class Case {");
     var layouts = new ArrayList<ObservationLayout.ObjectType>();
     var registrations = new ArrayList<String>();
+    var referenceLayouts = new ArrayList<ObservationLayout.ReferenceType>();
+    if (references) {
+      referenceClasses();
+      for (var kind : List.of(Value.ReferenceKind.SOFT, Value.ReferenceKind.WEAK)) {
+        String type = kind == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot";
+        registrations.add(
+            "new NativeObserver.Registration("
+                + type
+                + ".class, HeapSnapshot.ClassKind."
+                + (kind == Value.ReferenceKind.SOFT ? "SOFT_REFERENCE" : "WEAK_REFERENCE")
+                + ")");
+        referenceLayouts.add(
+            new ObservationLayout.ReferenceType(
+                "LCase$" + type + ";",
+                kind,
+                "idWorker",
+                "idSite",
+                "idOccurrence",
+                "idSlot",
+                "referent"));
+      }
+    }
     int index = 0;
     for (var shape : program.shapes()) {
       shapes.put(shape.name(), shape);
@@ -133,13 +164,55 @@ public final class JavaEmitter {
         new ObservationLayout(
             layouts,
             program.shapes().stream().filter(shape -> shape.kind() != Shape.Kind.OBJECT).toList(),
-            new ObservationLayout.Roots("LCase$Roots;", rootFields)));
+            new ObservationLayout.Roots("LCase$Roots;", rootFields),
+            referenceLayouts));
+  }
+
+  private void referenceClasses() {
+    line(
+        "private static final java.lang.ref.ReferenceQueue<Object> referenceQueue = new"
+            + " java.lang.ref.ReferenceQueue<>();");
+    for (String kind : List.of("Soft", "Weak")) {
+      line(
+          "public static final class "
+              + kind
+              + "Slot extends java.lang.ref."
+              + kind
+              + "Reference<Object> {");
+      line("public final int idWorker, idSite, idSlot; public final long idOccurrence;");
+      line(
+          "public "
+              + kind
+              + "Slot(int worker, int site, long occurrence, int slot, Object target) {"
+              + " super(target, referenceQueue); idWorker=worker; idSite=site;"
+              + " idOccurrence=occurrence; idSlot=slot; }");
+      line("}");
+    }
+    line(
+        "private static void reference(TargetSession session, int operation, int kind, long value,"
+            + " java.lang.ref.Reference<?> object, int tw, int ts, long occurrence) {");
+    line(
+        "if (object == null) session.reference(operation, kind, value, 0, 0, 0, 0L, 0, tw, ts,"
+            + " occurrence);");
+    line(
+        "else if (object instanceof SoftSlot r) session.reference(operation, kind, value, 1,"
+            + " r.idWorker, r.idSite, r.idOccurrence, r.idSlot, tw, ts, occurrence);");
+    line(
+        "else if (object instanceof WeakSlot r) session.reference(operation, kind, value, 2,"
+            + " r.idWorker, r.idSite, r.idOccurrence, r.idSlot, tw, ts, occurrence);");
+    line("else throw new IllegalStateException(\"Unregistered reference object\");");
+    line("}");
   }
 
   private void allocationCounters(List<Instruction> instructions) {
     for (var instruction : instructions)
       switch (instruction) {
         case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
+        case Instruction.WriteReference op -> {
+          if (op.kind() != Value.ReferenceKind.STRONG)
+            line("private static long w" + op.id() + ";");
+        }
+        case Instruction.Acquire acquire -> allocationCounters(acquire.body());
         case Instruction.Scope scope -> allocationCounters(scope.body());
         case Instruction.Repeat repeat -> allocationCounters(repeat.body());
         case Instruction.Parallel parallel -> {
@@ -165,15 +238,31 @@ public final class JavaEmitter {
               + allocation(shape, 0, object.id() + "L")
               + ";");
     }
+    if (references)
+      line(
+          "Object[] initialization = new Object[]{"
+              + String.join(
+                  ",", program.objects().stream().map(object -> objects.get(object.id())).toList())
+              + "};");
     for (var object : program.objects()) {
       var shape = shapes.get(object.shape());
       String name = objects.get(object.id());
-      for (int i = 0; i < object.references().size(); i++)
-        line(
-            slot(name, shape, i, true)
-                + " = "
-                + initial(object.references().get(i), objects)
-                + ";");
+      for (int i = 0; i < object.references().size(); i++) {
+        var value = object.references().get(i);
+        String target = initial(value, objects);
+        if (value.kind() != Value.ReferenceKind.STRONG)
+          target =
+              "new "
+                  + (value.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot")
+                  + "(0, 0, "
+                  + object.id()
+                  + "L, "
+                  + i
+                  + ", "
+                  + target
+                  + ")";
+        line(slot(name, shape, i, true) + " = " + target + ";");
+      }
       for (int i = 0; i < object.data().size(); i++)
         line(slot(name, shape, i, false) + " = " + object.data().get(i) + "L;");
     }
@@ -182,11 +271,17 @@ public final class JavaEmitter {
     // No registry survives construction; the graph's named roots establish its lifetime.
     for (var object : program.objects())
       bindArray(objects.get(object.id()), shapes.get(object.shape()), 0, object.id() + "L");
+    if (references) line("java.lang.ref.Reference.reachabilityFence(initialization);");
     line("}");
   }
 
   private void block(List<Instruction> instructions) {
+    block(instructions, null, null);
+  }
+
+  private void block(List<Instruction> instructions, String acquired, Binding acquiredBinding) {
     scopes.push(new LinkedHashMap<>());
+    if (acquired != null) scopes.peek().put(acquired, acquiredBinding);
     for (var instruction : instructions) {
       if (instruction instanceof Instruction.ReadData op) {
         var owner = binding(op.owner());
@@ -196,6 +291,74 @@ public final class JavaEmitter {
         continue;
       }
       switch (instruction) {
+        case Instruction.Acquire op -> {
+          var owner = binding(op.owner());
+          String ref = "reference" + op.id(), result = "b" + op.id();
+          line("{");
+          line(
+              "java.lang.ref.Reference<?> "
+                  + ref
+                  + " = (java.lang.ref.Reference<?>) "
+                  + slot(owner.name(), owner.shape(), op.index(), true)
+                  + ";");
+          line(
+              types.get(op.shape())
+                  + " "
+                  + result
+                  + " = ("
+                  + types.get(op.shape())
+                  + ") "
+                  + ref
+                  + ".get();");
+          reference(op.id(), "ACQUIRE", result + " == null ? 0L : 1L", ref, result);
+          line("if (" + result + " != null) {");
+          block(op.body(), op.name(), new Binding(result, shapes.get(op.shape())));
+          line(
+              "session.record("
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.ACQUIRE_END.ordinal(),"
+                  + " 0L);");
+          line("}");
+          line(result + " = null; " + ref + " = null;");
+          line("}");
+          continue;
+        }
+        case Instruction.ClearReference op -> {
+          var owner = binding(op.owner());
+          String ref = "reference" + op.id();
+          line(
+              "java.lang.ref.Reference<?> "
+                  + ref
+                  + " = (java.lang.ref.Reference<?>) "
+                  + slot(owner.name(), owner.shape(), op.index(), true)
+                  + ";");
+          line(ref + ".clear();");
+          reference(op.id(), "CLEAR", "0L", ref, null);
+          line(ref + " = null;");
+          continue;
+        }
+        case Instruction.ReferenceState op -> {
+          var owner = binding(op.owner());
+          String ref = "reference" + op.id();
+          line(
+              "java.lang.ref.Reference<?> "
+                  + ref
+                  + " = (java.lang.ref.Reference<?>) "
+                  + slot(owner.name(), owner.shape(), op.index(), true)
+                  + ";");
+          String name = declare(op.name(), null, op.id());
+          line("long " + name + " = " + ref + ".refersTo(null) ? 1L : 0L;");
+          reference(op.id(), "STATE", name, ref, null);
+          line(ref + " = null;");
+          continue;
+        }
+        case Instruction.PollQueue op -> {
+          String ref = "reference" + op.id();
+          line("java.lang.ref.Reference<?> " + ref + " = referenceQueue.poll();");
+          reference(op.id(), "QUEUE", ref + " == null ? 0L : 1L", ref, null);
+          line(ref + " = null;");
+          continue;
+        }
         case Instruction.Parallel parallel -> {
           record(parallel.id(), false);
           String ids =
@@ -266,6 +429,29 @@ public final class JavaEmitter {
         }
         case Instruction.WriteReference op -> {
           var owner = binding(op.owner());
+          if (op.kind() != Value.ReferenceKind.STRONG) {
+            String ref = "reference" + op.id();
+            line(
+                (op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot " : "WeakSlot ")
+                    + ref
+                    + " = new "
+                    + (op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot")
+                    + "("
+                    + worker
+                    + ", "
+                    + op.id()
+                    + ", ++w"
+                    + op.id()
+                    + ", -1, "
+                    + operand(op.value())
+                    + ");");
+            line(slot(owner.name(), owner.shape(), op.index(), true) + " = " + ref + ";");
+            String value =
+                op.value() instanceof Operand.Name name ? binding(name.name()).name() : null;
+            reference(op.id(), "INSTALL", "0L", ref, value);
+            line(ref + " = null;");
+            continue;
+          }
           line(
               slot(owner.name(), owner.shape(), op.index(), true)
                   + " = "
@@ -282,7 +468,7 @@ public final class JavaEmitter {
         }
         case Instruction.Release op -> {
           var binding = binding(op.name());
-          if (binding.shape() != null) line(binding.name() + " = null;");
+          if (binding.shape() != null) release(binding.name());
         }
         case Instruction.Scope scope -> {
           record(scope.id(), false);
@@ -317,8 +503,43 @@ public final class JavaEmitter {
       }
       record(instruction.id(), false);
     }
-    for (var binding : scopes.pop().values())
-      if (binding.shape() != null) line(binding.name() + " = null;");
+    for (var binding : scopes.pop().values()) if (binding.shape() != null) release(binding.name());
+  }
+
+  // A Java local's last use can precede GIR release; the fence preserves the modeled lifetime.
+  private void release(String name) {
+    line("java.lang.ref.Reference.reachabilityFence(" + name + "); " + name + " = null;");
+  }
+
+  private void reference(int operation, String kind, String value, String wrapper, String target) {
+    String identity =
+        target == null
+            ? "0, 0, 0L"
+            : "("
+                + target
+                + " == null ? 0 : "
+                + target
+                + ".idWorker), ("
+                + target
+                + " == null ? 0 : "
+                + target
+                + ".idSite), ("
+                + target
+                + " == null ? 0L : "
+                + target
+                + ".idOccurrence)";
+    line(
+        "reference(session, "
+            + operation
+            + ", ReferenceHistory.Kind."
+            + kind
+            + ".ordinal(), "
+            + value
+            + ", "
+            + wrapper
+            + ", "
+            + identity
+            + ");");
   }
 
   private void record(int operation, boolean iteration) {
