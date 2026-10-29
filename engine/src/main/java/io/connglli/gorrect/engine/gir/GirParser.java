@@ -5,6 +5,7 @@ import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 
@@ -15,6 +16,7 @@ public final class GirParser {
   private Token current;
   private Token lookahead;
   private int nextOperation = 1;
+  private int nextWorker = 1;
 
   private GirParser(String source) {
     lexer = new Lexer(source);
@@ -48,8 +50,14 @@ public final class GirParser {
     var shapes = new ArrayList<Shape>();
     var objects = new ArrayList<GirProgram.InitialObject>();
     var roots = new ArrayList<GirProgram.Root>();
+    var requirements = new HashSet<String>();
     while (!current.text().equals("program")) {
       switch (next().text()) {
+        case "require" -> {
+          String requirement = next().text();
+          if (!requirements.add(requirement)) throw error("Duplicate requirement " + requirement);
+          expect(";");
+        }
         case "shape" -> {
           String name = name();
           String kind = next().text();
@@ -83,7 +91,7 @@ public final class GirParser {
     expect("program");
     var body = block(0);
     expect("");
-    return new GirProgram(version, shapes, objects, roots, body, labels);
+    return new GirProgram(version, shapes, objects, roots, body, labels, requirements);
   }
 
   private List<Instruction> block(int depth) {
@@ -110,6 +118,9 @@ public final class GirParser {
             case "write-data" -> new Instruction.WriteData(id, name(), integer(), operand());
             case "release" -> new Instruction.Release(id, name());
             case "checkpoint" -> new Instruction.Checkpoint(id);
+            case "collect" -> new Instruction.Collect(id);
+            case "barrier" -> new Instruction.Barrier(id);
+            case "parallel" -> parallel(id, depth + 1);
             case "scope" -> new Instruction.Scope(id, block(depth + 1));
             case "repeat" -> new Instruction.Repeat(id, number(), block(depth + 1));
             default -> throw error("Unsupported instruction " + opcode);
@@ -118,6 +129,18 @@ public final class GirParser {
       instructions.add(instruction);
     }
     return instructions;
+  }
+
+  private Instruction.Parallel parallel(int id, int depth) {
+    expect("{");
+    var workers = new ArrayList<Instruction.Worker>();
+    while (!take("}")) {
+      expect("worker");
+      int worker = nextWorker++;
+      String name = name();
+      workers.add(new Instruction.Worker(worker, name, block(depth)));
+    }
+    return new Instruction.Parallel(id, workers);
   }
 
   private List<Value.Reference> references() {

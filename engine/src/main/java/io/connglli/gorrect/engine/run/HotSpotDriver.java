@@ -1,15 +1,22 @@
 package io.connglli.gorrect.engine.run;
 
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
+import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Properties;
+import java.util.Set;
 
 /** HotSpot launch policy and evidence interpretation; no collector rule enters the oracle. */
 final class HotSpotDriver {
   private HotSpotDriver() {}
+
+  static Set<ExecutionEvidence.Frame> compiledFrames(Path path, long run) throws IOException {
+    return HotSpotFrames.read(path, run);
+  }
 
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
     var arguments = new ArrayList<String>();
@@ -18,6 +25,11 @@ final class HotSpotDriver {
     arguments.add("-XX:+UseSerialGC");
     arguments.add("-XX:ErrorFile=" + directory.resolve("logs/hs_err_pid%p.log"));
     arguments.add("-agentpath:" + directory.resolve("support/" + observer));
+    if (profile.jit() != null) {
+      arguments.add("-XX:+UnlockDiagnosticVMOptions");
+      arguments.add("-XX:+WhiteBoxAPI");
+      arguments.add("-Xbootclasspath/a:" + directory.resolve("support/whitebox.jar"));
+    }
     return arguments;
   }
 
@@ -50,6 +62,10 @@ final class HotSpotDriver {
             case "compilation-events" ->
                 (bits & HeapSnapshot.COMPILATION_EVENTS) != 0
                     && (bits & HeapSnapshot.COMPILATION_OVERFLOW) == 0;
+            case "compiled-execution" ->
+                profile.jit() != null && target.getProperty("jit.problem", "unavailable").isEmpty();
+            case "gc-during-workers" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
+            case "concurrent-overlap" -> true;
             default -> false;
           };
       if (!available && !unmet.contains(requirement)) unmet.add(requirement);

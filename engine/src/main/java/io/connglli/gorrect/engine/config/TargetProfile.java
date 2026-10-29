@@ -22,11 +22,19 @@ public record TargetProfile(
     Map<String, String> environment,
     Support support,
     List<String> requirements,
-    Limits limits) {
+    Limits limits,
+    Jit jit) {
   public static final Set<String> ENVIRONMENT_OPTIONS =
       Set.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH");
 
-  public record Support(String runtime, String protocol, String observer) {}
+  public record Support(String runtime, String protocol, String observer, String whitebox) {
+    public Support(String runtime, String protocol, String observer) {
+      this(runtime, protocol, observer, null);
+    }
+  }
+
+  /** HotSpot installation requests; actual compiled execution requires separate frame evidence. */
+  public record Jit(int level, int warmupRounds, int deadlineMillis) {}
 
   public record Limits(
       int startupSeconds, int runSeconds, int compileSeconds, int records, int traceEvents) {}
@@ -58,7 +66,8 @@ public record TargetProfile(
         "environment",
         "support",
         "requirements",
-        "limits");
+        "limits",
+        "jit");
     if (JsonFiles.number(JsonFiles.required(object, "version")) != 1)
       throw new IllegalArgumentException("Unsupported profile version");
     String vm = text(object, "vm"), collector = text(object, "collector");
@@ -105,12 +114,36 @@ public record TargetProfile(
       }
     }
     var support = JsonFiles.required(object, "support").getAsJsonObject();
-    JsonFiles.fields(support, "runtime", "protocol", "observer");
+    JsonFiles.fields(support, "runtime", "protocol", "observer", "whitebox");
     var artifacts =
         new Support(
             resolve(base, text(support, "runtime")),
             resolve(base, text(support, "protocol")),
-            resolve(base, text(support, "observer")));
+            resolve(base, text(support, "observer")),
+            support.has("whitebox") && !support.get("whitebox").isJsonNull()
+                ? resolve(base, text(support, "whitebox"))
+                : null);
+    Jit jit = null;
+    if (object.has("jit") && !object.get("jit").isJsonNull()) {
+      var settings = object.getAsJsonObject("jit");
+      JsonFiles.fields(settings, "level", "warmupRounds", "deadlineMillis");
+      if (!vm.equals("hotspot") || artifacts.whitebox() == null)
+        throw new IllegalArgumentException("HotSpot JIT control requires support.whitebox");
+      long warmup =
+          settings.has("warmupRounds") ? JsonFiles.number(settings.get("warmupRounds")) : 1;
+      if (warmup < 0 || warmup > 1000)
+        throw new IllegalArgumentException("Invalid JIT warm-up count");
+      jit =
+          new Jit(
+              limit(settings, "level", 4, 4),
+              (int) warmup,
+              limit(settings, "deadlineMillis", 5000, 60000));
+      if (args.contains("-XX:-UnlockDiagnosticVMOptions"))
+        throw new IllegalArgumentException("JIT control requires diagnostic VM options");
+    }
+    for (String argument : args)
+      if (argument.matches("-XX:[+-]WhiteBoxAPI"))
+        throw new IllegalArgumentException("WhiteBox options belong to the driver");
     var requirements =
         object.has("requirements")
             ? strings(object.get("requirements"))
@@ -119,14 +152,15 @@ public record TargetProfile(
       throw new IllegalArgumentException("Duplicate capability requirement");
     for (String requirement : requirements)
       if (!Set.of(
-              "tagging",
-              "named-roots",
-              "gc-events",
-              "compilation-events",
-              "local-bindings",
-              "compiled-execution",
-              "gc-completion")
-          .contains(requirement))
+                  "tagging",
+                  "named-roots",
+                  "gc-events",
+                  "compilation-events",
+                  "local-bindings",
+                  "compiled-execution",
+                  "gc-completion")
+              .contains(requirement)
+          && !Set.of("concurrent-overlap", "gc-during-workers").contains(requirement))
         throw new IllegalArgumentException("Unknown requirement " + requirement);
     JsonObject limits = object.has("limits") ? object.getAsJsonObject("limits") : new JsonObject();
     JsonFiles.fields(
@@ -150,7 +184,8 @@ public record TargetProfile(
         environment,
         artifacts,
         requirements,
-        bounds);
+        bounds,
+        jit);
   }
 
   private static int limit(JsonObject object, String name, int fallback, int maximum) {

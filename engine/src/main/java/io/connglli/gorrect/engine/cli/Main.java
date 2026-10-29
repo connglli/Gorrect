@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.cli;
 
+import io.connglli.gorrect.engine.fuzz.FuzzCampaign;
 import io.connglli.gorrect.engine.run.RunEngine;
 import io.connglli.gorrect.engine.run.RunReport;
 import java.io.IOException;
@@ -29,6 +30,8 @@ public final class Main {
       var allowed =
           switch (command) {
             case "probe", "run" -> Set.of("--profile", "--out");
+            case "fuzz" ->
+                Set.of("--profile", "--out", "--workload", "--workers", "--duration", "--seed");
             case "verify" -> Set.<String>of();
             case "replay" -> Set.of("--repeat", "--out");
             default -> throw new IllegalArgumentException("Unknown command " + command);
@@ -57,9 +60,10 @@ public final class Main {
           input = option;
         }
       }
-      if (command.equals("probe") != (input == null))
+      boolean takesInput = Set.of("run", "verify", "replay").contains(command);
+      if (takesInput == (input == null))
         throw new IllegalArgumentException(
-            command.equals("probe") ? "probe takes no case argument" : "Missing input path");
+            takesInput ? "Missing input path" : command + " takes no case argument");
       if (command.equals("verify"))
         return print(RunEngine.verify(Path.of(input)), Path.of(input), out);
       Path output = Path.of(options.getOrDefault("--out", "runs/" + UUID.randomUUID()));
@@ -75,13 +79,27 @@ public final class Main {
         for (int i = 1; i <= repeats; i++) {
           Path directory = repeats == 1 ? output : output.resolve(Integer.toString(i));
           int next = print(RunEngine.replay(Path.of(input), directory), directory, out);
-          if (status == 0) status = next;
+          status = RunReport.combineExitStatus(status, next);
         }
         return status;
       }
       if (!options.containsKey("--profile"))
         throw new IllegalArgumentException("Missing --profile");
       Path profile = Path.of(options.get("--profile"));
+      if (command.equals("fuzz")) {
+        long seed =
+            options.containsKey("--seed")
+                ? Long.parseLong(options.get("--seed"))
+                : new java.security.SecureRandom().nextLong();
+        return FuzzCampaign.run(
+            profile,
+            output,
+            options.getOrDefault("--workload", "concurrent"),
+            Integer.parseInt(options.getOrDefault("--workers", "2")),
+            FuzzCampaign.duration(options.getOrDefault("--duration", "1m")),
+            seed,
+            out);
+      }
       var result =
           command.equals("probe")
               ? RunEngine.probe(profile, output)

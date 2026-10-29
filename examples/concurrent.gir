@@ -1,0 +1,46 @@
+gir 1;
+shape N object 2 1;
+object 1 N [null, 3] [7];
+object 2 N [null, 3] [9];
+object 3 N [3, null] [42];
+root left = 1;
+root right = 2;
+root shared = 3;
+
+program {
+  repeat 2 {
+    parallel {
+      worker alpha {
+        read-root owner N left;
+        write-root left null;
+        collect;
+        read-ref shared N owner 1;
+        read-data value shared 0;
+        repeat 20 {
+          allocate child N;
+          write-ref child 0 owner;
+          write-data child 0 value;
+          write-ref owner 0 child;
+        }
+        barrier;
+        write-root left owner;
+      }
+      worker beta {
+        read-root owner N right;
+        write-root right null;
+        collect;
+        read-ref shared N owner 1;
+        read-data value shared 0;
+        repeat 20 {
+          allocate child N;
+          write-ref child 0 owner;
+          write-data child 0 value;
+          write-ref owner 0 child;
+        }
+        barrier;
+        write-root right owner;
+      }
+    }
+  }
+  finished: checkpoint;
+}

@@ -1,12 +1,14 @@
 package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.ControlMessage;
+import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
 import java.lang.management.ManagementFactory;
+import java.lang.reflect.Method;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
@@ -14,8 +16,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 import java.util.Properties;
+import java.util.TreeMap;
+import java.util.concurrent.Phaser;
+import java.util.concurrent.atomic.AtomicReference;
 
 /** One target process's endpoint and bounded scalar recorder. It owns no workload references. */
 public final class TargetSession implements AutoCloseable {
@@ -25,11 +31,11 @@ public final class TargetSession implements AutoCloseable {
   private final long run;
   private final Path directory;
   private final int records;
-  private final int[] operations;
-  private final byte[] kinds;
-  private final long[] values;
+  private final Map<Integer, TraceRecorder> recorders = new TreeMap<>();
+  private final List<ExecutionEvidence.Group> groups = new ArrayList<>();
+  private final List<ExecutionEvidence.Window> windows = new ArrayList<>();
+  private JitControl jit;
   private final Map<Integer, Long> visits = new HashMap<>();
-  private int count;
   private long checkpoint;
   private boolean complete;
 
@@ -41,14 +47,13 @@ public final class TargetSession implements AutoCloseable {
     int capacity = Integer.parseInt(args[5]);
     if (run <= 0 || capacity <= 0 || capacity > ExecutionTrace.MAX_EVENTS)
       throw new IllegalArgumentException("Invalid trace capacity or run token");
-    operations = new int[capacity];
-    kinds = new byte[capacity];
-    values = new long[capacity];
+    recorders(capacity);
     socket = SocketChannel.open(UnixDomainSocketAddress.of(args[0]));
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
     try {
       System.load(args[3]);
+      jit = JitControl.open(directory, run);
       var properties = new Properties();
       for (String name :
           new String[] {
@@ -56,6 +61,7 @@ public final class TargetSession implements AutoCloseable {
           }) properties.setProperty(name, System.getProperty(name));
       properties.setProperty("java.feature", Integer.toString(Runtime.version().feature()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
+      properties.setProperty("jit.problem", jit.problem());
       properties.setProperty(
           "collectors",
           String.join(
@@ -69,6 +75,7 @@ public final class TargetSession implements AutoCloseable {
       send(ControlMessage.Kind.HELLO, 0, 0, "");
       acknowledge(0);
     } catch (Throwable failure) {
+      if (jit != null) jit.close();
       socket.close();
       throw failure;
     }
@@ -83,10 +90,122 @@ public final class TargetSession implements AutoCloseable {
    * stops the case before it can claim a complete trace.
    */
   public void record(int operation, int kind, long value) {
-    if (count == operations.length) throw new IllegalStateException("Trace capacity exhausted");
-    operations[count] = operation;
-    kinds[count] = (byte) kind;
-    values[count++] = value;
+    recorders.get(0).record(operation, kind, value, 0, 0, 0);
+  }
+
+  private void recorders(int capacity) throws IOException {
+    var bounds = new Properties();
+    Path plan = directory.resolve("generated/recorders.properties");
+    if (Files.exists(plan))
+      try (var input = Files.newInputStream(plan)) {
+        bounds.load(input);
+      }
+    else bounds.setProperty("0", Integer.toString(capacity));
+    int remaining = capacity;
+    var ids = bounds.stringPropertyNames().stream().map(Integer::parseInt).sorted().toList();
+    if (!ids.contains(0)) throw new IOException("Recorder plan omits the main worker");
+    // Counts only size storage; writeTrace emits actual appends, never unused or predicted records.
+    for (int id : ids) {
+      int requested = Integer.parseInt(bounds.getProperty(Integer.toString(id)));
+      if (id < 0 || id > 64 || requested < 0 || requested > ExecutionTrace.MAX_EVENTS)
+        throw new IOException("Invalid recorder bound");
+      int size = Math.min(requested, remaining);
+      remaining -= size;
+      recorders.put(id, new TraceRecorder(id, size));
+    }
+  }
+
+  @FunctionalInterface
+  public interface WorkerTask {
+    void run(WorkerContext worker) throws Exception;
+  }
+
+  /**
+   * Starts isolated worker frames, publishes construction through Thread.start, and joins peers.
+   */
+  public void parallel(int operation, int[] ids, WorkerTask[] tasks, Class<?> owner)
+      throws Exception {
+    if (ids.length != tasks.length || ids.length == 0 || ids.length > 16)
+      throw new IllegalArgumentException("Invalid worker group");
+    long round = visits.merge(operation, 1L, Long::sum);
+    Method[] methods = new Method[ids.length];
+    for (int index = 0; index < ids.length; index++)
+      methods[index] =
+          owner.getDeclaredMethod(
+              ExecutionEvidence.workerMethod(ids[index]), TargetSession.class, WorkerContext.class);
+    var compilations = jit.prepare(round, ids, methods);
+    var phaser = new Phaser(ids.length);
+    var failure = new AtomicReference<Throwable>();
+    var contexts = new ArrayList<WorkerContext>();
+    var threads = new ArrayList<Thread>();
+    for (int index = 0; index < ids.length; index++) {
+      int id = ids[index];
+      var recorder = recorders.get(id);
+      if (recorder == null) throw new IllegalStateException("Missing recorder for worker " + id);
+      var context = new WorkerContext(recorder, phaser, jit, id, operation, round);
+      contexts.add(context);
+      var task = tasks[index];
+      threads.add(
+          new Thread(
+              () -> {
+                try {
+                  task.run(context);
+                  if (!context.ended())
+                    throw new IllegalStateException("Worker omitted completion");
+                } catch (Throwable error) {
+                  failure.compareAndSet(null, error);
+                  phaser.forceTermination();
+                }
+              },
+              "gorrect-worker-" + id + "-" + round));
+    }
+    long gcBefore = NativeObserver.gcFinishes();
+    boolean joined = false;
+    try {
+      for (var thread : threads) thread.start();
+      for (int index = 0; index < threads.size(); index++) {
+        threads.get(index).join();
+        record(operation, ExecutionTrace.Kind.JOIN.ordinal(), ids[index]);
+      }
+      joined = failure.get() == null;
+    } catch (InterruptedException | RuntimeException | Error error) {
+      phaser.forceTermination();
+      threads.forEach(Thread::interrupt);
+      joinCancelled(threads);
+      throw error;
+    } finally {
+      long gcAfter = NativeObserver.gcFinishes();
+      groups.add(
+          new ExecutionEvidence.Group(
+              operation,
+              round,
+              java.util.Arrays.stream(ids).boxed().toList(),
+              joined,
+              gcBefore,
+              gcAfter,
+              compilations));
+      contexts.forEach(context -> windows.addAll(context.windows()));
+    }
+    if (failure.get() instanceof Exception error) throw error;
+    if (failure.get() instanceof Error error) throw error;
+  }
+
+  private static void joinCancelled(List<Thread> threads) {
+    boolean interrupted = Thread.interrupted();
+    for (var thread : threads)
+      while (thread.isAlive()) {
+        try {
+          thread.join();
+        } catch (InterruptedException failure) {
+          interrupted = true;
+        }
+      }
+    if (interrupted) Thread.currentThread().interrupt();
+  }
+
+  /** A collection control point receives no graph object arguments. */
+  public void collect() {
+    jit.collect();
   }
 
   /** Call at a named-root checkpoint; generated code must have no live GIR reference bindings. */
@@ -101,23 +220,25 @@ public final class TargetSession implements AutoCloseable {
 
   public void complete() throws IOException {
     writeTrace(true);
+    jit.finish();
     send(ControlMessage.Kind.COMPLETE, 0, 0, "");
     complete = true;
   }
 
   public void fail(Throwable failure) throws IOException {
     writeTrace(false);
+    jit.finish();
     // Bound failure text to the modified-UTF length used by control frames.
     String detail = failure.getClass().getName() + ": " + failure.getMessage();
     send(ControlMessage.Kind.FAILED, 0, 0, detail.substring(0, Math.min(detail.length(), 4000)));
   }
 
   private void writeTrace(boolean finished) throws IOException {
-    var events = new ArrayList<ExecutionTrace.Event>(count);
-    var eventKinds = ExecutionTrace.Kind.values();
-    for (int i = 0; i < count; i++)
-      events.add(new ExecutionTrace.Event(operations[i], eventKinds[kinds[i]], values[i]));
+    var events = new ArrayList<ExecutionTrace.Event>();
+    recorders.values().forEach(recorder -> recorder.appendTo(events));
     new ExecutionTrace(run, finished, events).write(directory.resolve("traces/execution.gtrace"));
+    new ExecutionEvidence(run, finished, groups, windows)
+        .write(directory.resolve("traces/workers.gevidence"));
   }
 
   private void send(ControlMessage.Kind kind, int operation, long occurrence, String detail)
@@ -136,6 +257,7 @@ public final class TargetSession implements AutoCloseable {
     try {
       if (!complete) writeTrace(false);
     } finally {
+      if (jit != null) jit.close();
       socket.close();
     }
   }

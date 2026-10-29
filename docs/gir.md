@@ -1,6 +1,6 @@
 # GIR
 
-GIR (Gorrect Intermediate Representation) describes the graph and its workload independently of a JVM. Version 1 supports deterministic sequential programs. Unsupported versions and operations are rejected.
+GIR (Gorrect Intermediate Representation) describes the graph and its workload independently of a JVM. Version 1 supports sequential programs, conflict-free parallel workers, barriers, collection requests, and stress requirements. It executes strong references only. The format is under development; unsupported versions and operations are rejected.
 
 ## Example
 
@@ -62,7 +62,7 @@ Programs access objects through handles obtained from roots, reference slots, or
 
 Labels identify instructions, not objects: `created` names the allocation above; `fresh` holds its result. Access requires no internal instruction number.
 
-The engine exposes logical identities as `(worker, allocation site, occurrence)` in oracle results. Initial object `1` uses `(0, 0, 1)`; new allocations use `(0, s, occurrence)`, with `s` assigned internally and occurrences starting at one per site. Handles provide access without calculating these diagnostic identities.
+The engine exposes logical identities as `(worker, allocation site, occurrence)` in oracle results. Initial object `1` uses `(0, 0, 1)`; main-program allocations use `(0, s, occurrence)`. Workers receive internal identities in declaration order; their allocations use that worker identity. Site `s` is assigned internally, and occurrences start at one per site. Repeating a parallel block preserves logical worker identities and advances allocation occurrences. Handles provide access without calculating these diagnostic identities.
 
 ## Instructions
 
@@ -83,13 +83,52 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `scope { ... }` | Execute a block with its own bindings. |
 | `repeat count { ... }` | Execute a block a nonnegative, literal number of times. |
 | `checkpoint;` | Record the graph obligations at this point. |
+| `collect;` | Request collection without changing the logical strong graph. Actual progress is recorded separately. |
+| `parallel { worker name { ... } ... }` | Start workers together and join all before continuing. |
+| `barrier;` | Finish a worker phase and wait for every peer before the next phase. |
 
 Reference operands are live handles or `null`; scalar operands are live scalar bindings or signed 64-bit literals. Reference slots and named roots can hold any target shape. A non-null reference read asserts the declared destination shape exactly. Field and array access requires a live, non-null owner and an index within the corresponding reference or data count. Static validation checks all blocks, including zero-iteration loops, for names, types, slot bounds, and labels.
 
 Bindings live until release or scope exit. Live reference bindings are strong handles; scalar bindings do not keep objects alive. Names cannot shadow another declaration in an active scope or be reused after release in that scope. Each loop iteration has a fresh scope. The program's outer scope ends before the final graph is derived.
 
+## Parallel workers
+
+Workers have separate local scopes and access shared state through named roots. They cannot capture caller bindings. Worker names are unique within their parallel block; users supply no numeric worker IDs. The implementation accepts up to 16 workers per block and 64 declarations per program. Nested parallel blocks and worker checkpoints are rejected; observe after joining workers.
+
+Within a phase, a slot written by one worker must not be read or written by another. Slots include named roots, reference fields/elements, and data fields/elements. Aliases identify the same slot. Shared reads and writes to different slots of one object are allowed; concurrent writes to one slot are rejected even if their values agree. The oracle checks concrete accesses before launching the JVM, so the final graph and per-worker reads are independent of the phase's interleaving.
+
+For example, both workers can mutate separate data fields of one object:
+
+```text
+gir 1;
+shape N object 0 2;
+object 1 N [] [0, 0];
+root shared = 1;
+program {
+  parallel {
+    worker left { read-root n N shared; write-data n 0 11; }
+    worker right { read-root n N shared; write-data n 1 22; }
+  }
+  checkpoint;
+}
+```
+
+Barriers must appear directly in worker bodies, and every worker must have the same number. They preserve local bindings and establish visibility of all preceding phase writes before any following phase starts. This permits ownership transfer between phases. [concurrent.gir](../examples/concurrent.gir) retains objects locally across collection, allocation, calls, and a barrier before publishing them again.
+
+## Stress requirements
+
+Declare `require concurrent-overlap;`, `require compiled-execution;`, and `require gc-during-workers;` before `program` to constrain execution coverage independently of the expected graph. Profile requirements also apply.
+
+| Requirement | Evidence |
+| --- | --- |
+| `concurrent-overlap` | At least two workers, with all workers' measured active intervals overlapping in one phase. This does not claim simultaneous CPU instruction execution. |
+| `compiled-execution` | Successful installation requests and VM-reported compiled generated-method frames at worker entry and exit, after the configured modeled warm-up visits. |
+| `gc-during-workers` | Reported GC pause progress during a retained worker collection request. This does not establish concurrent collector completion. |
+
+Required conditions must hold together in one parallel-block visit. If overlap and GC are required, the collection belongs to an overlapping phase. If compiled execution and GC are required, that request also needs compiled-frame witnesses immediately before and after the call. Missing conditions leave requirements unmet even when the graph satisfies the oracle. Witness points do not prove that the whole invocation, or the requested compiler tier, executed continuously as compiled code.
+
 ## Oracle obligations
 
 Checkpoint visits are distinguished by internal instruction ID and visit number; the program maps IDs to labels. Expectations include every named root, live reference binding, and logical object reachable through them, with exact shape, reference kind, targets, and data. Unreachable garbage may remain in an observation. Missing or extra required slots, changed roots or handles, and corrupted contents violate the expectations. Incomplete observations are inconclusive.
 
-The interpreter has explicit budgets for steps, allocated objects, slots, and cumulative snapshot cells. Each instruction and loop iteration consumes a step. A snapshot consumes one cell plus its objects, roots, handles, and reference and data slots; the final graph also counts. Budgets constrain the model, not target heap capacity. Exhaustion produces a checking-limit error, not a semantic verdict. Rejected primitive operations leave model state, identities, and budgets unchanged.
+The interpreter has explicit budgets for steps, allocated objects, slots, and cumulative snapshot cells. Each instruction, loop iteration, worker start/end, phase-start, and join marker consumes a step. A snapshot consumes one cell plus its objects, roots, handles, and reference and data slots; the final graph also counts. Budgets constrain the model, not target heap capacity. Exhaustion produces a checking-limit error, not a semantic verdict. Rejected primitive operations leave model state, identities, and budgets unchanged.

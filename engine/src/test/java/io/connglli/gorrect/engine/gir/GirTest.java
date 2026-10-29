@@ -193,6 +193,7 @@ class GirTest {
   @ValueSource(
       strings = {
         "gir 2; program {}",
+        "gir 99; program {}",
         "gir 1; shape N object -1 0; program {}",
         "gir 1; shape N object 0 0; shape N refs 0; program {}",
         "gir 1; shape null object 0 0; program {}",

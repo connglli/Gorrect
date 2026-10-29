@@ -4,8 +4,12 @@ import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.emit.JavaEmitter;
+import io.connglli.gorrect.engine.fuzz.WorkloadGenerator;
 import io.connglli.gorrect.engine.gir.GirException;
+import io.connglli.gorrect.engine.gir.GirFormatter;
 import io.connglli.gorrect.engine.gir.GirParser;
+import io.connglli.gorrect.engine.gir.GirProgram;
+import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
@@ -22,6 +26,7 @@ import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.SecureRandom;
+import java.time.Duration;
 import java.time.Instant;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -30,7 +35,7 @@ import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
-/** Shared sequential execution path used by run, probe, and replay. */
+/** Shared execution path for saved cases, probes, replay, and generated campaigns. */
 public final class RunEngine {
   private static final String OBSERVER = System.mapLibraryName("gorrect_observer");
   private static final String PROBE =
@@ -44,9 +49,25 @@ public final class RunEngine {
     return runText(Files.readString(input), profileFile, output);
   }
 
+  /** Campaign time caps execution internally; profile fields remain the launch configuration. */
+  public static RunReport runBounded(
+      Path input, Path profileFile, Path output, Duration remaining, Map<String, Object> provenance)
+      throws IOException {
+    var raw = JsonFiles.read(profileFile);
+    var profile = TargetProfile.parse(raw, profileFile.toAbsolutePath().getParent());
+    return prepare(
+        Files.readString(input),
+        profile,
+        raw,
+        output.toAbsolutePath().normalize(),
+        null,
+        System.nanoTime() + remaining.toNanos(),
+        provenance);
+  }
+
   /** Exercises named-root capture through the same execution and verification path as a case. */
   public static RunReport probe(Path profileFile, Path output) throws IOException {
-    return runText(PROBE, profileFile, output);
+    return runText(null, profileFile, output);
   }
 
   private static RunReport runText(String text, Path profileFile, Path output) throws IOException {
@@ -56,6 +77,25 @@ public final class RunEngine {
       profile = TargetProfile.parse(raw, profileFile.toAbsolutePath().getParent());
     } catch (RuntimeException exception) {
       throw new IOException("Invalid profile: " + exception.getMessage(), exception);
+    }
+    if (text == null) {
+      text = PROBE;
+      if (profile.jit() != null
+          || profile.requirements().stream().anyMatch(GirValidator.STRESS_REQUIREMENTS::contains)) {
+        var generated =
+            WorkloadGenerator.generate(
+                0, "concurrent", 2, profile.jit() == null ? 2 : profile.jit().warmupRounds() + 1);
+        var probe =
+            new GirProgram(
+                generated.version(),
+                generated.shapes(),
+                generated.objects(),
+                generated.roots(),
+                generated.body(),
+                generated.labels(),
+                java.util.Set.of());
+        text = GirFormatter.format(probe);
+      }
     }
     return prepare(text, profile, raw, output.toAbsolutePath().normalize(), null);
   }
@@ -79,6 +119,18 @@ public final class RunEngine {
   private static RunReport prepare(
       String text, TargetProfile profile, JsonObject inputProfile, Path directory, Path saved)
       throws IOException {
+    return prepare(text, profile, inputProfile, directory, saved, null, Map.of());
+  }
+
+  private static RunReport prepare(
+      String text,
+      TargetProfile profile,
+      JsonObject inputProfile,
+      Path directory,
+      Path saved,
+      Long campaignDeadline,
+      Map<String, Object> provenance)
+      throws IOException {
     // Refuse replacement: even an unsuccessful run must keep its own diagnostics.
     Files.createDirectories(directory.getParent());
     Files.createDirectory(directory);
@@ -91,6 +143,11 @@ public final class RunEngine {
     manifest.addProperty("created", Instant.now().toString());
     manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
     manifest.add("inputProfile", inputProfile);
+    manifest.add("provenance", JsonFiles.GSON.toJsonTree(provenance));
+    if (campaignDeadline != null)
+      manifest.addProperty(
+          "campaignBudgetMillis",
+          Math.max(0, TimeUnit.NANOSECONDS.toMillis(campaignDeadline - System.nanoTime())));
     Files.writeString(directory.resolve("case.gir"), text);
     JsonFiles.write(directory.resolve("manifest.json"), manifest);
     RunReport result;
@@ -98,6 +155,8 @@ public final class RunEngine {
       var program = GirParser.parse(text);
       var oracle = Oracle.interpret(program);
       var unsupported = new ArrayList<>(HotSpotDriver.unsupported(profile));
+      if (program.requirements().contains("compiled-execution") && profile.jit() == null)
+        unsupported.add("compiled-execution requires profile JIT control and a WhiteBox client");
       if (oracle.checkpoints().stream()
           .anyMatch(checkpoint -> !checkpoint.graph().handles().isEmpty()))
         unsupported.add("local-bindings: a checkpoint has live GIR reference bindings");
@@ -114,10 +173,40 @@ public final class RunEngine {
         var emission = JavaEmitter.emit(program);
         Files.writeString(directory.resolve("generated/Case.java"), emission.source());
         JsonFiles.write(directory.resolve("generated/layout.json"), emission.layout());
+        var recorderCounts = new java.util.TreeMap<Integer, Long>();
+        recorderCounts.put(0, 0L);
+        oracle.events().forEach(event -> recorderCounts.merge(event.worker(), 1L, Long::sum));
+        var recorderPlan = new StringBuilder();
+        recorderCounts.forEach(
+            (worker, count) -> recorderPlan.append(worker).append('=').append(count).append('\n'));
+        Files.writeString(directory.resolve("generated/recorders.properties"), recorderPlan);
+        if (profile.jit() != null)
+          Files.writeString(
+              directory.resolve("generated/jit.properties"),
+              "level="
+                  + profile.jit().level()
+                  + "\nwarmupRounds="
+                  + profile.jit().warmupRounds()
+                  + "\ndeadlineMillis="
+                  + profile.jit().deadlineMillis()
+                  + "\n");
         Files.copy(Path.of(profile.support().runtime()), directory.resolve("support/runtime.jar"));
         Files.copy(
             Path.of(profile.support().protocol()), directory.resolve("support/protocol.jar"));
         Files.copy(Path.of(profile.support().observer()), directory.resolve("support/" + OBSERVER));
+        if (profile.support().whitebox() != null) {
+          try (var jar = new java.util.jar.JarFile(profile.support().whitebox())) {
+            if (jar.stream()
+                .anyMatch(
+                    entry ->
+                        entry.getName().equals("Case.class")
+                            || entry.getName().startsWith("Case$")
+                            || entry.getName().startsWith("io/connglli/gorrect/")))
+              throw new IOException("WhiteBox client shadows generated or runtime classes");
+          }
+          Files.copy(
+              Path.of(profile.support().whitebox()), directory.resolve("support/whitebox.jar"));
+        }
         Path compiler = compiler();
         manifest.add(
             "compiler",
@@ -130,7 +219,7 @@ public final class RunEngine {
                     "engineRuntime",
                     System.getProperty("java.runtime.version"))));
         manifest.add("hashes", JsonFiles.GSON.toJsonTree(Artifacts.inputs(directory)));
-        var compilation = compile(directory, profile);
+        var compilation = compile(directory, profile, campaignDeadline);
         if (compilation != null) return finish(directory, manifest, compilation);
       } else {
         // Output directories exist, so copy children rather than replacing the run directory.
@@ -146,6 +235,7 @@ public final class RunEngine {
         var previous = manifest(saved);
         Artifacts.check(directory, previous);
         manifest.add("compiler", previous.get("compiler"));
+        if (previous.has("provenance")) manifest.add("provenance", previous.get("provenance"));
         manifest.addProperty("replayOf", saved.toString());
       }
       var installations = installations(profile);
@@ -167,7 +257,8 @@ public final class RunEngine {
               : JsonFiles.GSON.fromJson(
                   JsonFiles.required(manifest(saved), "environment"),
                   new com.google.gson.reflect.TypeToken<Map<String, String>>() {}.getType());
-      result = launch(directory, profile, manifest, oracle, run, savedEnvironment);
+      result =
+          launch(directory, profile, manifest, oracle, run, savedEnvironment, campaignDeadline);
     } catch (OracleLimitException exception) {
       result = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
     } catch (GirException exception) {
@@ -181,7 +272,7 @@ public final class RunEngine {
     return finish(directory, manifest, result);
   }
 
-  private static RunReport compile(Path directory, TargetProfile profile)
+  private static RunReport compile(Path directory, TargetProfile profile, Long campaignDeadline)
       throws IOException, InterruptedException {
     Path compiler = compiler();
     var command =
@@ -203,6 +294,15 @@ public final class RunEngine {
             .redirectOutput(directory.resolve("logs/compiler.stdout").toFile())
             .redirectError(directory.resolve("logs/compiler.stderr").toFile());
     cleanEnvironment(builder, Map.of());
+    long limit = profile.limits().compileSeconds() * 1000L;
+    boolean campaignBound =
+        campaignDeadline != null
+            && TimeUnit.NANOSECONDS.toMillis(campaignDeadline - System.nanoTime()) < limit;
+    if (campaignDeadline != null)
+      limit = Math.min(limit, TimeUnit.NANOSECONDS.toMillis(campaignDeadline - System.nanoTime()));
+    if (limit <= 0)
+      return RunReport.failure(
+          RunReport.Outcome.CAMPAIGN_LIMIT, "Campaign deadline reached before compilation");
     Process process;
     try {
       process = builder.start();
@@ -211,8 +311,10 @@ public final class RunEngine {
           RunReport.Outcome.COMPILATION_FAILURE, "Cannot start javac: " + exception);
     }
     try {
-      if (!process.waitFor(profile.limits().compileSeconds(), TimeUnit.SECONDS))
-        return RunReport.failure(RunReport.Outcome.TIMEOUT, "Compilation deadline exceeded");
+      if (!process.waitFor(limit, TimeUnit.MILLISECONDS))
+        return RunReport.failure(
+            campaignBound ? RunReport.Outcome.CAMPAIGN_LIMIT : RunReport.Outcome.TIMEOUT,
+            "Compilation deadline exceeded");
       return process.exitValue() == 0
           ? null
           : RunReport.failure(
@@ -228,12 +330,14 @@ public final class RunEngine {
       JsonObject manifest,
       OracleResult oracle,
       long run,
-      Map<String, String> savedEnvironment)
+      Map<String, String> savedEnvironment,
+      Long campaignDeadline)
       throws IOException, InterruptedException {
     var messages = new ArrayList<ControlMessage>();
     Process process = null;
     boolean hello = false;
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(profile.limits().runSeconds());
+    if (campaignDeadline != null) deadline = Math.min(deadline, campaignDeadline);
     long startupDeadline =
         Math.min(
             deadline,
@@ -266,6 +370,7 @@ public final class RunEngine {
       manifest.add("command", JsonFiles.GSON.toJsonTree(command));
       manifest.add("environment", JsonFiles.GSON.toJsonTree(builder.environment()));
       JsonFiles.write(directory.resolve("manifest.json"), manifest);
+      milliseconds(deadline);
       process = builder.start();
       control.accept(startupDeadline);
       var in = control.input();
@@ -300,7 +405,11 @@ public final class RunEngine {
             return RunReport.failure(
                 RunReport.Outcome.PROTOCOL_ERROR, "Premature target completion");
           if (!process.waitFor(milliseconds(deadline), TimeUnit.MILLISECONDS))
-            return RunReport.failure(RunReport.Outcome.TIMEOUT, "Target did not exit");
+            return RunReport.failure(
+                campaignDeadline != null && deadline == campaignDeadline
+                    ? RunReport.Outcome.CAMPAIGN_LIMIT
+                    : RunReport.Outcome.TIMEOUT,
+                "Target did not exit");
           return process.exitValue() == 0
               ? new RunReport(
                   RunReport.Outcome.COMPLETED,
@@ -334,7 +443,11 @@ public final class RunEngine {
             RunReport.Outcome.STARTUP_FAILURE,
             "Target exited before handshake: " + process.exitValue());
       return RunReport.failure(
-          RunReport.Outcome.TIMEOUT, hello ? "Run deadline exceeded" : "Startup deadline exceeded");
+          campaignDeadline != null
+                  && (hello ? deadline == campaignDeadline : startupDeadline == campaignDeadline)
+              ? RunReport.Outcome.CAMPAIGN_LIMIT
+              : RunReport.Outcome.TIMEOUT,
+          hello ? "Run deadline exceeded" : "Startup deadline exceeded");
     } catch (IOException exception) {
       if (Thread.currentThread().isInterrupted())
         throw new InterruptedException("Control operation interrupted");
@@ -379,16 +492,22 @@ public final class RunEngine {
       Artifacts.check(directory, manifest);
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
-      var oracle =
-          Oracle.interpret(GirParser.parse(Files.readString(directory.resolve("case.gir"))));
+      var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+      var oracle = Oracle.interpret(program);
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       var problems = new ArrayList<String>();
-      var unmet = HotSpotDriver.requirements(profile, target(directory));
+      var unmet = new ArrayList<>(HotSpotDriver.unsupported(profile));
+      unmet.addAll(HotSpotDriver.requirements(profile, target(directory)));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
-      boolean violated = !trace.events().equals(oracle.events());
+      var stress = StressVerifier.verify(directory, run, program, oracle, profile);
+      for (String requirement : stress.unmet())
+        if (!unmet.contains(requirement)) unmet.add(requirement);
+      problems.addAll(stress.problems());
+      boolean violated =
+          !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
       var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
       if (JsonFiles.number(JsonFiles.required(transcript, "version")) != 1
@@ -483,6 +602,8 @@ public final class RunEngine {
     paths.put("runtime", Path.of(profile.support().runtime()));
     paths.put("protocol", Path.of(profile.support().protocol()));
     paths.put("observer", Path.of(profile.support().observer()));
+    if (profile.support().whitebox() != null)
+      paths.put("whitebox", Path.of(profile.support().whitebox()));
     if (Files.exists(Path.of(profile.java()))) {
       Path home = Path.of(profile.java()).toRealPath().getParent().getParent();
       for (String name :

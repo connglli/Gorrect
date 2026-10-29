@@ -16,7 +16,7 @@ class CliTest {
   @TempDir Path directory;
 
   @ParameterizedTest
-  @ValueSource(strings = {"probe", "run", "verify", "replay"})
+  @ValueSource(strings = {"probe", "run", "verify", "replay", "fuzz"})
   void commandHelpNeedsNoInputsAndCreatesNoArtifacts(String command) {
     Path output = directory.resolve("unused-output");
     for (String help : new String[] {"--help", "-h"}) {
@@ -28,6 +28,16 @@ class CliTest {
           switch (command) {
             case "probe" ->
                 invoke(command, "--profile", "missing.json", "--out", output.toString(), help);
+            case "fuzz" ->
+                invoke(
+                    command,
+                    "--profile",
+                    "missing.json",
+                    "--duration",
+                    "1m",
+                    "--out",
+                    output.toString(),
+                    help);
             case "run" ->
                 invoke(
                     command,
@@ -75,6 +85,9 @@ class CliTest {
     for (var args :
         new String[][] {
           {"run", "case.gir", "--java", "jdk/bin/java"},
+          {"fuzz", "--profile", "missing.json", "--java", "jdk/bin/java"},
+          {"fuzz", "--profile", "missing.json", "--workers", "0"},
+          {"fuzz", "--profile", "missing.json", "--duration", "999999999999999999h"},
           {"probe", "--profile", "one.json", "--profile", "two.json"},
           {"verify", "run-dir", "--profile", "target.json"},
           {"replay", "run-dir", "--repeat", "0"},

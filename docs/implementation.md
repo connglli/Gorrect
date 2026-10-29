@@ -49,7 +49,7 @@ The GIR frontend parses, formats, and validates the [versioned language](./gir.m
 
 Validation checks object shapes, slot accesses, value types, scope, and synchronization structure before execution. The generator evaluates a candidate's preconditions and state change before accepting it. Rejecting a candidate leaves the graph and generation bookkeeping unchanged.
 
-The host model stores [logical identities](./gir.md#instructions), slots, values, and root lifetimes. Its immutable snapshots describe the target graph. No engine object is used as a target workload object, and semantic state belongs to one case or verification run.
+The host model stores [logical identities](./gir.md#identities-and-access), slots, values, and root lifetimes. Its immutable snapshots describe the target graph. Parallel phases are exact only after concrete slot-access checks establish independence; aliases do not create separate slots. Semantic state belongs to one case or verification run.
 
 ### Oracle and verifier
 
@@ -77,7 +77,7 @@ The execution phases include graph construction, warm-up, concurrent stress, wor
 
 Temporary handles can be emitted as Java locals in compiled frames or as explicitly published roots. Their required lifetimes follow GIR scopes. The recorder stores primitive identities and values so that telemetry does not retain workload objects.
 
-Each worker records events with its identity, operation identity, and local sequence information. Synchronization events establish ordering between workers. Recording avoids a shared lock or global sequence counter on every mutation. Buffer exhaustion is reported explicitly.
+Each worker records operation, group visit, phase, and scalar data in its own primitive buffer. The total allocation is bounded by the profile's trace limit; planned counts size storage without supplying expected payloads. Only appended events are serialized. Start, barrier, phase-start, end, and caller join markers establish the control structure without a shared lock or global sequence counter on ordinary mutations. Buffer exhaustion stops execution explicitly.
 
 Native calls and control traffic occur at the observation and coordination points that need them. Ordinary allocations and reference writes remain Java operations. Logical object identities are assigned in Java and associated with native snapshot identities during observation where possible.
 
@@ -97,7 +97,7 @@ A JVM integration has a host driver and a target-side control bridge.
 
 The host driver reads a target profile specifying the executable, collector, VM arguments and environment, support artifacts, required capabilities, and per-run limits. It probes the JVM and prepares the launch configuration, including the runtime bridge, native observer, and logging settings.
 
-The target-side bridge implements the supported collection requests, compilation requests, queries, and phase controls. HotSpot can use a matching WhiteBox client. OpenJ9 uses its own controls and logs. Compiler names, optimization levels, flags, and testing APIs stay inside the integration.
+The target-side bridge implements collection and compilation requests, queries, and phase controls. HotSpot uses an optional external WhiteBox client for full collection and requested method installation. JFR stack witnesses supply compiled-frame evidence independently of installation queries. Compiler levels, APIs, and frame interpretation stay inside the integration; another JVM must supply equivalent evidence or report the requirement unmet.
 
 Commands select the profile with `--profile`; profile fields have no CLI equivalents or overrides. CLI options control generation and campaigns. The integration verifies the actual collector and capabilities against case and profile requirements, reporting unsupported requirements without substitution or weaker checks.
 
@@ -114,6 +114,8 @@ The engine and runtime exchange versioned control messages over a Unix domain so
 The protocol unit owns message and record definitions and their Java codecs. Records carry sufficient identity and completion information to detect missing data or a file from another run. Readers reject malformed data and incompatible versions.
 
 Collection and compilation requests are paired with evidence. The runtime reports observed progress, and the engine checks the conditions required by the case. Flags and warm-up counts alone do not establish those conditions.
+
+Worker evidence validates group visits, completed joins, thread identities, and phase boundaries. The VM integration decodes raw stack records into frame facts. JFR witness version 1 identifies generated methods by class, name, descriptor, worker, visit, phase, thread, and collection-request ordinal. Counter summaries retain one completed collection request per phase; missing frames or bounded-recording loss cannot satisfy the corresponding [stress requirements](./gir.md#stress-requirements).
 
 ## Artifacts and results
 
@@ -143,6 +145,6 @@ Verification of saved artifacts uses the engine's oracle without the original ta
 
 Java tests cover GIR parsing and formatting, validation, graph operations, oracle decisions, emission, and protocol handling. Native tests cover isolated decoding and record production where useful. Shared fixtures check compatibility between the Java and C++ protocol implementations.
 
-Integration tests compile and execute generated Java on target JVMs, then verify its observations. They exercise multiple mutators, hot generated methods, local roots, conditional reference acquisition, supported atomic contention, and target capability reporting.
+Integration tests compile and execute generated Java on JDK 17 and 21, then verify observations. They exercise independent mutators, barriers, locals retained across collection and calls, compiled-frame interpretation, and capability reporting. Conditional references and contended atomics require the checks for their later profiles.
 
 The checker is also exercised with deliberately corrupted graphs, traces, and missing evidence. Process tests cover compilation failure, startup failure, runtime crashes, deadlines, incomplete artifacts, and replay. Compatibility checks include the JDK 17 target boundary and the declared JVM profiles.
