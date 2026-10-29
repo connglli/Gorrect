@@ -14,6 +14,7 @@ import java.util.List;
  * <p>Statements change only the specified state. {@link GirValidator} checks static contracts;
  * execution checks null owners and target shapes. Invalid preconditions raise {@link GirException};
  * exhausted checking budgets raise {@link io.connglli.gorrect.engine.oracle.OracleLimitException}.
+ * Read/write effects follow {@link MemoryMode}; atomic operations always have volatile effects.
  */
 public sealed interface Instruction {
   /** Internal preorder index, assigned by the frontend. */
@@ -36,13 +37,22 @@ public sealed interface Instruction {
    * including null. A non-null target must have exactly the declared shape. Later root writes do
    * not change the handle.
    */
-  record ReadRoot(int id, String name, String shape, String root) implements Operation {}
+  record ReadRoot(int id, String name, String shape, String root, MemoryMode mode)
+      implements Operation {
+    public ReadRoot(int id, String name, String shape, String root) {
+      this(id, name, shape, root, MemoryMode.PLAIN);
+    }
+  }
 
   /**
    * Requires an existing root and reference operand. Replaces its target with the operand's current
    * target, of any shape or null. Clearing preserves the root slot.
    */
-  record WriteRoot(int id, String root, Operand value) implements Operation {}
+  record WriteRoot(int id, String root, Operand value, MemoryMode mode) implements Operation {
+    public WriteRoot(int id, String root, Operand value) {
+      this(id, root, value, MemoryMode.PLAIN);
+    }
+  }
 
   /**
    * Requires a valid reference-slot access, declared destination shape, and fresh name. Reads the
@@ -50,18 +60,28 @@ public sealed interface Instruction {
    * slots require {@link Acquire}. A non-null target must have exactly the destination shape. Later
    * writes to the source slot do not change the handle.
    */
-  record ReadReference(int id, String name, String shape, String owner, int index)
-      implements Operation {}
+  record ReadReference(int id, String name, String shape, String owner, int index, MemoryMode mode)
+      implements Operation {
+    public ReadReference(int id, String name, String shape, String owner, int index) {
+      this(id, name, shape, owner, index, MemoryMode.PLAIN);
+    }
+  }
 
   /**
    * Requires a valid reference slot and reference operand. Replaces its value with the operand's
    * current target, of any shape or null. Strong writes store it directly; soft/weak writes create
    * a fresh wrapper incarnation, even for null.
    */
-  record WriteReference(int id, String owner, int index, Operand value, Value.ReferenceKind kind)
+  record WriteReference(
+      int id, String owner, int index, Operand value, Value.ReferenceKind kind, MemoryMode mode)
       implements Operation {
     public WriteReference(int id, String owner, int index, Operand value) {
-      this(id, owner, index, value, Value.ReferenceKind.STRONG);
+      this(id, owner, index, value, Value.ReferenceKind.STRONG, MemoryMode.PLAIN);
+    }
+
+    public WriteReference(
+        int id, String owner, int index, Operand value, Value.ReferenceKind kind) {
+      this(id, owner, index, value, kind, MemoryMode.PLAIN);
     }
   }
 
@@ -102,13 +122,54 @@ public sealed interface Instruction {
    * once into a scalar binding. Later slot writes do not change the copied value. The scalar
    * binding does not retain the owner object.
    */
-  record ReadData(int id, String name, String owner, int index) implements Operation {}
+  record ReadData(int id, String name, String owner, int index, MemoryMode mode)
+      implements Operation {
+    public ReadData(int id, String name, String owner, int index) {
+      this(id, name, owner, index, MemoryMode.PLAIN);
+    }
+  }
 
   /**
    * Requires a valid data slot and scalar operand. Replaces that slot with the operand's current
    * signed 64-bit value.
    */
-  record WriteData(int id, String owner, int index, Operand value) implements Operation {}
+  record WriteData(int id, String owner, int index, Operand value, MemoryMode mode)
+      implements Operation {
+    public WriteData(int id, String owner, int index, Operand value) {
+      this(id, owner, index, value, MemoryMode.PLAIN);
+    }
+  }
+
+  /**
+   * Requires a fresh scalar name, a valid location, and matching operand types. Atomically compares
+   * the current value with expected and writes update only on equality. References compare
+   * identity; longs compare bits. Binds 1 on success, 0 otherwise, without spurious failure. The
+   * read has volatile effects; a successful write does too. Reference locations must contain strong
+   * values.
+   */
+  record CompareSet(int id, String name, Location location, Operand expected, Operand update)
+      implements Operation {}
+
+  /**
+   * Atomically replaces a location and binds its old value, with volatile read/write effects.
+   * Requires a fresh name and matching update type. Reference locations require a declared result
+   * shape, including for a null result, and must contain strong values; data locations use a null
+   * shape. A returned reference is a strong handle through release/scope exit. Null and
+   * target-shape preconditions are checked before model mutation.
+   */
+  record Exchange(int id, String name, String shape, Location location, Operand update)
+      implements Operation {}
+
+  /**
+   * Consumes one branch step, executing a child scope iff the existing strong handle is non-null.
+   * It does not reread a slot or change the handle's lifetime. Checkpoints in the body are
+   * unsupported.
+   */
+  record IfPresent(int id, String name, List<Instruction> body) implements Instruction {
+    public IfPresent {
+      body = List.copyOf(body);
+    }
+  }
 
   /**
    * Requires a live reference or scalar binding declared in the current scope. Makes it unavailable
@@ -143,9 +204,9 @@ public sealed interface Instruction {
    * all join. Capturing caller bindings, nested parallelism, and worker checkpoints are
    * unsupported.
    *
-   * <p>Per phase, a slot written by one worker cannot be accessed by another. Concrete checks,
-   * including aliases, precede target execution. The block, worker start/end, phase-start, and
-   * caller join markers each consume one step.
+   * <p>The exact profile requires conflict-free phases; history profiles require race freedom under
+   * explicit synchronization. Concrete checks include aliases and precede target execution. The
+   * block, worker start/end, phase-start, and caller join markers each consume one step.
    */
   record Parallel(int id, List<Worker> workers) implements Instruction {
     public Parallel {

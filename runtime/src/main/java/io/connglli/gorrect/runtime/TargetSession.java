@@ -25,8 +25,7 @@ import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicReference;
 
 /** One target process's endpoint and bounded scalar recorder. It owns no workload references. */
-public final class TargetSession implements AutoCloseable {
-  private static final ReferenceHistory.Kind[] REFERENCE_KINDS = ReferenceHistory.Kind.values();
+public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final SocketChannel socket;
   private final DataInputStream in;
   private final DataOutputStream out;
@@ -37,7 +36,7 @@ public final class TargetSession implements AutoCloseable {
   private final List<ExecutionEvidence.Group> groups = new ArrayList<>();
   private final List<ExecutionEvidence.Window> windows = new ArrayList<>();
   private JitControl jit;
-  private ReferenceRecorder referenceRecorder;
+  private final boolean referenceRecording;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
   private boolean complete;
@@ -50,9 +49,8 @@ public final class TargetSession implements AutoCloseable {
     int capacity = Integer.parseInt(args[5]);
     if (run <= 0 || capacity <= 0 || capacity > ExecutionTrace.MAX_EVENTS)
       throw new IllegalArgumentException("Invalid trace capacity or run token");
+    referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
     recorders(capacity);
-    if (Files.exists(directory.resolve("generated/references.properties")))
-      referenceRecorder = new ReferenceRecorder(capacity);
     socket = SocketChannel.open(UnixDomainSocketAddress.of(args[0]));
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
@@ -98,41 +96,36 @@ public final class TargetSession implements AutoCloseable {
     recorders.get(0).record(operation, kind, value, 0, 0, 0);
   }
 
-  /** Reference observations arrive as primitives after exactly one acquisition or state read. */
+  /** Main-thread observations use recorder zero; worker contexts write to their own recorders. */
   public void reference(
       int operation,
       int kind,
       long value,
       int strength,
-      int worker,
-      int site,
-      long occurrence,
-      int slot,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
       int targetWorker,
       int targetSite,
       long targetOccurrence) {
-    if (referenceRecorder == null)
-      throw new IllegalStateException("Reference recording was not configured");
-    var type = REFERENCE_KINDS[kind];
-    int traceKind =
-        switch (type) {
-          case INSTALL, CLEAR -> ExecutionTrace.Kind.OPERATION.ordinal();
-          case ACQUIRE -> ExecutionTrace.Kind.ACQUIRE.ordinal();
-          case STATE -> ExecutionTrace.Kind.REFERENCE_STATE.ordinal();
-          case QUEUE -> ExecutionTrace.Kind.QUEUE_POLL.ordinal();
-        };
-    record(operation, traceKind, value);
-    referenceRecorder.record(
-        recorders.get(0).size(),
-        kind,
-        strength,
-        worker,
-        site,
-        occurrence,
-        slot,
-        targetWorker,
-        targetSite,
-        targetOccurrence);
+    recorders
+        .get(0)
+        .reference(
+            operation,
+            kind,
+            value,
+            strength,
+            wrapperWorker,
+            wrapperSite,
+            wrapperOccurrence,
+            wrapperSlot,
+            targetWorker,
+            targetSite,
+            targetOccurrence,
+            0,
+            0,
+            0);
   }
 
   private void recorders(int capacity) throws IOException {
@@ -153,7 +146,7 @@ public final class TargetSession implements AutoCloseable {
         throw new IOException("Invalid recorder bound");
       int size = Math.min(requested, remaining);
       remaining -= size;
-      recorders.put(id, new TraceRecorder(id, size));
+      recorders.put(id, new TraceRecorder(id, size, referenceRecording));
     }
   }
 
@@ -279,8 +272,12 @@ public final class TargetSession implements AutoCloseable {
     var events = new ArrayList<ExecutionTrace.Event>();
     recorders.values().forEach(recorder -> recorder.appendTo(events));
     new ExecutionTrace(run, finished, events).write(directory.resolve("traces/execution.gtrace"));
-    if (referenceRecorder != null)
-      referenceRecorder.write(directory.resolve("traces/references.ghistory"), run, finished);
+    if (referenceRecording) {
+      var references = new ArrayList<ReferenceHistory.Event>();
+      recorders.values().forEach(recorder -> recorder.appendReferences(references));
+      new ReferenceHistory(run, finished, references)
+          .write(directory.resolve("traces/references.ghistory"));
+    }
     new ExecutionEvidence(run, finished, groups, windows)
         .write(directory.resolve("traces/workers.gevidence"));
   }

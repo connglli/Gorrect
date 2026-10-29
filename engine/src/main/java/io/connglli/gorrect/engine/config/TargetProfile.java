@@ -165,6 +165,7 @@ public record TargetProfile(
                   "local-bindings",
                   "compiled-execution",
                   "gc-completion",
+                  "contended-histories",
                   "reference-histories",
                   "reference-queues",
                   "reference-reclamation")
@@ -189,7 +190,7 @@ public record TargetProfile(
             limit(limits, "records", 100_000, 1_000_000),
             limit(limits, "traceEvents", 100_000, 1_000_000),
             limit(limits, "historyStates", 4096, 1_000_000),
-            limit(limits, "historyTransitions", 100_000, 10_000_000));
+            limit(limits, "historyTransitions", 1_000_000, 10_000_000));
     if (bounds.startupSeconds() > bounds.runSeconds())
       throw new IllegalArgumentException("Startup deadline exceeds run deadline");
     return new TargetProfile(

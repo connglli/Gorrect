@@ -15,6 +15,7 @@ import java.util.stream.Collectors;
  */
 public record ExecutionTrace(long run, boolean complete, List<Event> events) {
   public static final int MAX_EVENTS = 1_000_000;
+  public static final int MAX_WORKERS = 64;
   private static final int MAGIC = 0x47525431;
   private static final long END = 0x454e445452414331L;
 
@@ -31,7 +32,13 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
     ACQUIRE,
     ACQUIRE_END,
     REFERENCE_STATE,
-    QUEUE_POLL
+    QUEUE_POLL,
+    /**
+     * Strong result presence, independently recorded from its identity: 0 for null, 1 otherwise.
+     */
+    REFERENCE_READ,
+    COMPARE_SET,
+    BRANCH
   }
 
   public record Event(
@@ -74,7 +81,7 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
         long round = in.readLong();
         int phase = in.readInt();
         if (worker < 0
-            || worker > 64
+            || worker > MAX_WORKERS
             || group < 0
             || round < 0
             || phase < 0

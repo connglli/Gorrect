@@ -62,6 +62,11 @@ public final class GirFormatter {
     String label = labels.get(instruction.id());
     String prefix = label == null ? "" : label + ": ";
     switch (instruction) {
+      case Instruction.IfPresent present -> {
+        line(indent, prefix + "if-present " + present.name() + " {");
+        present.body().forEach(child -> instruction(child, indent + 1));
+        line(indent, "}");
+      }
       case Instruction.Acquire acquire -> {
         line(
             indent,
@@ -104,13 +109,30 @@ public final class GirFormatter {
   private static String operation(Instruction.Operation operation) {
     return switch (operation) {
       case Instruction.Allocate op -> "allocate " + op.name() + " " + op.shape();
-      case Instruction.ReadRoot op -> "read-root " + op.name() + " " + op.shape() + " " + op.root();
-      case Instruction.WriteRoot op -> "write-root " + op.root() + " " + operand(op.value());
+      case Instruction.ReadRoot op ->
+          (op.mode() == MemoryMode.VOLATILE ? "read-volatile-root " : "read-root ")
+              + op.name()
+              + " "
+              + op.shape()
+              + " "
+              + op.root();
+      case Instruction.WriteRoot op ->
+          (op.mode() == MemoryMode.VOLATILE ? "write-volatile-root " : "write-root ")
+              + op.root()
+              + " "
+              + operand(op.value());
       case Instruction.ReadReference op ->
-          "read-ref " + op.name() + " " + op.shape() + " " + op.owner() + " " + op.index();
+          (op.mode() == MemoryMode.VOLATILE ? "read-volatile-ref " : "read-ref ")
+              + op.name()
+              + " "
+              + op.shape()
+              + " "
+              + op.owner()
+              + " "
+              + op.index();
       case Instruction.WriteReference op ->
           (op.kind() == Value.ReferenceKind.STRONG
-                  ? "write-ref "
+                  ? (op.mode() == MemoryMode.VOLATILE ? "write-volatile-ref " : "write-ref ")
                   : op.kind() == Value.ReferenceKind.SOFT ? "write-soft " : "write-weak ")
               + op.owner()
               + " "
@@ -122,14 +144,57 @@ public final class GirFormatter {
           "is-cleared " + op.name() + " " + op.owner() + " " + op.index();
       case Instruction.PollQueue ignored -> "poll-queue";
       case Instruction.ReadData op ->
-          "read-data " + op.name() + " " + op.owner() + " " + op.index();
+          (op.mode() == MemoryMode.VOLATILE ? "read-volatile-data " : "read-data ")
+              + op.name()
+              + " "
+              + op.owner()
+              + " "
+              + op.index();
       case Instruction.WriteData op ->
-          "write-data " + op.owner() + " " + op.index() + " " + operand(op.value());
+          (op.mode() == MemoryMode.VOLATILE ? "write-volatile-data " : "write-data ")
+              + op.owner()
+              + " "
+              + op.index()
+              + " "
+              + operand(op.value());
+      case Instruction.CompareSet op ->
+          "compare-set-"
+              + locationKind(op.location())
+              + " "
+              + op.name()
+              + " "
+              + location(op.location())
+              + " "
+              + operand(op.expected())
+              + " "
+              + operand(op.update());
+      case Instruction.Exchange op ->
+          "exchange-"
+              + locationKind(op.location())
+              + " "
+              + op.name()
+              + " "
+              + (op.shape() == null ? "" : op.shape() + " ")
+              + location(op.location())
+              + " "
+              + operand(op.update());
       case Instruction.Release op -> "release " + op.name();
       case Instruction.Checkpoint ignored -> "checkpoint";
       case Instruction.Collect ignored -> "collect";
       case Instruction.Barrier ignored -> "barrier";
     };
+  }
+
+  private static String locationKind(Location location) {
+    return switch (location.kind()) {
+      case ROOT -> "root";
+      case REFERENCE -> "ref";
+      case DATA -> "data";
+    };
+  }
+
+  private static String location(Location location) {
+    return location.owner() + (location.kind() == Location.Kind.ROOT ? "" : " " + location.index());
   }
 
   private static String operand(Operand operand) {

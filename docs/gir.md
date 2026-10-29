@@ -1,6 +1,6 @@
 # GIR
 
-GIR (Gorrect Intermediate Representation) describes the graph and its workload independently of a JVM. Version 1 supports strong graphs with conflict-free parallel workers, and sequential soft/weak-reference histories. The format is under development; unsupported versions and operations are rejected.
+GIR (Gorrect Intermediate Representation) describes the graph and workload independently of a JVM. Version 1 supports exact strong graphs, soft/weak references, and bounded concurrent histories with volatile and atomic operations. Unsupported versions and operations are rejected.
 
 ## Example
 
@@ -86,6 +86,13 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `poll-queue;` | Record one wrapper incarnation from the case's reference queue, or an empty result. |
 | `read-data value owner index;` | Bind a scalar to a data slot's contents. |
 | `write-data owner index value;` | Write a scalar or integer literal. |
+| `compare-set-root won root expected update;` | Compare root identity and conditionally update; bind scalar 1 on success, otherwise 0. |
+| `compare-set-ref won owner index expected update;` | Compare and conditionally update a strong slot by identity. |
+| `compare-set-data won owner index expected update;` | Compare and conditionally update a long slot by value. |
+| `exchange-root old N root update;` | Atomically replace a root and bind its old strong target. |
+| `exchange-ref old N owner index update;` | Atomically replace a strong slot and bind its old target. |
+| `exchange-data old owner index update;` | Atomically replace a long slot and bind its old value. |
+| `if-present h { ... }` | Execute a child scope when the existing strong handle is non-null. |
 | `release name;` | End the lifetime of a binding in the current scope. |
 | `scope { ... }` | Execute a block with its own bindings. |
 | `repeat count { ... }` | Execute a block a nonnegative, literal number of times. |
@@ -96,11 +103,13 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 
 Reference operands are live handles or `null`; scalar operands are live scalar bindings or signed 64-bit literals. Reference slots and named roots can hold any target shape. A non-null reference read asserts the declared destination shape exactly. Field and array access requires a live, non-null owner and an index within the corresponding reference or data count. Static validation checks all blocks, including zero-iteration loops, for names, types, slot bounds, and labels.
 
+Root, strong-reference, and data reads/writes have volatile variants with the same operands: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Compare-set and exchange always have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
+
 Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
 
 ## Reference histories
 
-Reference histories support sequential ordinary-object programs. An acquisition holds a successful result strongly until scope exit; checkpoints must follow that scope. [references.gir](../examples/references.gir) shows a complete example.
+Reference histories use ordinary-object shapes and can include parallel workers under the [contended-history rules](#contended-histories). Acquisition results stay strong until scope exit; checkpoints must follow that scope. [references.gir](../examples/references.gir) shows a complete example.
 
 The checker validates recorded choices before using them. GC follows Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html) and [weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) reference rules, including atomic clearing of related references. Clearing is permanent for each wrapper; stores create fresh [incarnations](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact fields and data.
 
@@ -110,7 +119,7 @@ Clearing, queue delivery, and reclamation are separate. Empty queue polls prove 
 
 Workers have independent scopes and share state through named roots, without capturing caller bindings. Names are unique within each block; numeric IDs are internal. Limits are 16 workers per block and 64 declarations per program. Nested parallel blocks and worker checkpoints are unsupported; observe after joining.
 
-Within a phase, a slot written by one worker cannot be read or written by another, even with the same value. This covers roots and reference/data fields or elements, including aliases. Shared reads and writes to distinct slots are allowed. The oracle rejects concrete conflicts before launch, making graph contents and per-worker reads independent of interleaving.
+The exact profile requires conflict-free phases: a slot written by one worker cannot be read or written by another, even with the same value. This covers roots and reference/data fields or elements, including aliases. Shared reads and distinct-slot writes are allowed. The oracle rejects concrete conflicts before launch, making graph contents and per-worker reads independent of interleaving.
 
 For example, both workers can mutate separate data fields of one object:
 
@@ -129,6 +138,14 @@ program {
 ```
 
 Barriers appear directly in worker bodies, with equal counts per worker. They preserve bindings and make all preceding phase writes visible before any following phase starts. [concurrent.gir](../examples/concurrent.gir) exercises local retention and publication across GC, allocation, calls, and a barrier.
+
+## Contended histories
+
+Volatile/atomic operations or parallel reference processing select bounded history checking. Before launch, exhaustive exploration must establish that every sequentially consistent schedule satisfies preconditions and has no ordinary data race. Any possible ordinary race is unsupported; a rejected precondition is invalid input. Exhausting the proof budget is inconclusive.
+
+The checker matches worker order, returned identities/values, branches, barriers, and snapshots to a legal schedule. File order and timestamps impose no extra cross-worker order. All live worker and caller handles protect referents. [contended.gir](../examples/contended.gir) transfers ownership using exchange-to-null.
+
+History execution currently requires ordinary-object shapes and checkpoints outside conditional scopes. [Java's memory model](https://docs.oracle.com/javase/specs/jls/se17/html/jls-17.html#jls-17.4.5) and [VarHandle](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/invoke/VarHandle.html) define the ordering guarantees; acquire/release-only modes and arbitrary data races are outside this profile.
 
 ## Stress requirements
 

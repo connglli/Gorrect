@@ -8,7 +8,7 @@ import java.util.List;
 import java.util.concurrent.Phaser;
 
 /** Worker-local recording and structured phase boundaries; it stores no graph references. */
-public final class WorkerContext {
+public final class WorkerContext implements ObservationRecorder {
   private final TraceRecorder recorder;
   private final Phaser phaser;
   private final JitControl jit;
@@ -33,6 +33,36 @@ public final class WorkerContext {
 
   public void record(int operation, int kind, long value) {
     recorder.record(operation, kind, value, group, round, phase);
+  }
+
+  @Override
+  public void reference(
+      int operation,
+      int kind,
+      long value,
+      int strength,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
+      int targetWorker,
+      int targetSite,
+      long targetOccurrence) {
+    recorder.reference(
+        operation,
+        kind,
+        value,
+        strength,
+        wrapperWorker,
+        wrapperSite,
+        wrapperOccurrence,
+        wrapperSlot,
+        targetWorker,
+        targetSite,
+        targetOccurrence,
+        group,
+        round,
+        phase);
   }
 
   public void begin() {
@@ -70,7 +100,7 @@ public final class WorkerContext {
     long after = NativeObserver.gcFinishes();
     jit.witness(worker, group, round, phase, ExecutionEvidence.AFTER_COLLECTION, collection);
     // Keep the last completed request per phase. Earlier compiled requests can remain unproven;
-    // conditional-reference checking will need a complete request history rather than this summary.
+    // reclamation/completion assertions need a complete request history rather than this summary.
     if (before >= 0 && after > before) {
       gcBefore = before;
       gcAfter = after;

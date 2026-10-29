@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.gir;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.Deque;
 import java.util.HashMap;
@@ -25,7 +26,7 @@ public final class GirValidator {
   private int nextOperation = 1;
   private int nextWorker = 1;
   private int workerDepth = -1;
-  private int acquireDepth;
+  private int conditionalDepth;
   public static final Set<String> STRESS_REQUIREMENTS =
       Set.of("concurrent-overlap", "compiled-execution", "gc-during-workers");
 
@@ -117,14 +118,24 @@ public final class GirValidator {
           fail("Internal instruction IDs must follow source order");
         }
         switch (instruction) {
+          case Instruction.IfPresent present -> {
+            if (binding(present.name()).shape() == null)
+              fail("if-present requires a reference handle");
+            conditionalDepth++;
+            try {
+              block(present.body(), depth + 1);
+            } finally {
+              conditionalDepth--;
+            }
+          }
           case Instruction.Acquire acquire -> {
             slot(acquire.owner(), acquire.index(), true);
             var shape = shape(acquire.shape());
-            acquireDepth++;
+            conditionalDepth++;
             try {
               block(acquire.body(), depth + 1, acquire.name(), shape);
             } finally {
-              acquireDepth--;
+              conditionalDepth--;
             }
           }
           case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
@@ -139,8 +150,8 @@ public final class GirValidator {
               fail("Barriers must be direct worker statements");
             if (operation instanceof Instruction.Checkpoint && workerDepth >= 0)
               fail("Worker checkpoints are unsupported; observe after join");
-            if (operation instanceof Instruction.Checkpoint && acquireDepth > 0)
-              fail("Observe after acquisition scopes have ended");
+            if (operation instanceof Instruction.Checkpoint && conditionalDepth > 0)
+              fail("Observe after conditional scopes have ended");
             operation(operation);
           }
         }
@@ -160,7 +171,9 @@ public final class GirValidator {
     try {
       for (var worker : parallel.workers()) {
         name(worker.name());
-        if (!names.add(worker.name()) || worker.id() != nextWorker++ || worker.id() > 64)
+        if (!names.add(worker.name())
+            || worker.id() != nextWorker++
+            || worker.id() > ExecutionTrace.MAX_WORKERS)
           fail("Duplicate or invalid worker identity");
         // Workers never inherit a caller's local bindings, including released-name reservations.
         scopes.clear();
@@ -182,21 +195,27 @@ public final class GirValidator {
     switch (operation) {
       case Instruction.Allocate op -> declare(op.name(), shape(op.shape()));
       case Instruction.ReadRoot op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         root(op.root());
         declare(op.name(), shape(op.shape()));
       }
       case Instruction.WriteRoot op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         root(op.root());
         operand(op.value(), true);
       }
       case Instruction.ReadReference op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
         declare(op.name(), shape(op.shape()));
       }
       case Instruction.WriteReference op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
         operand(op.value(), true);
         if (op.kind() == null) fail("Missing reference kind");
+        if (op.kind() != Value.ReferenceKind.STRONG && op.mode() != MemoryMode.PLAIN)
+          fail("Wrapped stores use ordinary accesses");
       }
       case Instruction.ClearReference op -> slot(op.owner(), op.index(), true);
       case Instruction.ReferenceState op -> {
@@ -205,12 +224,27 @@ public final class GirValidator {
       }
       case Instruction.PollQueue ignored -> {}
       case Instruction.ReadData op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), false);
         declare(op.name(), null);
       }
       case Instruction.WriteData op -> {
+        if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), false);
         operand(op.value(), false);
+      }
+      case Instruction.CompareSet op -> {
+        location(op.location());
+        operand(op.expected(), op.location().reference());
+        operand(op.update(), op.location().reference());
+        declare(op.name(), null);
+      }
+      case Instruction.Exchange op -> {
+        location(op.location());
+        operand(op.update(), op.location().reference());
+        if (!op.location().reference() && op.shape() != null)
+          fail("Data exchange has no reference shape");
+        declare(op.name(), op.location().reference() ? shape(op.shape()) : null);
       }
       case Instruction.Release op -> {
         var binding = scopes.peek().get(op.name());
@@ -223,6 +257,14 @@ public final class GirValidator {
       case Instruction.Collect ignored -> {}
       case Instruction.Barrier ignored -> {}
     }
+  }
+
+  private void location(Location location) {
+    if (location == null || location.kind() == null) fail("Missing atomic location");
+    if (location.kind() == Location.Kind.ROOT) {
+      root(location.owner());
+      if (location.index() != 0) fail("Root location has no index");
+    } else slot(location.owner(), location.index(), location.reference());
   }
 
   private void slot(String owner, int index, boolean reference) {

@@ -110,6 +110,32 @@ public final class GirParser {
       Instruction instruction =
           switch (opcode) {
             case "allocate" -> new Instruction.Allocate(id, name(), name());
+            case "read-volatile-root" ->
+                new Instruction.ReadRoot(id, name(), name(), name(), MemoryMode.VOLATILE);
+            case "write-volatile-root" ->
+                new Instruction.WriteRoot(id, name(), operand(), MemoryMode.VOLATILE);
+            case "read-volatile-ref" ->
+                new Instruction.ReadReference(
+                    id, name(), name(), name(), integer(), MemoryMode.VOLATILE);
+            case "write-volatile-ref" ->
+                new Instruction.WriteReference(
+                    id,
+                    name(),
+                    integer(),
+                    operand(),
+                    Value.ReferenceKind.STRONG,
+                    MemoryMode.VOLATILE);
+            case "read-volatile-data" ->
+                new Instruction.ReadData(id, name(), name(), integer(), MemoryMode.VOLATILE);
+            case "write-volatile-data" ->
+                new Instruction.WriteData(id, name(), integer(), operand(), MemoryMode.VOLATILE);
+            case "compare-set-root", "compare-set-ref", "compare-set-data" ->
+                new Instruction.CompareSet(id, name(), location(opcode), operand(), operand());
+            case "exchange-root", "exchange-ref" ->
+                new Instruction.Exchange(id, name(), name(), location(opcode), operand());
+            case "exchange-data" ->
+                new Instruction.Exchange(id, name(), null, location(opcode), operand());
+            case "if-present" -> new Instruction.IfPresent(id, name(), block(depth + 1));
             case "read-root" -> new Instruction.ReadRoot(id, name(), name(), name());
             case "write-root" -> new Instruction.WriteRoot(id, name(), operand());
             case "read-ref" -> new Instruction.ReadReference(id, name(), name(), name(), integer());
@@ -140,6 +166,14 @@ public final class GirParser {
       instructions.add(instruction);
     }
     return instructions;
+  }
+
+  private Location location(String opcode) {
+    var kind =
+        opcode.endsWith("root")
+            ? Location.Kind.ROOT
+            : opcode.endsWith("ref") ? Location.Kind.REFERENCE : Location.Kind.DATA;
+    return new Location(kind, name(), kind == Location.Kind.ROOT ? 0 : integer());
   }
 
   private Instruction.Parallel parallel(int id, int depth) {

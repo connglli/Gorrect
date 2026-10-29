@@ -14,6 +14,8 @@ public final class ReferenceProgram {
   private static boolean hasParallel(List<Instruction> body) {
     for (var instruction : body) {
       if (instruction instanceof Instruction.Parallel) return true;
+      if (instruction instanceof Instruction.IfPresent present && hasParallel(present.body()))
+        return true;
       if (instruction instanceof Instruction.Scope scope && hasParallel(scope.body())) return true;
       if (instruction instanceof Instruction.Repeat repeat && hasParallel(repeat.body()))
         return true;
@@ -39,6 +41,7 @@ public final class ReferenceProgram {
             case Instruction.ReferenceState ignored -> true;
             case Instruction.PollQueue ignored -> true;
             case Instruction.WriteReference op -> op.kind() != Value.ReferenceKind.STRONG;
+            case Instruction.IfPresent present -> usesReferences(present.body());
             case Instruction.Scope scope -> usesReferences(scope.body());
             case Instruction.Repeat repeat -> usesReferences(repeat.body());
             case Instruction.Parallel parallel ->

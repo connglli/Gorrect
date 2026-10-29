@@ -1,6 +1,6 @@
 # Running Gorrect
 
-The CLI supports sequential reference histories and conflict-free concurrent strong [GIR](./gir.md) on HotSpot Serial GC, JDK 17+. Other collectors, OpenJ9, and contended histories remain planned work.
+The CLI supports exact and bounded concurrent [GIR](./gir.md) on HotSpot Serial GC, JDK 17+, including volatile/atomic operations and soft/weak acquisition. Other collectors and OpenJ9 remain planned work.
 
 ## Build and configure
 
@@ -53,13 +53,13 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | `support` | Paths named `runtime`, `protocol`, and `observer`, plus optional `whitebox`. Copies enter the run bundle. |
 | `vmArgs` | Optional VM argument array. Collector selection, agents, classpath, entry point, and crash destination belong to the driver. Use one array element per argument. |
 | `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. The resolved launch environment is retained. |
-| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `compilation-events`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `gc-completion`, and `reference-reclamation` remain unsupported. |
-| `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound simultaneous clearing states and cumulative search work. Startup fits within the run deadline; compilation has a separate deadline. |
+| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `compilation-events`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `gc-completion`, and `reference-reclamation` remain unsupported. |
+| `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
 | `jit` | Optional HotSpot controls: `level`, `warmupRounds`, and `deadlineMillis`. Requires `support.whitebox`; the driver supplies bootstrap and WhiteBox flags. |
 
 Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
 
-Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. The [observation contract](./observation.md) defines identity capture and its effects.
+Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. Contended histories require ordinary-object shapes and a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
 
 For JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. `warmupRounds` counts modeled visits to each parallel block before installation requests; warm-up adds no unmodeled mutations. Compilation level requests installation; actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
 

@@ -1,6 +1,5 @@
 package io.connglli.gorrect.engine.oracle;
 
-import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
@@ -13,24 +12,30 @@ import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
-/** Syntax-only storage/control bounds. It predicts no acquisition result or graph payload. */
-public final class ReferencePlan {
+/**
+ * Syntax-only storage/control bounds. OracleResult carries quotas and checkpoint visits here; its
+ * event values and graphs are placeholders, never verification predictions. Conditional bodies are
+ * planned as taken to reserve their maximum storage.
+ */
+public final class HistoryPlan {
   private final GirProgram program;
   private final OracleLimits limits;
   private final List<ExecutionTrace.Event> events = new ArrayList<>();
   private final List<OracleResult.Checkpoint> checkpoints = new ArrayList<>();
   private final Map<Integer, Long> visits = new HashMap<>();
-  private final ArrayDeque<Map<String, Integer>> scopes = new ArrayDeque<>();
+  private ArrayDeque<Map<String, Integer>> scopes = new ArrayDeque<>();
   private long objects, slots;
+  private int worker, group, phase;
+  private long round;
 
-  private ReferencePlan(GirProgram program, OracleLimits limits) {
+  private HistoryPlan(GirProgram program, OracleLimits limits) {
     this.program = program;
     this.limits = limits;
   }
 
   public static OracleResult plan(GirProgram program, OracleLimits limits) {
     GirValidator.validate(program);
-    var plan = new ReferencePlan(program, limits);
+    var plan = new HistoryPlan(program, limits);
     new GraphMachine(program, limits); // Apply the same initial graph/wrapper bounds as execution.
     plan.objects =
         program.objects().size()
@@ -47,16 +52,39 @@ public final class ReferencePlan {
   private void event(int operation, ExecutionTrace.Kind kind) {
     if (events.size() >= limits.steps())
       throw new OracleLimitException("Conditional control/storage step bound exhausted");
-    events.add(new ExecutionTrace.Event(operation, kind, 0));
+    events.add(new ExecutionTrace.Event(operation, kind, 0, worker, group, round, phase));
   }
 
-  private void block(List<Instruction> body, String acquired, int declaration) {
+  private void block(List<Instruction> body, String acquired, int acquiredDeclaration) {
     scopes.push(new HashMap<>());
-    if (acquired != null) scopes.peek().put(acquired, declaration);
+    if (acquired != null) scopes.peek().put(acquired, acquiredDeclaration);
     for (var instruction : body)
       switch (instruction) {
-        case Instruction.Parallel ignored ->
-            throw new GirException("Parallel reference histories are unsupported");
+        case Instruction.Parallel parallel -> {
+          event(parallel.id(), ExecutionTrace.Kind.OPERATION);
+          long visit = visits.merge(parallel.id(), 1L, Long::sum);
+          var callerScopes = scopes;
+          for (var declaration : parallel.workers()) {
+            scopes = new ArrayDeque<>();
+            worker = declaration.id();
+            group = parallel.id();
+            round = visit;
+            phase = 0;
+            event(parallel.id(), ExecutionTrace.Kind.WORKER_START);
+            block(declaration.body(), null, 0);
+            event(parallel.id(), ExecutionTrace.Kind.WORKER_END);
+          }
+          scopes = callerScopes;
+          worker = 0;
+          group = 0;
+          round = 0;
+          phase = 0;
+          for (var declaration : parallel.workers()) event(parallel.id(), ExecutionTrace.Kind.JOIN);
+        }
+        case Instruction.IfPresent present -> {
+          event(present.id(), ExecutionTrace.Kind.BRANCH);
+          block(present.body(), null, 0);
+        }
         case Instruction.Scope scope -> {
           event(scope.id(), ExecutionTrace.Kind.OPERATION);
           block(scope.body(), null, 0);
@@ -74,7 +102,15 @@ public final class ReferencePlan {
           event(acquire.id(), ExecutionTrace.Kind.ACQUIRE_END);
         }
         case Instruction.Operation operation -> {
-          event(operation.id(), ExecutionTrace.Kind.OPERATION);
+          event(
+              operation.id(),
+              operation instanceof Instruction.Barrier
+                  ? ExecutionTrace.Kind.BARRIER
+                  : ExecutionTrace.Kind.OPERATION);
+          if (operation instanceof Instruction.Barrier) {
+            phase++;
+            event(operation.id(), ExecutionTrace.Kind.PHASE_START);
+          }
           if (operation instanceof Instruction.Allocate allocate) {
             if (++objects > limits.objects()
                 || shape(allocate.shape()).slots() > limits.slots() - slots)
@@ -85,6 +121,8 @@ public final class ReferencePlan {
             scopes.peek().put(read.name(), read.id());
           else if (operation instanceof Instruction.ReadReference read)
             scopes.peek().put(read.name(), read.id());
+          else if (operation instanceof Instruction.Exchange exchange
+              && exchange.location().reference()) scopes.peek().put(exchange.name(), exchange.id());
           else if (operation instanceof Instruction.Release release)
             scopes.peek().remove(release.name());
           else if (operation instanceof Instruction.WriteReference write

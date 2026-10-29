@@ -23,15 +23,26 @@ final class ReferenceFrontier {
 
   record State(BitSet cleared, BitSet pending, BitSet delivered) {}
 
-  private final HistoryLimits limits;
+  private final HistoryBudget budget;
   private final List<Instance> instances = new ArrayList<>();
   private final Map<WrapperId, Integer> indices = new HashMap<>();
   private Set<State> states = new LinkedHashSet<>();
-  private long work;
 
   ReferenceFrontier(HistoryLimits limits) {
-    this.limits = limits;
+    this(new HistoryBudget(limits));
+  }
+
+  ReferenceFrontier(HistoryBudget budget) {
+    this.budget = budget;
     states.add(new State(new BitSet(), new BitSet(), new BitSet()));
+  }
+
+  ReferenceFrontier(ReferenceFrontier source) {
+    budget = source.budget;
+    instances.addAll(source.instances);
+    indices.putAll(source.indices);
+    // State bitsets are immutable after insertion; mutating operations clone the affected sets.
+    states = new LinkedHashSet<>(source.states);
   }
 
   void register(Value.Reference value) {
@@ -98,8 +109,7 @@ final class ReferenceFrontier {
         }
         var next = new State(cleared, pending, state.delivered());
         if (closure.add(next)) {
-          if (closure.size() > limits.states())
-            throw new HistoryLimitException("Reference-history state budget exhausted");
+          budget.states(closure.size());
           queue.addLast(next);
         }
       }
@@ -162,6 +172,37 @@ final class ReferenceFrontier {
 
   Set<State> states() {
     return Set.copyOf(states);
+  }
+
+  int size() {
+    return states.size();
+  }
+
+  private record ClearingKey(
+      Set<WrapperId> cleared, Set<WrapperId> pending, Set<WrapperId> delivered) {}
+
+  private record FrontierKey(Map<WrapperId, Instance> instances, Set<ClearingKey> states) {}
+
+  /**
+   * Canonical identities allow equal states even when workers installed wrappers in different
+   * orders.
+   */
+  Object key() {
+    budget.spend(1L + instances.size() * (1L + states.size()));
+    var values = new HashMap<WrapperId, Instance>();
+    instances.forEach(instance -> values.put(instance.id(), instance));
+    var clearings = new HashSet<ClearingKey>();
+    for (var state : states)
+      clearings.add(
+          new ClearingKey(ids(state.cleared()), ids(state.pending()), ids(state.delivered())));
+    return new FrontierKey(Map.copyOf(values), Set.copyOf(clearings));
+  }
+
+  private Set<WrapperId> ids(BitSet bits) {
+    var result = new HashSet<WrapperId>();
+    for (int index = bits.nextSetBit(0); index >= 0; index = bits.nextSetBit(index + 1))
+      result.add(instances.get(index).id());
+    return Set.copyOf(result);
   }
 
   List<String> match(Graph model, Graph observed) {
@@ -270,9 +311,7 @@ final class ReferenceFrontier {
   }
 
   private void spend(long units) {
-    if (units > limits.transitions() - work)
-      throw new HistoryLimitException("Reference-history transition budget exhausted");
-    work += units;
+    budget.spend(units);
   }
 
   private static BitSet copy(BitSet value) {

@@ -2,8 +2,8 @@ package io.connglli.gorrect.engine.gir;
 
 import static org.junit.jupiter.api.Assertions.*;
 
+import io.connglli.gorrect.engine.oracle.HistoryPlan;
 import io.connglli.gorrect.engine.oracle.OracleLimits;
-import io.connglli.gorrect.engine.oracle.ReferencePlan;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -36,7 +36,7 @@ class ReferenceGirTest {
                 """);
     assertEquals(program, GirParser.parse(GirFormatter.format(program)));
     assertTrue(ReferenceProgram.usesReferences(program));
-    var plan = ReferencePlan.plan(program, OracleLimits.DEFAULT);
+    var plan = HistoryPlan.plan(program, OracleLimits.DEFAULT);
     assertEquals(13, plan.events().size());
     assertTrue(plan.checkpoints().getFirst().graph().handles().isEmpty());
   }
