@@ -27,6 +27,9 @@ public final class GirFormatter {
 
   private void program(GirProgram program) {
     line(0, "gir " + program.version() + ";");
+    program.requirements().stream()
+        .sorted()
+        .forEach(requirement -> line(0, "require " + requirement + ";"));
     for (var shape : program.shapes()) {
       String dimensions =
           switch (shape.kind()) {
@@ -59,6 +62,15 @@ public final class GirFormatter {
     String label = labels.get(instruction.id());
     String prefix = label == null ? "" : label + ": ";
     switch (instruction) {
+      case Instruction.Parallel parallel -> {
+        line(indent, prefix + "parallel {");
+        for (var worker : parallel.workers()) {
+          line(indent + 1, "worker " + worker.name() + " {");
+          worker.body().forEach(child -> instruction(child, indent + 2));
+          line(indent + 1, "}");
+        }
+        line(indent, "}");
+      }
       case Instruction.Scope scope -> {
         line(indent, prefix + "scope {");
         scope.body().forEach(child -> instruction(child, indent + 1));
@@ -88,6 +100,8 @@ public final class GirFormatter {
           "write-data " + op.owner() + " " + op.index() + " " + operand(op.value());
       case Instruction.Release op -> "release " + op.name();
       case Instruction.Checkpoint ignored -> "checkpoint";
+      case Instruction.Collect ignored -> "collect";
+      case Instruction.Barrier ignored -> "barrier";
     };
   }
 

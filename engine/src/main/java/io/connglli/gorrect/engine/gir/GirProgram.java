@@ -5,6 +5,7 @@ import io.connglli.gorrect.engine.model.Value;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
+import java.util.Set;
 
 /**
  * Immutable declarations and instruction tree. The label map associates internal instruction IDs
@@ -16,13 +17,25 @@ public record GirProgram(
     List<InitialObject> objects,
     List<Root> roots,
     List<Instruction> body,
-    Map<Integer, String> labels) {
+    Map<Integer, String> labels,
+    Set<String> requirements) {
   public GirProgram {
     shapes = List.copyOf(shapes);
     objects = List.copyOf(objects);
     roots = List.copyOf(roots);
     body = List.copyOf(body);
     labels = Map.copyOf(labels);
+    requirements = Set.copyOf(requirements);
+  }
+
+  public GirProgram(
+      int version,
+      List<Shape> shapes,
+      List<InitialObject> objects,
+      List<Root> roots,
+      List<Instruction> body,
+      Map<Integer, String> labels) {
+    this(version, shapes, objects, roots, body, labels, Set.of());
   }
 
   public GirProgram(

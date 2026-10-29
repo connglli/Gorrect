@@ -9,7 +9,7 @@ public record ControlMessage(
     Kind kind, long run, long sequence, int operation, long occurrence, String detail) {
   private static final int MAGIC = 0x47524331;
 
-  // Ordinals are wire values; changing their order requires a format version change.
+  // Ordinals are wire values; the writer and reader must use the same ordering.
   public enum Kind {
     HELLO,
     ACK,

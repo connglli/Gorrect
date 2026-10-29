@@ -41,6 +41,7 @@ tasks.named('test') {
     useJUnitPlatform()
     exclude '**/ObserverArtifactsTest.class'
     exclude '**/RunEngineTest.class'
+    exclude '**/JitEvidenceTest.class'
 }
 
 def observerIntegration = tasks.register('observerIntegration', Test) {
@@ -70,6 +71,7 @@ def sequentialIntegration = tasks.register('sequentialIntegration', Test) {
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform()
     include '**/RunEngineTest.class'
+    include '**/JitEvidenceTest.class'
     inputs.dir(layout.buildDirectory.dir('install/gorrect/support'))
             .withPathSensitivity(PathSensitivity.RELATIVE)
     [17, 21].each { feature ->

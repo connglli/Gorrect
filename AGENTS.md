@@ -20,6 +20,8 @@ Prefer an existing project facility, then a standard library or platform facilit
 
 Keep the core small and explicit. Add abstractions, options, and extension points when a concrete requirement needs them. Favor straightforward code over a shorter expression that takes effort to decode.
 
+Keep the initial GIR and artifact formats at version 1 while their contracts are being developed.
+
 Preserve validation and error handling when moving or simplifying code. Fix a shared cause once, after inspecting its callers. Choose the approach that handles edge cases correctly.
 
 Explain reasoning the code cannot express in concise comments. For a deliberate shortcut, record its limit and the condition that would justify replacing it.
@@ -59,7 +61,7 @@ Before extending the design, ask whether the mechanism is necessary, whether a s
 2. Run the existing pre-commit hooks on changed files. Preserve both the `pre-commit` and `commit-msg` hook stages and their configuration.
 3. Review the diff and `git status` for unintended changes and generated artifacts.
 4. Stage all changes and ask the user to review changes before committing, unless the user has already authorized the commit in the session.
-5. Use a Conventional Commit message with a title of at most 50 characters and a body that explains intent and design impact when needed. Follow [commit attribution](#commit-attribution) for agent co-author trailers.
+5. Use a Conventional Commit message with a component scope, such as `feat(engine)` or `fix(runtime)`, a title of at most 50 characters, and a body that explains intent and design impact when needed. Follow [commit attribution](#commit-attribution) for agent co-author trailers.
 
 ## Commit attribution
 

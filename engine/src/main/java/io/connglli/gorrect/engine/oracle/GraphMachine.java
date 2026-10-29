@@ -15,8 +15,10 @@ import java.util.ArrayList;
 import java.util.Collections;
 import java.util.Deque;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 
 /**
  * Case-local state. Heap writes replace immutable records so retained checkpoints stay unchanged.
@@ -26,7 +28,10 @@ final class GraphMachine {
   private final Map<String, Shape> shapes = new HashMap<>();
   private final Map<ObjectId, HeapObject> objects = new HashMap<>();
   private final Map<String, Value.Reference> roots = new HashMap<>();
-  private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
+  private Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
+  private int worker, group, phase;
+  private long round;
+  private final Map<Integer, Access> accesses = new HashMap<>();
   private final Map<Integer, Long> occurrences = new HashMap<>();
   private final List<OracleResult.Checkpoint> checkpoints = new ArrayList<>();
   private final List<ExecutionTrace.Event> events = new ArrayList<>();
@@ -41,6 +46,77 @@ final class GraphMachine {
   private record Binding(int operation, Value value) {}
 
   private record Target(ObjectId id, HeapObject object) {}
+
+  record Context(
+      int worker, int group, long round, int phase, Deque<Map<String, Binding>> scopes) {}
+
+  private record Slot(ObjectId object, String root, boolean reference, int index) {}
+
+  private static final class Access {
+    final Set<Slot> reads = new HashSet<>(), writes = new HashSet<>();
+  }
+
+  Context context() {
+    return new Context(worker, group, round, phase, scopes);
+  }
+
+  Context workerContext(int id, int operation, long visit) {
+    var locals = new ArrayDeque<Map<String, Binding>>();
+    locals.push(new HashMap<>());
+    return new Context(id, operation, visit, 0, locals);
+  }
+
+  void activate(Context state, int nextPhase) {
+    worker = state.worker();
+    group = state.group();
+    round = state.round();
+    phase = nextPhase;
+    scopes = state.scopes();
+  }
+
+  long visit(int operation) {
+    long value = occurrences.getOrDefault(operation, 0L) + 1;
+    occurrences.put(operation, value);
+    return value;
+  }
+
+  void marker(int operation, ExecutionTrace.Kind kind, long value) {
+    requireStep();
+    steps++;
+    events.add(event(operation, kind, value));
+  }
+
+  private ExecutionTrace.Event event(int operation, ExecutionTrace.Kind kind, long value) {
+    return new ExecutionTrace.Event(operation, kind, value, worker, group, round, phase);
+  }
+
+  void beginPhase() {
+    accesses.clear();
+  }
+
+  void checkPhase() {
+    // Conflict freedom makes the chosen serial interpretation valid for every phase interleaving.
+    for (var left : accesses.entrySet())
+      for (var right : accesses.entrySet()) {
+        if (left.getKey().equals(right.getKey())) continue;
+        for (var slot : left.getValue().writes) {
+          if (right.getValue().writes.contains(slot) || right.getValue().reads.contains(slot))
+            throw new GirException(
+                "Conflicting phase access by workers "
+                    + left.getKey()
+                    + " and "
+                    + right.getKey()
+                    + ": "
+                    + slot);
+        }
+      }
+  }
+
+  private void access(Slot slot, boolean write) {
+    if (worker == 0) return;
+    var values = accesses.computeIfAbsent(worker, ignored -> new Access());
+    (write ? values.writes : values.reads).add(slot);
+  }
 
   GraphMachine(GirProgram program, OracleLimits limits) {
     this.limits = limits;
@@ -70,7 +146,7 @@ final class GraphMachine {
     requireStep();
     steps++;
     events.add(
-        new ExecutionTrace.Event(
+        event(
             operation,
             iteration ? ExecutionTrace.Kind.ITERATION : ExecutionTrace.Kind.OPERATION,
             0));
@@ -102,11 +178,13 @@ final class GraphMachine {
         var value = root(op.root());
         requireShape(value, shape(op.shape()));
         bind(op.name(), op.id(), value);
+        access(new Slot(null, op.root(), true, 0), false);
       }
       case Instruction.WriteRoot op -> {
         root(op.root());
         var value = reference(op.value());
         roots.put(op.root(), value);
+        access(new Slot(null, op.root(), true, 0), true);
       }
       case Instruction.ReadReference op -> {
         requireDeclaration(op.name());
@@ -114,6 +192,7 @@ final class GraphMachine {
         var value = target.object().references().get(op.index());
         requireShape(value, shape(op.shape()));
         bind(op.name(), op.id(), value);
+        access(new Slot(target.id(), null, true, op.index()), false);
       }
       case Instruction.WriteReference op -> {
         var target = target(op.owner(), op.index(), true);
@@ -123,12 +202,14 @@ final class GraphMachine {
         objects.put(
             target.id(),
             new HeapObject(target.object().shape(), references, target.object().data()));
+        access(new Slot(target.id(), null, true, op.index()), true);
       }
       case Instruction.ReadData op -> {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), false);
         read = target.object().data().get(op.index());
         bind(op.name(), op.id(), new Value.Scalar(read));
+        access(new Slot(target.id(), null, false, op.index()), false);
       }
       case Instruction.WriteData op -> {
         var target = target(op.owner(), op.index(), false);
@@ -138,6 +219,7 @@ final class GraphMachine {
         objects.put(
             target.id(),
             new HeapObject(target.object().shape(), target.object().references(), data));
+        access(new Slot(target.id(), null, false, op.index()), true);
       }
       case Instruction.Release op -> {
         var binding = scopes.peek().get(op.name());
@@ -153,14 +235,18 @@ final class GraphMachine {
         occurrences.put(op.id(), occurrence);
         checkpoints.add(checkpoint);
       }
+      case Instruction.Collect ignored -> {}
+      case Instruction.Barrier ignored -> {}
     }
     steps++;
     events.add(
-        new ExecutionTrace.Event(
+        event(
             operation.id(),
-            operation instanceof Instruction.ReadData
-                ? ExecutionTrace.Kind.SCALAR_READ
-                : ExecutionTrace.Kind.OPERATION,
+            operation instanceof Instruction.Barrier
+                ? ExecutionTrace.Kind.BARRIER
+                : operation instanceof Instruction.ReadData
+                    ? ExecutionTrace.Kind.SCALAR_READ
+                    : ExecutionTrace.Kind.OPERATION,
             read));
   }
 
@@ -170,7 +256,7 @@ final class GraphMachine {
     if (objects.size() >= limits.objects()) limit("objects");
     if (shape.slots() > limits.slots() - slots) limit("slots");
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
-    var id = new ObjectId(0, op.id(), occurrence);
+    var id = new ObjectId(worker, op.id(), occurrence);
     var object =
         new HeapObject(
             shape,

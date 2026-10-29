@@ -7,9 +7,11 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 /**
- * Sequential operation evidence. Values contain scalars only and cannot retain workload objects.
+ * Per-worker operation evidence. Values contain scalars only and cannot retain workload objects.
  */
 public record ExecutionTrace(long run, boolean complete, List<Event> events) {
   public static final int MAX_EVENTS = 1_000_000;
@@ -20,19 +22,35 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
   public enum Kind {
     OPERATION,
     ITERATION,
-    SCALAR_READ
+    SCALAR_READ,
+    WORKER_START,
+    BARRIER,
+    PHASE_START,
+    WORKER_END,
+    JOIN
   }
 
-  public record Event(int operation, Kind kind, long value) {}
+  public record Event(
+      int operation, Kind kind, long value, int worker, int group, long round, int phase) {
+    public Event(int operation, Kind kind, long value) {
+      this(operation, kind, value, 0, 0, 0, 0);
+    }
+  }
 
   public ExecutionTrace {
     events = List.copyOf(events);
   }
 
+  /** Per-worker order is evidence; file order between workers does not define an interleaving. */
+  public Map<Integer, List<Event>> byWorker() {
+    return events.stream().collect(Collectors.groupingBy(Event::worker));
+  }
+
   public static ExecutionTrace read(Path path, long run) throws IOException {
-    if (Files.size(path) > 32L * MAX_EVENTS) throw new IOException("Trace exceeds byte limit");
+    if (Files.size(path) > 64L * MAX_EVENTS) throw new IOException("Trace exceeds byte limit");
     try (var in = new DataInputStream(Files.newInputStream(path))) {
-      if (in.readInt() != MAGIC || in.readInt() != 1 || in.readLong() != run)
+      if (in.readInt() != MAGIC) throw new IOException("Unsupported trace magic");
+      if (in.readInt() != 1 || in.readLong() != run)
         throw new IOException("Trace format or run identity mismatch");
       int completion = in.readUnsignedByte();
       if (run <= 0 || completion > 1)
@@ -47,7 +65,19 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
         long value = in.readLong();
         if (operation <= 0 || kind >= Kind.values().length)
           throw new IOException("Invalid trace event");
-        events.add(new Event(operation, Kind.values()[kind], value));
+        int worker = in.readInt();
+        int group = in.readInt();
+        long round = in.readLong();
+        int phase = in.readInt();
+        if (worker < 0
+            || worker > 64
+            || group < 0
+            || round < 0
+            || phase < 0
+            || (worker == 0 && (group != 0 || round != 0 || phase != 0))
+            || (worker > 0 && (group == 0 || round == 0)))
+          throw new IOException("Invalid worker trace identity");
+        events.add(new Event(operation, Kind.values()[kind], value, worker, group, round, phase));
       }
       if (in.readLong() != END || in.read() != -1)
         throw new IOException("Incomplete trace envelope");
@@ -66,6 +96,10 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
         out.writeInt(event.operation());
         out.writeByte(event.kind().ordinal());
         out.writeLong(event.value());
+        out.writeInt(event.worker());
+        out.writeInt(event.group());
+        out.writeLong(event.round());
+        out.writeInt(event.phase());
       }
       out.writeLong(END);
     }

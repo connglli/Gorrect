@@ -8,6 +8,6 @@ Build with JDK 21, CMake 3.24 or newer, and a C++17 compiler. Compatibility chec
 ./gradlew build
 ```
 
-The build checks generated cases and native loading on JDK 17 and 21. Build the CLI with `./gradlew :engine:installDist`; see [usage](./docs/usage.md) for target profiles, execution, offline verification, and replay.
+The build checks generated cases and native loading on JDK 17 and 21. Build the CLI with `./gradlew :engine:installDist`; see [usage](./docs/usage.md) for target profiles, concurrent/JIT fuzzing, offline verification, and replay.
 
 [Design](./docs/design.md) | [GIR](./docs/gir.md) | [Implementation](./docs/implementation.md) | [AGENTS.md](./AGENTS.md) | [docs/AGENTS.md](./docs/AGENTS.md)

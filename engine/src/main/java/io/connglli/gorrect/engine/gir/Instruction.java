@@ -3,7 +3,7 @@ package io.connglli.gorrect.engine.gir;
 import java.util.List;
 
 /**
- * Immutable statements and their execution contracts for validated GIR 1 programs.
+ * Immutable statements and their execution contracts for validated GIR programs.
  *
  * <p>Fresh binding names differ from all declarations in active scopes, including released
  * bindings. Reference operands are live handles or {@code null}; scalar operands are live scalar
@@ -93,6 +93,43 @@ public sealed interface Instruction {
    * It does not request garbage collection.
    */
   record Checkpoint(int id) implements Operation {}
+
+  /**
+   * Collection request. Preserves logical graph state and bindings; the VM integration decides how
+   * to request collection and records its actual progress separately. Consumes one step.
+   */
+  record Collect(int id) implements Operation {}
+
+  /**
+   * Worker barrier, permitted only directly in a worker body. All workers finish the preceding
+   * phase before any starts the next. Bindings survive. Every worker must have the same barrier
+   * count. A barrier and the following phase-start marker each consume one step.
+   */
+  record Barrier(int id) implements Operation {}
+
+  /**
+   * Fork/join block. Workers start together, have independent local scopes, and join before the
+   * caller continues. Workers access shared state through roots; they cannot capture caller
+   * bindings. Nested parallel blocks and worker checkpoints are unsupported.
+   *
+   * <p>Within each phase, a slot written by one worker must not be read or written by another. The
+   * oracle checks concrete root/field/element accesses, including aliases, before execution. Worker
+   * identities are assigned internally in declaration order, independently of names. The block
+   * consumes one control step; worker start/end, phase-start, and caller join markers each consume
+   * a step as well.
+   */
+  record Parallel(int id, List<Worker> workers) implements Instruction {
+    public Parallel {
+      workers = List.copyOf(workers);
+    }
+  }
+
+  /** A named declaration; its internal worker identity is separate from instruction identities. */
+  record Worker(int id, String name, List<Instruction> body) {
+    public Worker {
+      body = List.copyOf(body);
+    }
+  }
 
   /**
    * Consumes one control step, then executes the body in a child scope with outer bindings visible.

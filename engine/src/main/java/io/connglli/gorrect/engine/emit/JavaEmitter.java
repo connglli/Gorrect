@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
+import io.connglli.gorrect.protocol.ExecutionEvidence;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -15,6 +16,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
 /** Emits direct operations from GIR. Layout metadata describes fields, never expected values. */
@@ -29,6 +31,8 @@ public final class JavaEmitter {
   private final Map<String, String> types = new HashMap<>();
   private final Map<String, String> roots = new LinkedHashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
+  private final List<Instruction.Worker> workers = new ArrayList<>();
+  private int worker;
 
   private JavaEmitter(GirProgram program) {
     this.program = program;
@@ -41,6 +45,7 @@ public final class JavaEmitter {
 
   private Emission emit() {
     line("import io.connglli.gorrect.runtime.TargetSession;");
+    line("import io.connglli.gorrect.runtime.WorkerContext;");
     line("import io.connglli.gorrect.runtime.observe.NativeObserver;");
     line("import io.connglli.gorrect.protocol.HeapSnapshot;");
     line("public final class Case {");
@@ -59,14 +64,15 @@ public final class JavaEmitter {
       index++;
       if (shape.kind() != Shape.Kind.OBJECT) continue;
       line("public static final class " + type + " {");
-      line("public final int idWorker = 0, idSite;");
+      line("public final int idWorker, idSite;");
       line("public final long idOccurrence;");
       for (String field : names("f", shape.references())) line("public Object " + field + ";");
       for (String field : names("d", shape.data())) line("public long " + field + ";");
       line(
           "public "
               + type
-              + "(int site, long occurrence) { idSite = site; idOccurrence = occurrence; }");
+              + "(int worker, int site, long occurrence) { idWorker = worker; idSite = site;"
+              + " idOccurrence = occurrence; }");
       line("}");
       layouts.add(
           new ObservationLayout.ObjectType(
@@ -107,6 +113,18 @@ public final class JavaEmitter {
     line("private static void execute(TargetSession session) throws Exception {");
     block(program.body());
     line("}");
+    for (var declaration : workers) {
+      worker = declaration.id();
+      line(
+          "private static void "
+              + ExecutionEvidence.workerMethod(worker)
+              + "(TargetSession session, WorkerContext worker) throws Exception {");
+      line("worker.begin();");
+      block(declaration.body());
+      line("worker.end();");
+      line("}");
+    }
+    worker = 0;
     line("}");
     var rootFields = new LinkedHashMap<String, String>();
     roots.forEach((name, field) -> rootFields.put(field, name));
@@ -124,6 +142,10 @@ public final class JavaEmitter {
         case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
         case Instruction.Scope scope -> allocationCounters(scope.body());
         case Instruction.Repeat repeat -> allocationCounters(repeat.body());
+        case Instruction.Parallel parallel -> {
+          workers.addAll(parallel.workers());
+          parallel.workers().forEach(declaration -> allocationCounters(declaration.body()));
+        }
         default -> {}
       }
   }
@@ -170,10 +192,40 @@ public final class JavaEmitter {
         var owner = binding(op.owner());
         String name = declare(op.name(), null, op.id());
         line("long " + name + " = " + slot(owner.name(), owner.shape(), op.index(), false) + ";");
-        line("session.record(" + op.id() + ", 2, " + name + ");");
+        line(recorder() + ".record(" + op.id() + ", 2, " + name + ");");
         continue;
       }
       switch (instruction) {
+        case Instruction.Parallel parallel -> {
+          record(parallel.id(), false);
+          String ids =
+              parallel.workers().stream()
+                  .map(declaration -> Integer.toString(declaration.id()))
+                  .collect(Collectors.joining(","));
+          String tasks =
+              parallel.workers().stream()
+                  .map(
+                      declaration ->
+                          "context -> "
+                              + ExecutionEvidence.workerMethod(declaration.id())
+                              + "(session, context)")
+                  .collect(Collectors.joining(","));
+          line(
+              "session.parallel("
+                  + parallel.id()
+                  + ", new int[]{"
+                  + ids
+                  + "}, new TargetSession.WorkerTask[]{"
+                  + tasks
+                  + "}, Case.class);");
+          continue;
+        }
+        case Instruction.Barrier op -> {
+          line("worker.barrier(" + op.id() + ");");
+          continue;
+        }
+        case Instruction.Collect ignored ->
+            line((worker == 0 ? "session" : "worker") + ".collect();");
         case Instruction.Allocate op -> {
           var shape = shapes.get(op.shape());
           String name = declare(op.name(), shape, op.id());
@@ -270,7 +322,11 @@ public final class JavaEmitter {
   }
 
   private void record(int operation, boolean iteration) {
-    line("session.record(" + operation + ", " + (iteration ? 1 : 0) + ", 0);");
+    line(recorder() + ".record(" + operation + ", " + (iteration ? 1 : 0) + ", 0);");
+  }
+
+  private String recorder() {
+    return worker == 0 ? "session" : "worker";
   }
 
   private String declare(String name, Shape shape, int id) {
@@ -294,7 +350,8 @@ public final class JavaEmitter {
 
   private String allocation(Shape shape, int site, String occurrence) {
     return switch (shape.kind()) {
-      case OBJECT -> "new " + types.get(shape.name()) + "(" + site + ", " + occurrence + ")";
+      case OBJECT ->
+          "new " + types.get(shape.name()) + "(" + worker + ", " + site + ", " + occurrence + ")";
       case REFERENCE_ARRAY -> "new Object[" + shape.references() + "]";
       case DATA_ARRAY -> "new long[" + shape.data() + "]";
     };
@@ -307,7 +364,9 @@ public final class JavaEmitter {
               + name
               + ", "
               + JsonFiles.GSON.toJson(shape.name())
-              + ", 0, "
+              + ", "
+              + worker
+              + ", "
               + site
               + ", "
               + occurrence

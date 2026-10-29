@@ -19,6 +19,7 @@ final class Help {
         Usage: gorrect <command> [arguments]
 
         Commands:
+          fuzz    Generate and validate seeded concurrent stress workloads.
           probe   Check a target JVM and collector with a small graph test.
           run     Compile and execute a GIR workload, then verify its observations.
           verify  Recheck a saved run offline, without launching a target JVM.
@@ -29,6 +30,7 @@ final class Help {
         Select it with --profile; JVM settings belong in the profile.
 
         Example workflow (with a configured profile):
+          gorrect fuzz --profile profiles/local/target.json --duration 1m --seed 42
           gorrect probe --profile profiles/local/target.json
           gorrect run examples/cycle.gir --profile profiles/local/target.json --out runs/example
           gorrect verify runs/example
@@ -38,6 +40,7 @@ final class Help {
         directory under runs/. Use --out to choose that directory.
 
         Current support: HotSpot Serial GC, JDK 17+, named-root checkpoints.
+        Compiled stress uses a WhiteBox client and JIT settings from the profile.
         Use 'gorrect <command> --help' for arguments, options, and examples.
         -h, --help  Show help.
         """);
@@ -46,14 +49,27 @@ final class Help {
   static void command(String command, Set<String> options, PrintStream out) {
     out.println(
         switch (command) {
+          case "fuzz" ->
+              """
+              Usage: gorrect fuzz --profile FILE [--workload NAME] [--workers N]
+                                  [--duration TIME] [--seed N] [--out DIR]
+
+              Generate seeded graph workloads and validate them on the target JVM.
+              Workers mutate disjoint slots while retaining objects across collection,
+              allocations, calls, and barriers. concurrent-jit also requires evidence
+              of compiled worker frames and JIT controls configured in the profile.
+              Runs one target JVM at a time; workers are threads inside that JVM.
+              Saves each executable case under DIR/cases/ and campaign.json summarizes
+              outcomes, unmet requirements, and the seed needed to reproduce each case.
+              """;
           case "probe" ->
               """
               Usage: gorrect probe --profile FILE [--out DIR]
 
               Check that a target JVM, collector, and observer work together.
-              Compiles and runs a small built-in graph test, verifies its observation,
-              and reports the actual VM, collector, and observer capabilities.
-              Use this to check a profile before running your own workloads.
+              Runs a built-in graph workload and exercises the profile's required
+              concurrency or JIT controls. Verifies its observations and reports
+              the actual VM, collector, and observer capabilities.
               """;
           case "run" ->
               """
@@ -106,12 +122,24 @@ final class Help {
       out.println(
           "  --repeat N      Number of fresh runs, 1..1000 (default: 1). For N > 1,\n"
               + "                  results go into DIR/1, DIR/2, ... under the output directory.");
+    if (options.contains("--workload"))
+      out.println("  --workload NAME concurrent (default) or concurrent-jit.");
+    if (options.contains("--workers"))
+      out.println("  --workers N     Threads per case, 2..16 (default: 2).");
+    if (options.contains("--duration"))
+      out.println(
+          "  --duration TIME Campaign time budget, with ms, s, m, or h (default: 1m; max: 24h).");
+    if (options.contains("--seed"))
+      out.println("  --seed N        Signed 64-bit campaign seed (default: a fresh random seed).");
     out.println("  -h, --help      Show this help without running a case.");
     out.println();
     out.println("Example:");
     out.println(
         "  gorrect "
             + switch (command) {
+              case "fuzz" ->
+                  "fuzz --profile profiles/local/target.json --workload concurrent-jit --workers 4"
+                      + " --duration 1m --seed 42";
               case "probe" -> "probe --profile profiles/local/target.json";
               case "run" ->
                   "run examples/cycle.gir --profile profiles/local/target.json --out runs/example";

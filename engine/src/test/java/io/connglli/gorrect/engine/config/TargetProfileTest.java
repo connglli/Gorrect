@@ -20,6 +20,48 @@ class TargetProfileTest {
       """;
 
   @Test
+  void jitControlsRequireAnExplicitWhiteBoxClientAndStayOutOfVmArgs() throws IOException {
+    Path path = directory.resolve("profile.json");
+    Files.writeString(path, PROFILE);
+    var object = JsonFiles.read(path);
+    object.add("jit", new com.google.gson.JsonObject());
+    JsonFiles.write(path, object);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+    object.getAsJsonObject("support").addProperty("whitebox", "whitebox.jar");
+    JsonFiles.write(path, object);
+    var profile = TargetProfile.read(path);
+    assertEquals(4, profile.jit().level());
+    assertEquals(1, profile.jit().warmupRounds());
+    assertEquals(directory.resolve("whitebox.jar").toString(), profile.support().whitebox());
+    object.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of("-XX:+WhiteBoxAPI")));
+    JsonFiles.write(path, object);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "{\"level\":0}",
+        "{\"level\":5}",
+        "{\"warmupRounds\":-1}",
+        "{\"warmupRounds\":1.5}",
+        "{\"deadlineMillis\":0}",
+        "{\"deadlineMillis\":60001}",
+        "{\"unknown\":1}",
+        "true"
+      })
+  void rejectsInvalidJitSettings(String settings) throws IOException {
+    Path path = directory.resolve("profile.json");
+    Files.writeString(path, PROFILE);
+    var object = JsonFiles.read(path);
+    object.getAsJsonObject("support").addProperty("whitebox", "client.jar");
+    Files.writeString(path, "{\"jit\":" + settings + "}");
+    object.add("jit", JsonFiles.read(path).get("jit"));
+    JsonFiles.write(path, object);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+  }
+
+  @Test
   void resolvesPathsWithoutTouchingInstallations() throws IOException {
     var path = directory.resolve("profile.json");
     Files.writeString(path, PROFILE);

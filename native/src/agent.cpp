@@ -316,6 +316,14 @@ std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
 } // namespace
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) { return JNI_VERSION_1_8; }
+
+extern "C" JNIEXPORT jlong JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_gcFinishes(JNIEnv *env, jclass) {
+  return entry(env, []() -> jlong {
+    require_agent();
+    return (capabilities & 2) ? gc_finishes.load() : -1;
+  });
+}
 extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
   try {
     void *environment = nullptr;

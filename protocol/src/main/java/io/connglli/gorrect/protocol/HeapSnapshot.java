@@ -4,7 +4,7 @@ import java.util.List;
 
 /**
  * Raw evidence from one bounded heap walk. Tags identify physical objects within the target JVM.
- * Enum ordinals are wire values; reordering them requires a snapshot format version change.
+ * Enum ordinals are wire values and must stay aligned with the native writer.
  */
 public record HeapSnapshot(
     long run,

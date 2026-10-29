@@ -14,7 +14,7 @@ JDK 17 execution remains a separate compatibility check. Compilation with `--rel
 
 Follow the [profile and CLI ownership contract](../../../docs/implementation.md#jvm-integration). The stages below introduce each command with its underlying engine functionality.
 
-The following is proposed CLI syntax, not an implemented command:
+This future parallel-campaign form includes the planned `--jobs` option:
 
 ```bash
 gorrect fuzz --profile hotspot-g1.json \
@@ -61,11 +61,11 @@ Checkpoints with live GIR reference bindings remain unsupported rather than subs
 
 ## 5. Generate concurrent and JIT stress workloads
 
-Goal: deliver `fuzz` for concurrent and JIT stress with an exact oracle.
+Status: complete for the current HotSpot Serial integration. [GIR 1](../../../docs/gir.md) supplies named workers, structured start/join and barriers, collection requests, and stress requirements. The oracle checks concrete per-phase accesses, rejects cross-worker conflicts including aliases, and compares independent per-worker traces. Generated methods perform direct graph operations; telemetry contains no workload references.
 
-Add workers, start and join, barriers, safe publication, and disjoint or commuting mutations. Emit reusable methods and hot loops directly. Add separate warm-up objects or an explicit modeled prefix, per-worker scalar recording, local-root lifetime cases, and target-method compilation evidence through a HotSpot control bridge. Implement a small seeded generator and a bounded single-job `fuzz` loop with workload, seed, worker count, duration, and output options.
+The [CLI](../../../docs/usage.md) includes bounded, single-job `fuzz` with reproducible seeds, workload and worker selection, duration, and retained cases. Profiles own optional WhiteBox control settings. Modeled visits supply warm-up; installation queries and raw JFR frame witnesses remain separate evidence. Joint stress checks require the relevant overlap, compiled execution, and GC progress in one group visit. Campaign budget exhaustion is distinct from a target timeout.
 
-Complete when a CLI campaign generates overlapping mutators, allocation pressure, and compiled workload methods with exact checks after synchronization. Saved findings must replay through stage 4's execution path. Check local lifetimes across allocations and calls, and detect trace loss or missing synchronization evidence. Report semantic verdict and stress requirements separately; warm-up counts or code installation alone cannot prove compiled execution. Inspect bytecode and focused recordings to confirm direct graph operations and recording without per-mutation serialization.
+Verified a clean build, 180 Java tests, native checks, strict Javadoc, and JDK 17/21 compatibility. Selected HotSpot campaigns establish actual joint stress; interpreted launches retain a valid graph verdict while failing compiled coverage. Offline verification, exact-class replay without original support files, provenance, failure handling, bytecode, and missing/corrupted evidence checks pass. The [completed stage note](./completed-2026-10-29-stage5.md) records witness limits and client compatibility details.
 
 ## 6. Implement conditional reference histories
 

@@ -70,6 +70,9 @@ public final class NativeObserver {
     return capabilities0();
   }
 
+  /** Reported GC pause finishes, or -1 when the agent cannot observe GC events. */
+  public static native long gcFinishes();
+
   /** Evidence of installed code, not proof that a particular invocation executed that code. */
   public static boolean hasCompiledCode(Method method) {
     return wasCompiled0(Objects.requireNonNull(method));

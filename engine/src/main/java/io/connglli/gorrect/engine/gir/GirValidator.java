@@ -23,6 +23,10 @@ public final class GirValidator {
   private final Set<String> roots = new HashSet<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private int nextOperation = 1;
+  private int nextWorker = 1;
+  private int workerDepth = -1;
+  public static final Set<String> STRESS_REQUIREMENTS =
+      Set.of("concurrent-overlap", "compiled-execution", "gc-during-workers");
 
   private record Binding(Shape shape, boolean live) {}
 
@@ -44,6 +48,8 @@ public final class GirValidator {
 
   private void validateProgram(GirProgram program) {
     if (program.version() != 1) fail("Unsupported GIR version " + program.version());
+    if (!STRESS_REQUIREMENTS.containsAll(program.requirements()))
+      fail("Unsupported GIR stress requirements");
     for (var shape : program.shapes()) {
       name(shape.name());
       if (shapes.putIfAbsent(shape.name(), shape) != null) fail("Duplicate shape " + shape.name());
@@ -79,7 +85,8 @@ public final class GirValidator {
   }
 
   private static void initialReference(Value.Reference value, Set<ObjectId> ids) {
-    if (value.kind() != Value.ReferenceKind.STRONG) fail("GIR 1 requires strong references");
+    if (value.kind() != Value.ReferenceKind.STRONG)
+      fail("Executable GIR requires strong references");
     if (value.target() != null && !ids.contains(value.target())) {
       fail("Unknown initial reference target " + value.target());
     }
@@ -95,16 +102,52 @@ public final class GirValidator {
           fail("Internal instruction IDs must follow source order");
         }
         switch (instruction) {
+          case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
           case Instruction.Scope scope -> block(scope.body(), depth + 1);
           case Instruction.Repeat repeat -> {
             if (repeat.count() < 0) fail("Negative repeat count at " + repeat.id());
             block(repeat.body(), depth + 1);
           }
-          case Instruction.Operation operation -> operation(operation);
+          case Instruction.Operation operation -> {
+            if (operation instanceof Instruction.Barrier
+                && (workerDepth < 0 || depth != workerDepth))
+              fail("Barriers must be direct worker statements");
+            if (operation instanceof Instruction.Checkpoint && workerDepth >= 0)
+              fail("Worker checkpoints are unsupported; observe after join");
+            operation(operation);
+          }
         }
       }
     } finally {
       scopes.pop();
+    }
+  }
+
+  private void parallel(Instruction.Parallel parallel, int depth) {
+    if (workerDepth >= 0) fail("Parallel blocks cannot be nested in workers");
+    if (parallel.workers().isEmpty() || parallel.workers().size() > 16)
+      fail("Parallel blocks require 1..16 workers");
+    var names = new HashSet<String>();
+    var callerScopes = new ArrayDeque<>(scopes);
+    int barriers = -1;
+    try {
+      for (var worker : parallel.workers()) {
+        name(worker.name());
+        if (!names.add(worker.name()) || worker.id() != nextWorker++ || worker.id() > 64)
+          fail("Duplicate or invalid worker identity");
+        // Workers never inherit a caller's local bindings, including released-name reservations.
+        scopes.clear();
+        workerDepth = depth;
+        block(worker.body(), depth);
+        int count =
+            (int) worker.body().stream().filter(op -> op instanceof Instruction.Barrier).count();
+        if (barriers >= 0 && barriers != count) fail("Workers must have equal barrier counts");
+        barriers = count;
+      }
+    } finally {
+      workerDepth = -1;
+      scopes.clear();
+      scopes.addAll(callerScopes);
     }
   }
 
@@ -142,6 +185,8 @@ public final class GirValidator {
         scopes.peek().put(op.name(), new Binding(binding.shape(), false));
       }
       case Instruction.Checkpoint ignored -> {}
+      case Instruction.Collect ignored -> {}
+      case Instruction.Barrier ignored -> {}
     }
   }
 
