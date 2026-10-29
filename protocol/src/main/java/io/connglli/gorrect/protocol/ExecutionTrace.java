@@ -27,7 +27,11 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
     BARRIER,
     PHASE_START,
     WORKER_END,
-    JOIN
+    JOIN,
+    ACQUIRE,
+    ACQUIRE_END,
+    REFERENCE_STATE,
+    QUEUE_POLL
   }
 
   public record Event(

@@ -11,11 +11,15 @@ public sealed interface Value {
   }
 
   /** A null target preserves the slot's kind, allowing verification to detect strength changes. */
-  record Reference(ReferenceKind kind, ObjectId target) implements Value {
+  record Reference(ReferenceKind kind, ObjectId target, WrapperId wrapper) implements Value {
     public static final Reference NULL = new Reference(ReferenceKind.STRONG, null);
 
     public Reference {
       Objects.requireNonNull(kind);
+    }
+
+    public Reference(ReferenceKind kind, ObjectId target) {
+      this(kind, target, null);
     }
 
     public static Reference strong(ObjectId target) {

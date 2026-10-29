@@ -1,20 +1,19 @@
 package io.connglli.gorrect.engine.gir;
 
+import io.connglli.gorrect.engine.model.Value;
 import java.util.List;
 
 /**
- * Immutable statements and their execution contracts for validated GIR programs.
+ * Immutable GIR statements and their execution contracts.
  *
- * <p>Fresh binding names differ from all declarations in active scopes, including released
- * bindings. Reference operands are live handles or {@code null}; scalar operands are live scalar
- * bindings or signed 64-bit literals. Field and array access requires a live, non-null owner handle
- * and an in-range index in the specified reference or data namespace, according to the owner's
- * shape.
+ * <p>Fresh names exclude all declarations in active scopes, including released bindings. Reference
+ * operands are live handles or {@code null}; scalar operands are live scalars or signed 64-bit
+ * literals. Slot access requires a live, non-null owner and an in-range index in its shape's
+ * reference or data namespace.
  *
- * <p>Each statement changes only the state described by its contract. Invalid preconditions raise
- * {@link GirException}; exhausted checking budgets raise {@link
- * io.connglli.gorrect.engine.oracle.OracleLimitException}. {@link GirValidator} checks static
- * requirements; null dereferences and target-shape assertions are checked during execution.
+ * <p>Statements change only the specified state. {@link GirValidator} checks static contracts;
+ * execution checks null owners and target shapes. Invalid preconditions raise {@link GirException};
+ * exhausted checking budgets raise {@link io.connglli.gorrect.engine.oracle.OracleLimitException}.
  */
 public sealed interface Instruction {
   /** Internal preorder index, assigned by the frontend. */
@@ -27,43 +26,76 @@ public sealed interface Instruction {
   sealed interface Operation extends Instruction {}
 
   /**
-   * Requires a fresh name and a declared shape. Creates a distinct object with that shape, all
-   * references null, and all data zero, then binds the name to a strong reference to it. The
-   * identity uses this allocation site and its next occurrence; named roots remain unchanged.
+   * Requires a fresh name and declared shape. Allocates a distinct object with null references and
+   * zero data, binding a strong handle to it. Identity uses this site and its next occurrence.
    */
   record Allocate(int id, String name, String shape) implements Operation {}
 
   /**
-   * Requires a declared root, declared shape, and fresh destination name. Reads the root once and
-   * binds a new strong handle to the same target, including null. A non-null target must have
-   * exactly the declared shape. The root is unchanged, and later root writes do not change the
-   * handle.
+   * Requires a declared root and shape and a fresh name. Reads the root once into a strong handle,
+   * including null. A non-null target must have exactly the declared shape. Later root writes do
+   * not change the handle.
    */
   record ReadRoot(int id, String name, String shape, String root) implements Operation {}
 
   /**
-   * Requires an existing named root and a reference operand. Replaces that root's target with the
-   * operand's current target; the target may have any shape. Null clears the target while
-   * preserving the named root slot. The source binding and other references remain unchanged.
+   * Requires an existing root and reference operand. Replaces its target with the operand's current
+   * target, of any shape or null. Clearing preserves the root slot.
    */
   record WriteRoot(int id, String root, Operand value) implements Operation {}
 
   /**
    * Requires a valid reference-slot access, declared destination shape, and fresh name. Reads the
-   * slot once and binds a new strong handle to its current target, including null. A non-null
-   * target must have exactly the destination shape. Later writes to the source slot do not change
-   * the handle.
+   * strong slot once and binds a new strong handle to its current target, including null. Soft/weak
+   * slots require {@link Acquire}. A non-null target must have exactly the destination shape. Later
+   * writes to the source slot do not change the handle.
    */
   record ReadReference(int id, String name, String shape, String owner, int index)
       implements Operation {}
 
   /**
-   * Requires a valid reference-slot access and a reference operand. Replaces only that slot's
-   * target with the operand's current target, which may have any shape or be null. The owner
-   * retains its identity and shape, and the slot retains its index and strong kind. The source
-   * binding keeps its value and lifetime.
+   * Requires a valid reference slot and reference operand. Replaces its value with the operand's
+   * current target, of any shape or null. Strong writes store it directly; soft/weak writes create
+   * a fresh wrapper incarnation, even for null.
    */
-  record WriteReference(int id, String owner, int index, Operand value) implements Operation {}
+  record WriteReference(int id, String owner, int index, Operand value, Value.ReferenceKind kind)
+      implements Operation {
+    public WriteReference(int id, String owner, int index, Operand value) {
+      this(id, owner, index, value, Value.ReferenceKind.STRONG);
+    }
+  }
+
+  /**
+   * Reads a soft/weak slot exactly once. A non-null result must have the declared shape and is held
+   * strongly in the child scope while its body executes; null skips the body. The result's binding
+   * expires at scope exit and cannot be released early. Checkpoints inside the body are
+   * unsupported. Acquisitions consume one step and a successful scope exit consumes one.
+   */
+  record Acquire(int id, String name, String shape, String owner, int index, List<Instruction> body)
+      implements Instruction {
+    public Acquire {
+      body = List.copyOf(body);
+    }
+  }
+
+  /**
+   * Clears the current wrapper explicitly. This permits clearing a protected referent, without
+   * enqueueing it.
+   */
+  record ClearReference(int id, String owner, int index) implements Operation {}
+
+  /**
+   * Binds scalar 1 if refersTo(null) reports cleared, else 0, without acquiring a strong referent.
+   */
+  record ReferenceState(int id, String name, String owner, int index) implements Operation {}
+
+  /**
+   * Polls the case's reference queue once without acquiring a referent. Records the delivered
+   * incarnation or an empty result. GC-cleared wrappers may arrive later, in any order, once each;
+   * an empty result establishes no processing progress. Initially null wrappers and explicitly
+   * cleared wrappers are not enqueued by those actions.
+   */
+  record PollQueue(int id) implements Operation {}
 
   /**
    * Requires a valid data-slot access and a fresh destination name. Reads the signed 64-bit value
@@ -73,9 +105,8 @@ public sealed interface Instruction {
   record ReadData(int id, String name, String owner, int index) implements Operation {}
 
   /**
-   * Requires a valid data-slot access and a scalar operand. Replaces only that slot's value with
-   * the operand's current signed 64-bit value. The source binding, owner shape, and other slots are
-   * unchanged.
+   * Requires a valid data slot and scalar operand. Replaces that slot with the operand's current
+   * signed 64-bit value.
    */
   record WriteData(int id, String owner, int index, Operand value) implements Operation {}
 
@@ -88,9 +119,9 @@ public sealed interface Instruction {
 
   /**
    * Records immutable obligations after preceding statements: named roots, live reference handles,
-   * and their strong closure with exact contents. Each execution appends a visit numbered from one
-   * for this instruction. Heap and bindings are unchanged; step and snapshot budgets are charged.
-   * It does not request garbage collection.
+   * and their accessible closure with exact contents under the selected legal history. Each
+   * execution appends a visit numbered from one for this instruction. Heap and bindings are
+   * unchanged; step and snapshot budgets are charged. It does not request garbage collection.
    */
   record Checkpoint(int id) implements Operation {}
 
@@ -108,15 +139,13 @@ public sealed interface Instruction {
   record Barrier(int id) implements Operation {}
 
   /**
-   * Fork/join block. Workers start together, have independent local scopes, and join before the
-   * caller continues. Workers access shared state through roots; they cannot capture caller
-   * bindings. Nested parallel blocks and worker checkpoints are unsupported.
+   * Starts workers together with independent scopes and shared roots; the caller continues after
+   * all join. Capturing caller bindings, nested parallelism, and worker checkpoints are
+   * unsupported.
    *
-   * <p>Within each phase, a slot written by one worker must not be read or written by another. The
-   * oracle checks concrete root/field/element accesses, including aliases, before execution. Worker
-   * identities are assigned internally in declaration order, independently of names. The block
-   * consumes one control step; worker start/end, phase-start, and caller join markers each consume
-   * a step as well.
+   * <p>Per phase, a slot written by one worker cannot be accessed by another. Concrete checks,
+   * including aliases, precede target execution. The block, worker start/end, phase-start, and
+   * caller join markers each consume one step.
    */
   record Parallel(int id, List<Worker> workers) implements Instruction {
     public Parallel {
@@ -124,7 +153,10 @@ public sealed interface Instruction {
     }
   }
 
-  /** A named declaration; its internal worker identity is separate from instruction identities. */
+  /**
+   * A named declaration with an internal declaration-order worker ID, separate from instruction
+   * IDs.
+   */
   record Worker(int id, String name, List<Instruction> body) {
     public Worker {
       body = List.copyOf(body);

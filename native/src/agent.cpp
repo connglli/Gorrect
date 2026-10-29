@@ -95,6 +95,9 @@ const ClassInfo *type_for(jlong tag) {
   return &classes[static_cast<std::size_t>(-tag - 1)];
 }
 bool is_array_tag(jlong tag) { return tag >= array_base; }
+bool logical_type(const ClassInfo *type) {
+  return type && (type->kind == 0 || type->kind == 4 || type->kind == 5);
+}
 
 // Reserve all callback storage before FollowReferences. The callbacks neither allocate nor call
 // JNI.
@@ -175,8 +178,8 @@ jint JNICALL reference_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapRefe
   auto type = type_for(class_tag);
   auto owner = type_for(referrer_class_tag);
   auto root_class = source ? type_for(*source) : nullptr;
-  bool target_workload = (type && type->kind == 0) || is_array_tag(*target);
-  bool source_workload = (owner && owner->kind == 0) || (source && is_array_tag(*source));
+  bool target_workload = logical_type(type) || is_array_tag(*target);
+  bool source_workload = logical_type(owner) || (source && is_array_tag(*source));
   bool root_field =
       kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && root_class && root_class->kind == 3;
   if (*target < 0)
@@ -247,7 +250,7 @@ jint JNICALL primitive_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapRefe
   auto metadata =
       kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD ? type_for(*object) : type_for(class_tag);
   // A primitive callback can precede the object's reference callback; assign its owner tag here.
-  if (metadata && (metadata->kind == 0 || metadata->kind == 3))
+  if (logical_type(metadata) || (metadata && metadata->kind == 3))
     capture.add({2, capture.tag(object), info->field.index, type, primitive_bits(value, type),
                  class_tag, 0, 0});
   return capture.full ? JVMTI_VISIT_ABORT : 0;
@@ -341,7 +344,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
     desired.can_generate_compiled_method_load_events =
         available.can_generate_compiled_method_load_events;
     check(jvmti->AddCapabilities(&desired));
-    capabilities = 1 | (desired.can_generate_garbage_collection_events ? 2 : 0) |
+    capabilities = 1 | 16 | (desired.can_generate_garbage_collection_events ? 2 : 0) |
                    (desired.can_generate_compiled_method_load_events ? 4 : 0);
     jvmtiEventCallbacks callbacks{};
     callbacks.GarbageCollectionStart = gc_start;
@@ -386,7 +389,7 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
     for (jsize index = 0; index < count; ++index) {
       auto type = static_cast<jclass>(env->GetObjectArrayElement(types, index));
       jint kind = values[static_cast<std::size_t>(index)];
-      if (kind < 0 || kind > 3)
+      if (kind < 0 || kind > 5)
         throw std::runtime_error("Unknown class kind");
       jlong previous = 0;
       check(jvmti->GetTag(type, &previous));
@@ -400,6 +403,45 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
         throw std::runtime_error("Reference arrays must use Object[]");
       if (kind == 2 && metadata.signature != "[J")
         throw std::runtime_error("Data arrays must use long[]");
+      if (kind == 4 || kind == 5) {
+        auto parent = env->GetSuperclass(type);
+        if (!parent || signature(parent) != (kind == 4 ? "Ljava/lang/ref/SoftReference;"
+                                                       : "Ljava/lang/ref/WeakReference;")) {
+          env->DeleteLocalRef(parent);
+          throw std::runtime_error(
+              "Reference wrappers require direct SoftReference/WeakReference subclasses");
+        }
+        env->DeleteLocalRef(parent);
+        std::vector<jclass> hierarchy;
+        if (env->PushLocalFrame(32) != JNI_OK)
+          throw std::bad_alloc();
+        for (auto current = static_cast<jclass>(env->NewLocalRef(type)); current;
+             current = env->GetSuperclass(current))
+          hierarchy.push_back(current);
+        // JVMTI indices include every declared field, starting at Object, even static fields.
+        // The supported reference hierarchy has no interfaces contributing additional indices.
+        jint field_index = 0;
+        for (auto level = hierarchy.rbegin(); level != hierarchy.rend(); ++level) {
+          JvmtiMemory<jclass> interfaces;
+          jint interface_count = 0;
+          check(jvmti->GetImplementedInterfaces(*level, &interface_count, &interfaces.data));
+          if (interface_count != 0)
+            throw std::runtime_error("Reference interfaces are unsupported");
+          JvmtiMemory<jfieldID> fields;
+          jint count_fields = 0;
+          check(jvmti->GetClassFields(*level, &count_fields, &fields.data));
+          for (jint i = 0; i < count_fields; ++i) {
+            JvmtiMemory<char> name, descriptor;
+            jint modifiers = 0;
+            check(
+                jvmti->GetFieldName(*level, fields.data[i], &name.data, &descriptor.data, nullptr));
+            check(jvmti->GetFieldModifiers(*level, fields.data[i], &modifiers));
+            metadata.fields.push_back(
+                {field_index++, modifiers, ascii(name.data), ascii(descriptor.data)});
+          }
+        }
+        env->PopLocalFrame(nullptr);
+      }
       if (kind == 0 || kind == 3) {
         // This restriction makes GetClassFields order match heap callback field indices.
         // Supporting inheritance/interfaces requires resolving their JVMTI index contributions.

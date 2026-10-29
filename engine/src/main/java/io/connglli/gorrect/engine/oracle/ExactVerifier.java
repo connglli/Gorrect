@@ -36,6 +36,16 @@ public final class ExactVerifier {
   public static Result verify(Graph expected, Graph observed, boolean complete) {
     if (!complete) return new Result(Verdict.INCONCLUSIVE, List.of("Incomplete observation"));
     var required = expected.required();
+    return compare(required, observed);
+  }
+
+  /** Compares all still-accessible referents chosen by a legal reference-history state. */
+  public static Result verifyAccessible(Graph expected, Graph observed, boolean complete) {
+    if (!complete) return new Result(Verdict.INCONCLUSIVE, List.of("Incomplete observation"));
+    return compare(expected.accessible(), observed);
+  }
+
+  private static Result compare(Graph required, Graph observed) {
     var differences = new ArrayList<String>();
     bindings("root", required.roots(), observed.roots(), differences);
     bindings("handle", required.handles(), observed.handles(), differences);

@@ -5,11 +5,27 @@ import java.util.List;
 import java.util.Map;
 
 /** Emitted field descriptions only; this contains no predicted targets or payload values. */
-public record ObservationLayout(List<ObjectType> objects, List<Shape> arrays, Roots roots) {
+public record ObservationLayout(
+    List<ObjectType> objects, List<Shape> arrays, Roots roots, List<ReferenceType> references) {
   public ObservationLayout {
     objects = List.copyOf(objects);
     arrays = List.copyOf(arrays);
+    references = references == null ? List.of() : List.copyOf(references);
   }
+
+  public ObservationLayout(List<ObjectType> objects, List<Shape> arrays, Roots roots) {
+    this(objects, arrays, roots, List.of());
+  }
+
+  /** Actual wrapper metadata roles; inherited fields use captured JVMTI indices. */
+  public record ReferenceType(
+      String signature,
+      io.connglli.gorrect.engine.model.Value.ReferenceKind kind,
+      String worker,
+      String site,
+      String occurrence,
+      String slot,
+      String referent) {}
 
   /**
    * Maps a JVM class signature to logical slots. Reference and data field names are in logical slot

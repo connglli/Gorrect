@@ -1,0 +1,32 @@
+gir 1;
+shape N object 2 1;
+object 1 N [soft(2), weak(2)] [0];
+object 2 N [null, null] [7];
+root main = 1;
+root saved = null;
+
+program {
+  scope {
+    read-root owner N main;
+    acquire held N owner 0 {
+      allocate child N;
+      write-data child 0 9;
+      write-ref held 0 child;
+    }
+    collect;
+    acquire held_again N owner 0 {
+      read-ref child N held_again 0;
+      write-root saved child;
+      collect;
+    }
+    is-cleared cleared owner 0;
+    write-data owner 0 cleared;
+    clear-ref owner 0;
+    write-weak owner 1 null;
+    clear-ref owner 1;
+    poll-queue;
+  }
+  acquired: checkpoint;
+  collect;
+  finished: checkpoint;
+}

@@ -5,6 +5,7 @@ import io.connglli.gorrect.engine.model.HeapObject;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.lang.reflect.Modifier;
@@ -79,6 +80,7 @@ public final class SnapshotProjector {
     private final Map<Slot, HeapSnapshot.Record> elements = new HashMap<>();
     private final Set<Long> visitedClasses = new HashSet<>();
     private final Map<Long, ObjectId> identities = new HashMap<>();
+    private final Map<Long, Value.Reference> wrappers = new HashMap<>();
 
     Decoder(HeapSnapshot snapshot, ObservationLayout layout) {
       this.snapshot = snapshot;
@@ -92,6 +94,10 @@ public final class SnapshotProjector {
       require(
           (snapshot.capabilities() & HeapSnapshot.TAGGING) != 0,
           "Object tagging evidence is unavailable");
+      require(
+          layout.references().isEmpty()
+              || (snapshot.capabilities() & HeapSnapshot.REFERENCE_FIELDS) != 0,
+          "Non-strengthening reference-field capture is unavailable");
       // Resolve logical field roles against actual VM metadata, never declaration-order guesses.
       for (var type : snapshot.classes()) {
         require(
@@ -170,7 +176,9 @@ public final class SnapshotProjector {
         long tag = entry.getKey();
         var record = entry.getValue();
         var type = classes.get(integer(record.b()));
-        require(type != null, "Unregistered object class at physical tag " + tag);
+        // Reference bookkeeping can lead to opaque VM queue objects. Logical fields still require
+        // mapped node or wrapper targets; opaque records never become guessed graph objects.
+        if (type == null || isWrapper(type)) continue;
         ObjectId id;
         if (type.kind() == HeapSnapshot.ClassKind.OBJECT) {
           var resolved = objectTypes.get(type.id());
@@ -200,11 +208,48 @@ public final class SnapshotProjector {
         require(used.add(id), "Duplicate logical object identity " + id);
         identities.put(tag, id);
       }
+      for (var layout : layout.references()) {
+        var type = type(layout.signature());
+        require(
+            isWrapper(type)
+                && (type.kind() == HeapSnapshot.ClassKind.SOFT_REFERENCE)
+                    == (layout.kind() == Value.ReferenceKind.SOFT),
+            "Wrapper class kind mismatch");
+        var roles = new HashSet<String>();
+        var worker = identityField(type, layout.worker(), "I", roles);
+        var site = identityField(type, layout.site(), "I", roles);
+        var occurrence = identityField(type, layout.occurrence(), "J", roles);
+        var slot = identityField(type, layout.slot(), "I", roles);
+        var referent = field(type, layout.referent(), roles);
+        require(
+            !Modifier.isStatic(referent.modifiers())
+                && referent.descriptor().equals("Ljava/lang/Object;"),
+            "Invalid referent metadata");
+        for (var entry : objects.entrySet()) {
+          long tag = entry.getKey();
+          if (entry.getValue().b() != type.id()) continue;
+          var id =
+              new WrapperId(
+                  integer(primitive(tag, worker, INT)),
+                  integer(primitive(tag, site, INT)),
+                  primitive(tag, occurrence, LONG),
+                  integer(primitive(tag, slot, INT)));
+          var edge = references.get(new Slot(tag, referent.index()));
+          ObjectId target = edge == null ? null : identities.get(edge.b());
+          require(edge == null || target != null, "Unmapped non-null referent");
+          wrappers.put(tag, new Value.Reference(layout.kind(), target, id));
+        }
+      }
+      require(
+          wrappers.values().stream().map(Value.Reference::wrapper).distinct().count()
+              == wrappers.size(),
+          "Duplicate wrapper incarnation");
       validateFieldRecords();
       var heap = new HashMap<ObjectId, HeapObject>();
       for (var entry : objects.entrySet()) {
         long tag = entry.getKey();
         var type = classes.get(integer(entry.getValue().b()));
+        if (type == null || isWrapper(type)) continue;
         Shape shape;
         var refs = new ArrayList<Value.Reference>();
         var data = new ArrayList<Long>();
@@ -291,7 +336,8 @@ public final class SnapshotProjector {
             continue;
           }
           require(
-              type.kind() == HeapSnapshot.ClassKind.OBJECT && record.c() == FIELD,
+              (type.kind() == HeapSnapshot.ClassKind.OBJECT || isWrapper(type))
+                  && record.c() == FIELD,
               "Unexpected object edge kind");
         }
         if (record.kind() == HeapSnapshot.Kind.REFERENCE
@@ -361,9 +407,16 @@ public final class SnapshotProjector {
       if (record == null) return Value.Reference.NULL;
       require(record.c() == kind, "Reference kind mismatch");
       var id = identities.get(record.b());
+      var wrapper = wrappers.get(record.b());
+      if (wrapper != null) return wrapper;
       require(id != null, "Unmapped non-null reference target " + record.b());
       return Value.Reference.strong(id);
     }
+  }
+
+  private static boolean isWrapper(HeapSnapshot.ClassInfo type) {
+    return type.kind() == HeapSnapshot.ClassKind.SOFT_REFERENCE
+        || type.kind() == HeapSnapshot.ClassKind.WEAK_REFERENCE;
   }
 
   private static boolean isReference(String descriptor) {
