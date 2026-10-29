@@ -83,13 +83,13 @@ Native calls and control traffic occur at the observation and coordination point
 
 ## Native observer
 
-The C++ library uses JNI to expose observation requests and JVMTI to inspect the target. It receives generated layout descriptions, not the expected graph. Class metadata identifies fields and array elements without guessing object headers or field offsets.
+The C++ library uses JNI to expose observation requests and JVMTI to inspect the target under the [observation contract](./observation.md). It receives layout descriptions, not the expected graph. Class metadata identifies fields and array elements without guessing object headers or field offsets.
 
 Heap callbacks capture object identities, references, relevant roots, sizes, and requested data into bounded native storage. The engine decodes the capture into a logical graph and retains both forms. Unknown fields, schema mismatches, and incomplete captures are explicit results rather than silently discarded records.
 
 Heap callbacks obey JVMTI's callback restrictions and do not call Java. The observer avoids persistent strong JNI references to workload objects. Native failures are reported through the runtime or protocol; C++ exceptions must not escape JNI or JVMTI entry points.
 
-The observer records available compilation and collection events. JVMTI GC start and finish notifications describe stop-the-world pauses, so concurrent collector phases require additional evidence from the JVM integration.
+The observer records compilation and collection events where available. Their coverage and heap-walk effects are specified in the [observation contract](./observation.md#coverage-and-observer-effects); JVM integrations supply additional evidence required by the case.
 
 ## JVM integration
 
