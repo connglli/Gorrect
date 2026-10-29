@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.model.HeapObject;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -28,6 +29,7 @@ final class GraphMachine {
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private final Map<Integer, Long> occurrences = new HashMap<>();
   private final List<OracleResult.Checkpoint> checkpoints = new ArrayList<>();
+  private final List<ExecutionTrace.Event> events = new ArrayList<>();
   private long steps;
   private long slots;
   private long snapshotCells;
@@ -64,9 +66,18 @@ final class GraphMachine {
     scopes.pop();
   }
 
-  void step() {
+  void step(int operation, boolean iteration) {
     requireStep();
     steps++;
+    events.add(
+        new ExecutionTrace.Event(
+            operation,
+            iteration ? ExecutionTrace.Kind.ITERATION : ExecutionTrace.Kind.OPERATION,
+            0));
+  }
+
+  List<ExecutionTrace.Event> events() {
+    return List.copyOf(events);
   }
 
   long steps() {
@@ -83,6 +94,7 @@ final class GraphMachine {
   void apply(Instruction.Operation operation) {
     if (operation.id() <= 0) throw new GirException("Invalid operation ID");
     requireStep();
+    long read = 0;
     switch (operation) {
       case Instruction.Allocate op -> allocate(op);
       case Instruction.ReadRoot op -> {
@@ -115,7 +127,8 @@ final class GraphMachine {
       case Instruction.ReadData op -> {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), false);
-        bind(op.name(), op.id(), new Value.Scalar(target.object().data().get(op.index())));
+        read = target.object().data().get(op.index());
+        bind(op.name(), op.id(), new Value.Scalar(read));
       }
       case Instruction.WriteData op -> {
         var target = target(op.owner(), op.index(), false);
@@ -142,6 +155,13 @@ final class GraphMachine {
       }
     }
     steps++;
+    events.add(
+        new ExecutionTrace.Event(
+            operation.id(),
+            operation instanceof Instruction.ReadData
+                ? ExecutionTrace.Kind.SCALAR_READ
+                : ExecutionTrace.Kind.OPERATION,
+            read));
   }
 
   private void allocate(Instruction.Allocate op) {

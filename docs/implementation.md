@@ -101,13 +101,15 @@ The target-side bridge implements the supported collection requests, compilation
 
 Commands select the profile with `--profile`; profile fields have no CLI equivalents or overrides. CLI options control generation and campaigns. The integration verifies the actual collector and capabilities against case and profile requirements, reporting unsupported requirements without substitution or weaker checks.
 
+The implemented commands and profile format are specified in [usage.md](./usage.md).
+
 The common observer is reused where it satisfies the target's observation contract. A JVM that needs another observation implementation must still produce the same protocol records. Adding a JVM extends its integration without changing GIR or the oracle's validation rules.
 
 ## Runner and protocol
 
 The runner owns process startup, phase and run deadlines, control communication, output capture, termination, and artifact retention. A campaign can run several target JVM jobs; each job has its own generated worker threads. These two forms of parallelism have separate limits.
 
-The engine and runtime exchange versioned control messages over a local connection, separate from JVM stdout and stderr. Messages identify the run, capabilities, requested phase, checkpoint, completion, or failure. Bulk trace and snapshot data are files rather than per-operation control messages.
+The engine and runtime exchange versioned control messages over a Unix domain socket, separate from JVM stdout and stderr. Messages identify the run, capabilities, requested phase, checkpoint, completion, or failure. Bulk trace and snapshot data are files rather than per-operation control messages.
 
 The protocol unit owns message and record definitions and their Java codecs. Records carry sufficient identity and completion information to detect missing data or a file from another run. Readers reject malformed data and incompatible versions.
 
@@ -122,9 +124,12 @@ runs/<run-id>/
     case.gir
     manifest.json
     generated/
+    support/
     traces/
     snapshots/
     logs/
+    target.properties
+    execution.json
     result.json
 ```
 

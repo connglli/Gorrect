@@ -51,13 +51,13 @@ Portability limits remain explicit: the selected OpenJ9 compiled-local probe pre
 
 ## 4. Deliver profiles and the sequential CLI
 
-Goal: execute and investigate saved GIR cases through the CLI.
+Status: complete for HotSpot Serial GC and named-root observation. The [CLI contract](../../../docs/usage.md) defines versioned profiles, commands, artifacts, and result statuses. `probe`, `run`, `verify`, and repeated `replay` share the execution and verification path; profile fields have no command-line overrides.
 
-Implement versioned JSON profile loading and validation, then expose `probe`, `run`, `verify`, and basic `replay`. Connect direct Java emission, layout descriptions, compilation, the runtime endpoint, control protocol, runner, native capture, and exact verification. Start with one HotSpot collector. Retain profile contents, resolved launch settings, artifact identities, source, classes, observations, logs, and results. Keep local profiles and generated artifacts excluded from Git.
+Generated Java performs direct graph operations. A bounded scalar recorder supplies operation order and data reads; a Unix domain socket carries versioned startup and checkpoint messages. Run bundles retain resolved profile data, the launch environment, installation and compiler identities, source, layout, exact classes, bundled support libraries, observations, and diagnostics. Offline verification needs no target installation. Replay restores recorded settings and environment, checks executable provenance, and records installation changes.
 
-Complete when hand-written GIR cases run on JDK 17 and a newer supported JDK. Profile validation must reject malformed data, unknown fields, conflicting settings, and unsupported requirements; the CLI must expose no profile-field overrides. `probe` reports actual capabilities. `verify` works offline without the original profile file or target installation. `replay` reuses saved classes and profile settings, supports repeated runs, and records changes to target or support artifacts.
+Verified JDK 17/21 execution, fresh object and array identities, aliases, cycles, loops, repeated checkpoints, scalar reads, offline checking, exact-class replay, and changed launchers. Negative checks cover strict profile parsing, conflicting flags, invalid GIR, checking limits, missing and corrupted evidence, buffer exhaustion, compilation and startup failures, malformed control, crashes, startup/run deadlines, partial control frames, and socket cleanup after success or failure. The packaged CLI also passes the selected HotSpot fastdebug target; the OpenJ9 driver reports unsupported explicitly.
 
-Corrupted graphs and traces must fail the appropriate checks. Compilation failure, startup failure, crashes, deadlines, and incomplete artifacts must retain diagnostics and distinct results. Define readable summaries, machine-readable results, and exit statuses that preserve execution outcome, semantic verdict, and unmet requirements.
+Checkpoints with live GIR reference bindings remain unsupported rather than substituting synthetic roots. The named-root diagnostic profile permits the observer effects described in the [observation contract](../../../docs/observation.md). Concurrent/JIT generation, additional collectors, and the OpenJ9 driver follow in their planned stages.
 
 ## 5. Generate concurrent and JIT stress workloads
 
