@@ -1,0 +1,49 @@
+import java.time.Duration
+
+plugins {
+    id 'java-library'
+}
+
+sourceSets {
+    smoke {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+
+configurations {
+    smokeImplementation.extendsFrom implementation
+    smokeRuntimeOnly.extendsFrom runtimeOnly
+    nativeObserver {
+        canBeConsumed = false
+        canBeResolved = true
+    }
+}
+
+dependencies {
+    implementation project(':protocol')
+    nativeObserver project(path: ':native', configuration: 'observerLibrary')
+}
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    def smokeTest = tasks.register("nativeSmoke${javaVersion}", JavaExec) {
+        group = 'verification'
+        description = "Checks JNI and JVMTI loading on Java ${javaVersion}."
+        dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
+        classpath = sourceSets.smoke.runtimeClasspath
+        mainClass = 'io.connglli.gorrect.runtime.NativeSmoke'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(javaVersion)
+        }
+        timeout = Duration.ofSeconds(60)
+        doFirst {
+            def library = configurations.nativeObserver.singleFile.absolutePath
+            setJvmArgs(["-agentpath:${library}"])
+            setArgs([library])
+        }
+    }
+
+    tasks.named('check') {
+        dependsOn smokeTest
+    }
+}

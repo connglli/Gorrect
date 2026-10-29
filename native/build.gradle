@@ -1,0 +1,43 @@
+plugins {
+    id 'base'
+    id 'jvm-toolchains'
+}
+
+def cmakeDirectory = layout.buildDirectory.dir('cmake')
+def installDirectory = layout.buildDirectory.dir('install')
+def observerLibraryFile = layout.buildDirectory.file("install/lib/${System.mapLibraryName('gorrect_observer')}")
+def engineCompiler = javaToolchains.compilerFor {
+    languageVersion = JavaLanguageVersion.of(rootProject.engineJavaVersion)
+}
+
+tasks.register('configureNative', Exec) {
+    doFirst {
+        commandLine 'cmake', '-S', projectDir, '-B', cmakeDirectory.get().asFile,
+                '-DCMAKE_BUILD_TYPE=RelWithDebInfo',
+                "-DCMAKE_INSTALL_PREFIX=${installDirectory.get().asFile}",
+                "-DJAVA_HOME=${engineCompiler.get().metadata.installationPath.asFile}"
+    }
+}
+
+def buildNative = tasks.register('buildNative', Exec) {
+    dependsOn tasks.named('configureNative')
+    commandLine 'cmake', '--build', cmakeDirectory.get().asFile,
+            '--config', 'RelWithDebInfo', '--target', 'install', '--parallel'
+}
+
+configurations {
+    observerLibrary {
+        canBeConsumed = true
+        canBeResolved = false
+    }
+}
+
+artifacts {
+    add('observerLibrary', observerLibraryFile) {
+        builtBy buildNative
+    }
+}
+
+tasks.named('assemble') {
+    dependsOn buildNative
+}
