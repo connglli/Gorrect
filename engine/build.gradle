@@ -86,6 +86,9 @@ tasks.named('processTestResources') {
     from(rootProject.file('examples/references.gir')) {
         into 'cases'
     }
+    from(rootProject.file('examples/contended.gir')) {
+        into 'cases'
+    }
     from(rootProject.file('docs/gir.md')) {
         into 'docs'
     }

@@ -14,6 +14,21 @@ class ReferenceHistoryTest {
   @TempDir Path directory;
 
   @Test
+  void validatesPositionsPerWorkerWithoutAGlobalRecordOrder() throws IOException {
+    Path file = directory.resolve("workers.ghistory");
+    var first =
+        new ReferenceHistory.Event(
+            1, 1, ReferenceHistory.Kind.STRONG_READ, 0, null, new ReferenceHistory.Target(0, 0, 1));
+    var second = new ReferenceHistory.Event(2, 1, ReferenceHistory.Kind.STRONG_READ, 0, null, null);
+    var last = new ReferenceHistory.Event(1, 2, ReferenceHistory.Kind.STRONG_READ, 0, null, null);
+    var history = new ReferenceHistory(1, true, List.of(second, first, last));
+    history.write(file);
+    assertEquals(history, ReferenceHistory.read(file, 1));
+    new ReferenceHistory(1, true, List.of(first, last, first)).write(file);
+    assertThrows(IOException.class, () -> ReferenceHistory.read(file, 1));
+  }
+
+  @Test
   void boundsAndValidatesSparseObservations() throws IOException {
     Path file = directory.resolve("references.ghistory");
     var value =

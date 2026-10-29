@@ -463,16 +463,179 @@ class RunEngineTest {
     var limited = RunEngine.run(input(references), selected, directory.resolve("reference-bound"));
     assertEquals(RunReport.Outcome.COMPLETED, limited.execution());
     assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, limited.verdict());
-    String parallel = references.replace("checkpoint;", "parallel { worker a {} worker b {} }");
+    String arrays = references.replace("program", "shape A refs 0; program");
     assertEquals(
         RunReport.Outcome.UNSUPPORTED,
-        RunEngine.run(input(parallel), selected, directory.resolve("parallel-references"))
-            .execution());
+        RunEngine.run(input(arrays), selected, directory.resolve("array-references")).execution());
     raw.add("requirements", JsonFiles.GSON.toJsonTree(List.of("reference-reclamation")));
     JsonFiles.write(selected, raw);
     assertEquals(
         RunReport.Outcome.UNSUPPORTED,
         RunEngine.run(input(references), selected, directory.resolve("reclamation")).execution());
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {17, 21})
+  void executesContendedOwnershipAndChecksWorkerIdentityEvidence(int feature) throws IOException {
+    String program;
+    try (var resource = getClass().getResourceAsStream("/cases/contended.gir")) {
+      program =
+          new String(
+              java.util.Objects.requireNonNull(resource).readAllBytes(),
+              java.nio.charset.StandardCharsets.UTF_8);
+    }
+    Path selected = profile(feature), output = directory.resolve("contended");
+    var raw = JsonFiles.read(selected);
+    raw.getAsJsonObject("limits").addProperty("historyTransitions", 1_000_000);
+    JsonFiles.write(selected, raw);
+    assertPass(RunEngine.run(input(program), selected, output));
+    assertPass(RunEngine.verify(output));
+    assertPass(RunEngine.replay(output, directory.resolve("ownership-replay")));
+    long run = JsonFiles.read(output.resolve("manifest.json")).get("run").getAsLong();
+    var history =
+        io.connglli.gorrect.protocol.ReferenceHistory.read(
+            output.resolve("traces/references.ghistory"), run);
+    assertEquals(
+        java.util.Set.of(1, 2),
+        history.events().stream()
+            .map(io.connglli.gorrect.protocol.ReferenceHistory.Event::worker)
+            .collect(java.util.stream.Collectors.toSet()));
+    assertEquals(1, history.events().stream().filter(event -> event.target() != null).count());
+    Path altered = copy(output, "ownership-altered");
+    var events = new ArrayList<>(history.events());
+    var first = events.getFirst();
+    events.set(
+        0,
+        new io.connglli.gorrect.protocol.ReferenceHistory.Event(
+            first.worker(),
+            first.sequence(),
+            first.kind(),
+            first.strength(),
+            first.wrapper(),
+            new io.connglli.gorrect.protocol.ReferenceHistory.Target(0, 0, 99)));
+    new io.connglli.gorrect.protocol.ReferenceHistory(run, true, events)
+        .write(altered.resolve("traces/references.ghistory"));
+    assertEquals(ExactVerifier.Verdict.VIOLATED, RunEngine.verify(altered).verdict());
+    Path missing = copy(output, "ownership-missing");
+    Files.delete(missing.resolve("traces/references.ghistory"));
+    assertEquals(RunReport.Outcome.EXTRACTION_ERROR, RunEngine.verify(missing).execution());
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {17, 21})
+  void callerAcquisitionProtectsReferentsAcrossPeerCollectionAndBarriers(int feature)
+      throws IOException {
+    String program =
+        """
+        gir 1; shape N object 1 1;
+        object 1 N [weak(2)] [0]; object 2 N [null] [7]; root r = 1; root guard = 2;
+        program {
+          scope { read-root owner N r; acquire held N owner 0 {
+            write-root guard null;
+            parallel {
+              worker collector { collect; barrier; collect; }
+              worker observer { read-root owner N r; is-cleared first owner 0; barrier; is-cleared second owner 0; }
+            }
+          } }
+          checkpoint;
+        }
+        """;
+    Path selected = profile(feature), output = directory.resolve("protected-reference");
+    var raw = JsonFiles.read(selected);
+    raw.getAsJsonObject("limits").addProperty("historyTransitions", 2_000_000);
+    JsonFiles.write(selected, raw);
+    assertPass(RunEngine.run(input(program), selected, output));
+    assertPass(RunEngine.verify(output));
+    assertPass(RunEngine.replay(output, directory.resolve("protected-replay")));
+    long run = JsonFiles.read(output.resolve("manifest.json")).get("run").getAsLong();
+    var trace = ExecutionTrace.read(output.resolve("traces/execution.gtrace"), run);
+    var states =
+        trace.events().stream()
+            .filter(event -> event.kind() == ExecutionTrace.Kind.REFERENCE_STATE)
+            .toList();
+    assertEquals(2, states.size());
+    assertTrue(states.stream().allMatch(event -> event.value() == 0));
+    Path corrupt = copy(output, "protected-corrupt");
+    var events = new ArrayList<>(trace.events());
+    var state = states.getFirst();
+    events.set(
+        events.indexOf(state),
+        new ExecutionTrace.Event(
+            state.operation(),
+            state.kind(),
+            1,
+            state.worker(),
+            state.group(),
+            state.round(),
+            state.phase()));
+    new ExecutionTrace(run, true, events).write(corrupt.resolve("traces/execution.gtrace"));
+    assertEquals(ExactVerifier.Verdict.VIOLATED, RunEngine.verify(corrupt).verdict());
+  }
+
+  @ParameterizedTest
+  @ValueSource(ints = {17, 21})
+  void executesVolatileFieldsAndAtomicReferenceAndLongSlots(int feature) throws IOException {
+    String program =
+        """
+        gir 1; shape N object 1 1; object 1 N [null] [5]; root r = 1; root saved = null;
+        program { scope {
+          read-volatile-root owner N r;
+          read-volatile-data value owner 0;
+          compare-set-data changed owner 0 value 6;
+          exchange-data old owner 0 42;
+          write-data owner 0 old;
+          write-volatile-ref owner 0 owner;
+          read-volatile-ref alias N owner 0;
+          exchange-ref prior N alias 0 null;
+          compare-set-ref linked owner 0 null prior;
+          write-volatile-data prior 0 9;
+          write-volatile-root saved prior;
+        } checkpoint; }
+        """;
+    assertPass(RunEngine.run(input(program), profile(feature), directory.resolve("atomic-fields")));
+  }
+
+  @Test
+  void probesContendedCapabilityThroughTheHistoryChecker() throws IOException {
+    Path selected = profile(21);
+    var raw = JsonFiles.read(selected);
+    raw.add("requirements", JsonFiles.GSON.toJsonTree(List.of("contended-histories")));
+    JsonFiles.write(selected, raw);
+    Path output = directory.resolve("atomic-probe");
+    assertPass(RunEngine.probe(selected, output));
+    assertTrue(
+        JsonFiles.read(output.resolve("manifest.json")).get("concurrentHistory").getAsBoolean());
+  }
+
+  @Test
+  void rejectsRacesInvalidPathsAndUnprovedSearchesBeforeLaunch() throws IOException {
+    String race =
+        """
+        gir 1; shape N object 0 1; object 1 N [] [0]; root r = 1;
+        program { parallel {
+          worker a { read-volatile-root n N r; write-data n 0 1; }
+          worker b { read-volatile-root n N r; read-data value n 0; }
+        } }
+        """;
+    Path selected = profile(21), output = directory.resolve("racy");
+    assertEquals(
+        RunReport.Outcome.UNSUPPORTED, RunEngine.run(input(race), selected, output).execution());
+    assertFalse(Files.exists(output.resolve("logs/compiler-command.json")));
+    String invalid =
+        "gir 1; shape N object 0 1; root r = null; program { read-volatile-root n N r; write-data n"
+            + " 0 1; }";
+    assertEquals(
+        RunReport.Outcome.INVALID_WORKLOAD,
+        RunEngine.run(input(invalid), selected, directory.resolve("invalid-history")).execution());
+    var raw = JsonFiles.read(selected);
+    raw.getAsJsonObject("limits").addProperty("historyTransitions", 1);
+    JsonFiles.write(selected, raw);
+    String bounded =
+        "gir 1; shape N object 0 1; object 1 N [] [0]; root r = 1; program { read-volatile-root n N"
+            + " r; release n; checkpoint; }";
+    assertEquals(
+        RunReport.Outcome.CHECKING_LIMIT,
+        RunEngine.run(input(bounded), selected, directory.resolve("unproved")).execution());
   }
 
   @Test

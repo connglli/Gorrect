@@ -10,18 +10,22 @@ import io.connglli.gorrect.engine.gir.GirFormatter;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
+import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
+import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
+import io.connglli.gorrect.engine.oracle.HistoryLimitException;
 import io.connglli.gorrect.engine.oracle.HistoryLimits;
 import io.connglli.gorrect.engine.oracle.HistoryOracle;
+import io.connglli.gorrect.engine.oracle.HistoryPlan;
 import io.connglli.gorrect.engine.oracle.Oracle;
 import io.connglli.gorrect.engine.oracle.OracleLimitException;
 import io.connglli.gorrect.engine.oracle.OracleLimits;
 import io.connglli.gorrect.engine.oracle.OracleResult;
-import io.connglli.gorrect.engine.oracle.ReferencePlan;
+import io.connglli.gorrect.engine.oracle.UnsupportedHistoryException;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.ReferenceHistory;
@@ -64,6 +68,16 @@ public final class RunEngine {
         }
         checkpoint;
       }
+      """;
+
+  private static final String CONTENDED_PROBE =
+      """
+      gir 1; shape Probe object 0 1; object 1 Probe [] [0]; object 2 Probe [] [0];
+      root left = 1; root right = 2; root winner = null;
+      program { parallel {
+        worker left { read-volatile-root n Probe left; compare-set-root won winner null n; write-data n 0 won; }
+        worker right { read-volatile-root n Probe right; compare-set-root won winner null n; write-data n 0 won; }
+      } checkpoint; }
       """;
 
   private RunEngine() {}
@@ -111,6 +125,7 @@ public final class RunEngine {
                               || requirement.equals("reference-queues"))
               ? REFERENCE_PROBE
               : PROBE;
+      if (profile.requirements().contains("contended-histories")) text = CONTENDED_PROBE;
       if (profile.jit() != null
           || profile.requirements().stream().anyMatch(GirValidator.STRESS_REQUIREMENTS::contains)) {
         var generated =
@@ -185,22 +200,22 @@ public final class RunEngine {
     try {
       var program = GirParser.parse(text);
       boolean references = ReferenceProgram.usesReferences(program);
-      if (references
-          && (ReferenceProgram.hasParallel(program)
-              || program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT)))
+      boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
+      if ((references || concurrent)
+          && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
         return finish(
             directory,
             manifest,
             new RunReport(
                 RunReport.Outcome.UNSUPPORTED,
                 ExactVerifier.Verdict.INCONCLUSIVE,
-                List.of(
-                    "Reference histories currently require sequential ordinary-object programs"),
+                List.of("History programs currently require ordinary-object shapes"),
                 List.of()));
       manifest.addProperty("referenceHistory", references);
+      manifest.addProperty("concurrentHistory", concurrent);
       var oracle =
-          references
-              ? ReferencePlan.plan(program, OracleLimits.DEFAULT)
+          (references || concurrent)
+              ? HistoryPlan.plan(program, OracleLimits.DEFAULT)
               : Oracle.interpret(program);
       var unsupported = new ArrayList<>(HotSpotDriver.unsupported(profile));
       if (program.requirements().contains("compiled-execution") && profile.jit() == null)
@@ -217,6 +232,7 @@ public final class RunEngine {
                 ExactVerifier.Verdict.INCONCLUSIVE,
                 unsupported,
                 List.of()));
+      if (concurrent) ConcurrentHistory.audit(program, historyLimits(profile));
       if (saved == null) {
         var emission = JavaEmitter.emit(program);
         Files.writeString(directory.resolve("generated/Case.java"), emission.source());
@@ -228,7 +244,7 @@ public final class RunEngine {
         recorderCounts.forEach(
             (worker, count) -> recorderPlan.append(worker).append('=').append(count).append('\n'));
         Files.writeString(directory.resolve("generated/recorders.properties"), recorderPlan);
-        if (references)
+        if (references || concurrent)
           Files.writeString(directory.resolve("generated/references.properties"), "enabled=true\n");
         if (profile.jit() != null)
           Files.writeString(
@@ -309,8 +325,10 @@ public final class RunEngine {
                   new com.google.gson.reflect.TypeToken<Map<String, String>>() {}.getType());
       result =
           launch(directory, profile, manifest, oracle, run, savedEnvironment, campaignDeadline);
-    } catch (OracleLimitException exception) {
+    } catch (OracleLimitException | HistoryLimitException exception) {
       result = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
+    } catch (UnsupportedHistoryException exception) {
+      result = RunReport.failure(RunReport.Outcome.UNSUPPORTED, exception.getMessage());
     } catch (GirException exception) {
       result = RunReport.failure(RunReport.Outcome.INVALID_WORKLOAD, exception.getMessage());
     } catch (InterruptedException exception) {
@@ -553,9 +571,10 @@ public final class RunEngine {
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
       boolean references = ReferenceProgram.usesReferences(program);
+      boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
-          references
-              ? ReferencePlan.plan(program, OracleLimits.DEFAULT)
+          (references || concurrent)
+              ? HistoryPlan.plan(program, OracleLimits.DEFAULT)
               : Oracle.interpret(program);
       var layout =
           JsonFiles.GSON.fromJson(
@@ -565,24 +584,24 @@ public final class RunEngine {
       unmet.addAll(HotSpotDriver.requirements(profile, target(directory)));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
-      if (references) {
+      if (references || concurrent) {
         controls(directory, run, oracle);
         var observations = new ArrayList<HistoryOracle.Observation>();
         for (int index = 1; index <= oracle.checkpoints().size() + 1; index++) {
-          var projection = SnapshotProjector.project(snapshot(directory, run, index), layout);
+          var snapshot = snapshot(directory, run, index);
+          compilationCoverage(snapshot, profile, unmet);
+          var projection = SnapshotProjector.project(snapshot, layout);
           observations.add(
               new HistoryOracle.Observation(projection.graph(), projection.problems()));
         }
         var history = ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run);
         if (!history.complete()) throw new IOException("Reference history is incomplete");
         var result =
-            HistoryOracle.check(
-                program,
-                trace,
-                history,
-                observations,
-                new HistoryLimits(
-                    profile.limits().historyStates(), profile.limits().historyTransitions()));
+            concurrent
+                ? ConcurrentHistory.check(
+                    program, trace, history, observations, historyLimits(profile))
+                : HistoryOracle.check(
+                    program, trace, history, observations, historyLimits(profile));
         problems.addAll(result.problems());
         if (result.execution() != null) {
           var coverage =
@@ -617,11 +636,7 @@ public final class RunEngine {
                 ? oracle.checkpoints().get(i)
                 : new OracleResult.Checkpoint(0, 1, oracle.finalGraph());
         var snapshot = snapshot(directory, run, i + 1L);
-        if (profile.requirements().contains("compilation-events")
-            && (snapshot.capabilities()
-                    & io.connglli.gorrect.protocol.HeapSnapshot.COMPILATION_OVERFLOW)
-                != 0
-            && !unmet.contains("compilation-events")) unmet.add("compilation-events");
+        compilationCoverage(snapshot, profile, unmet);
         var result = SnapshotProjector.project(snapshot, layout).verify(visit.graph());
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
         if (result.verdict() == ExactVerifier.Verdict.VIOLATED) violated = true;
@@ -634,8 +649,12 @@ public final class RunEngine {
               ? ExactVerifier.Verdict.VIOLATED
               : inconclusive ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED;
       report = new RunReport(RunReport.Outcome.COMPLETED, verdict, unmet, problems);
-    } catch (OracleLimitException exception) {
+    } catch (OracleLimitException | HistoryLimitException exception) {
       report = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
+    } catch (UnsupportedHistoryException exception) {
+      report = RunReport.failure(RunReport.Outcome.UNSUPPORTED, exception.getMessage());
+    } catch (GirException exception) {
+      report = RunReport.failure(RunReport.Outcome.INVALID_WORKLOAD, exception.getMessage());
     } catch (IOException | RuntimeException exception) {
       report = RunReport.failure(RunReport.Outcome.EXTRACTION_ERROR, exception.toString());
     }
@@ -656,6 +675,7 @@ public final class RunEngine {
   private static RunReport diagnoseReferenceFailure(
       Path directory, JsonObject manifest, RunReport execution) {
     if (execution.execution() != RunReport.Outcome.RUNTIME_ERROR
+        || manifest.has("concurrentHistory") && manifest.get("concurrentHistory").getAsBoolean()
         || !manifest.has("referenceHistory")
         || !manifest.get("referenceHistory").getAsBoolean()) return execution;
     try {
@@ -725,6 +745,22 @@ public final class RunEngine {
         throw new IOException("Control checkpoint identity mismatch");
     }
     return messages;
+  }
+
+  private static void compilationCoverage(
+      io.connglli.gorrect.protocol.HeapSnapshot snapshot,
+      TargetProfile profile,
+      List<String> unmet) {
+    if (profile.requirements().contains("compilation-events")
+        && (snapshot.capabilities()
+                & io.connglli.gorrect.protocol.HeapSnapshot.COMPILATION_OVERFLOW)
+            != 0
+        && !unmet.contains("compilation-events")) unmet.add("compilation-events");
+  }
+
+  private static HistoryLimits historyLimits(TargetProfile profile) {
+    return new HistoryLimits(
+        profile.limits().historyStates(), profile.limits().historyTransitions());
   }
 
   private static JsonObject manifest(Path directory) throws IOException {

@@ -268,6 +268,8 @@ final class StressVerifier {
           groups.put(parallel.id(), parallel);
           parallel.workers().forEach(worker -> declarations(worker.body(), groups, collects));
         }
+        case Instruction.Acquire acquire -> declarations(acquire.body(), groups, collects);
+        case Instruction.IfPresent present -> declarations(present.body(), groups, collects);
         case Instruction.Scope scope -> declarations(scope.body(), groups, collects);
         case Instruction.Repeat repeat -> declarations(repeat.body(), groups, collects);
         case Instruction.Collect collect -> collects.add(collect.id());

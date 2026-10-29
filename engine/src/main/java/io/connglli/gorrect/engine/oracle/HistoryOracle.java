@@ -77,6 +77,8 @@ public final class HistoryOracle {
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits) {
+    if (io.connglli.gorrect.engine.gir.HistoryProgram.usesConcurrentHistory(program))
+      return ConcurrentHistory.check(program, trace, history, observations, limits);
     return check(program, trace, history, observations, limits, false);
   }
 
@@ -163,6 +165,12 @@ public final class HistoryOracle {
     for (var instruction : body) {
       frontier.expand(machine.graph());
       switch (instruction) {
+        case Instruction.IfPresent present -> {
+          boolean value = machine.present(present.name());
+          machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
+          expect();
+          if (value) scoped(present.body());
+        }
         case Instruction.Parallel ignored ->
             throw new GirException("Parallel reference histories are unsupported");
         case Instruction.Scope scope -> {
@@ -330,7 +338,7 @@ public final class HistoryOracle {
     require(referencePosition < history.events().size(), "Reference observation is missing");
     var event = history.events().get(referencePosition++);
     require(
-        event.sequence() == sequence && event.kind() == kind,
+        event.worker() == 0 && event.sequence() == sequence && event.kind() == kind,
         "Reference observation order or kind differs from the scalar trace");
     return event;
   }

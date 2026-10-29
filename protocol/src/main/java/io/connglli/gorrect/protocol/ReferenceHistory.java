@@ -8,7 +8,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
 
-/** Sparse reference observations keyed to one-based positions in the main scalar trace. */
+/**
+ * Sparse reference observations keyed to worker and one-based worker-local scalar-trace position.
+ */
 public record ReferenceHistory(long run, boolean complete, List<Event> events) {
   private static final int MAGIC = 0x47524631;
   private static final long END = 0x454e445245465331L;
@@ -18,7 +20,8 @@ public record ReferenceHistory(long run, boolean complete, List<Event> events) {
     ACQUIRE,
     STATE,
     CLEAR,
-    QUEUE
+    QUEUE,
+    STRONG_READ
   }
 
   public record Identity(int worker, int site, long occurrence, int slot) {
@@ -38,8 +41,13 @@ public record ReferenceHistory(long run, boolean complete, List<Event> events) {
     }
   }
 
-  /** Strength is 1 for soft, 2 for weak, and 0 only for an empty queue observation. */
-  public record Event(int sequence, Kind kind, int strength, Identity wrapper, Target target) {}
+  /** Strength is 1 for soft, 2 for weak, and 0 for an unwrapped strong read or empty queue poll. */
+  public record Event(
+      int worker, int sequence, Kind kind, int strength, Identity wrapper, Target target) {
+    public Event(int sequence, Kind kind, int strength, Identity wrapper, Target target) {
+      this(0, sequence, kind, strength, wrapper, target);
+    }
+  }
 
   public ReferenceHistory {
     events = List.copyOf(events);
@@ -53,6 +61,7 @@ public record ReferenceHistory(long run, boolean complete, List<Event> events) {
       out.writeBoolean(complete);
       out.writeInt(events.size());
       for (var event : events) {
+        out.writeInt(event.worker());
         out.writeInt(event.sequence());
         out.writeByte(event.kind().ordinal());
         out.writeByte(event.strength());
@@ -80,17 +89,23 @@ public record ReferenceHistory(long run, boolean complete, List<Event> events) {
       if (flag > 1 || count < 0 || count > ExecutionTrace.MAX_EVENTS)
         throw new IOException("Invalid reference history header");
       var events = new ArrayList<Event>();
-      int previous = 0;
+      var previous = new java.util.HashMap<Integer, Integer>();
+      var types = Kind.values();
       for (int index = 0; index < count; index++) {
-        int sequence = in.readInt(), kind = in.readUnsignedByte(), strength = in.readUnsignedByte();
+        int recordingWorker = in.readInt(),
+            sequence = in.readInt(),
+            kind = in.readUnsignedByte(),
+            strength = in.readUnsignedByte();
         int worker = in.readInt(), site = in.readInt();
         long occurrence = in.readLong();
         int slot = in.readInt();
         int targetWorker = in.readInt(), targetSite = in.readInt();
         long targetOccurrence = in.readLong();
-        if (sequence <= previous
+        if (recordingWorker < 0
+            || recordingWorker > ExecutionTrace.MAX_WORKERS
+            || sequence <= previous.getOrDefault(recordingWorker, 0)
             || sequence > ExecutionTrace.MAX_EVENTS
-            || kind >= Kind.values().length
+            || kind >= types.length
             || strength > 2) throw new IOException("Invalid reference history entry");
         Identity wrapper = strength == 0 ? null : new Identity(worker, site, occurrence, slot);
         Target target =
@@ -100,12 +115,16 @@ public record ReferenceHistory(long run, boolean complete, List<Event> events) {
                     || site != 0
                     || occurrence != 0
                     || slot != 0
-                    || kind != Kind.QUEUE.ordinal()))
+                    || (kind != Kind.QUEUE.ordinal() && kind != Kind.STRONG_READ.ordinal())))
             || (target == null && (targetWorker != 0 || targetSite != 0))
-            || (target != null && kind != Kind.INSTALL.ordinal() && kind != Kind.ACQUIRE.ordinal()))
+            || (target != null
+                && kind != Kind.INSTALL.ordinal()
+                && kind != Kind.ACQUIRE.ordinal()
+                && kind != Kind.STRONG_READ.ordinal())
+            || (kind == Kind.STRONG_READ.ordinal() && strength != 0))
           throw new IOException("Inconsistent reference history entry");
-        events.add(new Event(sequence, Kind.values()[kind], strength, wrapper, target));
-        previous = sequence;
+        events.add(new Event(recordingWorker, sequence, types[kind], strength, wrapper, target));
+        previous.put(recordingWorker, sequence);
       }
       if (in.readLong() != END || in.read() != -1)
         throw new IOException("Incomplete reference history envelope");

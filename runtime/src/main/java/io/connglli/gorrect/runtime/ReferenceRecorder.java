@@ -1,9 +1,6 @@
 package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.ReferenceHistory;
-import java.io.IOException;
-import java.nio.file.Path;
-import java.util.ArrayList;
 
 /** Bounded scalar storage for reference identities; it never retains a wrapper or referent. */
 final class ReferenceRecorder {
@@ -16,9 +13,11 @@ final class ReferenceRecorder {
       targetWorkers,
       targetSites;
   private final long[] occurrences, targetOccurrences;
+  private final int worker;
   private int count;
 
-  ReferenceRecorder(int capacity) {
+  ReferenceRecorder(int worker, int capacity) {
+    this.worker = worker;
     sequences = new int[capacity];
     kinds = new int[capacity];
     strengths = new int[capacity];
@@ -35,10 +34,10 @@ final class ReferenceRecorder {
       int sequence,
       int kind,
       int strength,
-      int worker,
-      int site,
-      long occurrence,
-      int slot,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
       int targetWorker,
       int targetSite,
       long targetOccurrence) {
@@ -47,17 +46,16 @@ final class ReferenceRecorder {
     sequences[count] = sequence;
     kinds[count] = kind;
     strengths[count] = strength;
-    workers[count] = worker;
-    sites[count] = site;
-    occurrences[count] = occurrence;
-    slots[count] = slot;
+    workers[count] = wrapperWorker;
+    sites[count] = wrapperSite;
+    occurrences[count] = wrapperOccurrence;
+    slots[count] = wrapperSlot;
     targetWorkers[count] = targetWorker;
     targetSites[count] = targetSite;
     targetOccurrences[count++] = targetOccurrence;
   }
 
-  void write(Path path, long run, boolean complete) throws IOException {
-    var events = new ArrayList<ReferenceHistory.Event>(count);
+  void appendTo(java.util.List<ReferenceHistory.Event> events) {
     var types = ReferenceHistory.Kind.values();
     for (int index = 0; index < count; index++) {
       var wrapper =
@@ -72,8 +70,7 @@ final class ReferenceRecorder {
                   targetWorkers[index], targetSites[index], targetOccurrences[index]);
       events.add(
           new ReferenceHistory.Event(
-              sequences[index], types[kinds[index]], strengths[index], wrapper, target));
+              worker, sequences[index], types[kinds[index]], strengths[index], wrapper, target));
     }
-    new ReferenceHistory(run, complete, events).write(path);
   }
 }

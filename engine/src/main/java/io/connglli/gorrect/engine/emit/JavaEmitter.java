@@ -3,7 +3,10 @@ package io.connglli.gorrect.engine.emit;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
+import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.Location;
+import io.connglli.gorrect.engine.gir.MemoryMode;
 import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
@@ -26,6 +29,10 @@ public final class JavaEmitter {
 
   private record Binding(String name, Shape shape) {}
 
+  private record Variable(String owner, String field, boolean reference, boolean root) {}
+
+  private final Map<String, Variable> variables = new LinkedHashMap<>();
+
   private final GirProgram program;
   private final StringBuilder source = new StringBuilder();
   private final Map<String, Shape> shapes = new HashMap<>();
@@ -35,25 +42,27 @@ public final class JavaEmitter {
   private final List<Instruction.Worker> workers = new ArrayList<>();
   private int worker;
   private final boolean references;
+  private final boolean concurrent;
 
   private JavaEmitter(GirProgram program) {
     this.program = program;
     references = ReferenceProgram.usesReferences(program);
+    concurrent = HistoryProgram.usesConcurrentHistory(program);
   }
 
   public static Emission emit(GirProgram program) {
     GirValidator.validate(program);
-    if (ReferenceProgram.usesReferences(program)
-        && (ReferenceProgram.hasParallel(program)
-            || program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT)))
+    if ((ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program))
+        && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
       throw new io.connglli.gorrect.engine.gir.GirException(
-          "Reference emission requires a sequential ordinary-object program");
+          "History emission requires an ordinary-object program");
     return new JavaEmitter(program).emit();
   }
 
   private Emission emit() {
     line("import io.connglli.gorrect.runtime.TargetSession;");
     line("import io.connglli.gorrect.runtime.WorkerContext;");
+    line("import io.connglli.gorrect.runtime.ObservationRecorder;");
     line("import io.connglli.gorrect.runtime.observe.NativeObserver;");
     line("import io.connglli.gorrect.protocol.HeapSnapshot;");
     line("import io.connglli.gorrect.protocol.ReferenceHistory;");
@@ -156,6 +165,8 @@ public final class JavaEmitter {
       line("}");
     }
     worker = 0;
+    // Method emission discovers the used variables; their declarations follow those methods.
+    if (concurrent) varHandles();
     line("}");
     var rootFields = new LinkedHashMap<String, String>();
     roots.forEach((name, field) -> rootFields.put(field, name));
@@ -189,8 +200,8 @@ public final class JavaEmitter {
       line("}");
     }
     line(
-        "private static void reference(TargetSession session, int operation, int kind, long value,"
-            + " java.lang.ref.Reference<?> object, int tw, int ts, long occurrence) {");
+        "private static void reference(ObservationRecorder session, int operation, int kind, long"
+            + " value, java.lang.ref.Reference<?> object, int tw, int ts, long occurrence) {");
     line(
         "if (object == null) session.reference(operation, kind, value, 0, 0, 0, 0L, 0, tw, ts,"
             + " occurrence);");
@@ -204,6 +215,88 @@ public final class JavaEmitter {
     line("}");
   }
 
+  private void varHandles() {
+    if (variables.isEmpty()) return;
+    line(
+        "private static java.lang.invoke.VarHandle variable(Class<?> owner, String name, Class<?>"
+            + " type, boolean root) { try { var lookup = java.lang.invoke.MethodHandles.lookup();"
+            + " return root ? lookup.findStaticVarHandle(owner, name, type) :"
+            + " lookup.findVarHandle(owner, name, type); } catch (ReflectiveOperationException"
+            + " failure) { throw new ExceptionInInitializerError(failure); } }");
+    for (var entry : variables.entrySet()) {
+      var variable = entry.getValue();
+      line(
+          "private static final java.lang.invoke.VarHandle "
+              + entry.getKey()
+              + " = variable("
+              + variable.owner()
+              + ".class, \""
+              + variable.field()
+              + "\", "
+              + (variable.reference() ? "Object" : "long")
+              + ".class, "
+              + variable.root()
+              + ");");
+    }
+  }
+
+  private String handle(Location location) {
+    String owner, field;
+    boolean root = location.kind() == Location.Kind.ROOT;
+    if (root) {
+      owner = "Roots";
+      field = roots.get(location.owner());
+    } else {
+      var binding = binding(location.owner());
+      owner = types.get(binding.shape().name());
+      field = (location.reference() ? "f" : "d") + location.index();
+    }
+    String name = "v_" + owner + "_" + field;
+    variables.putIfAbsent(name, new Variable(owner, field, location.reference(), root));
+    return name;
+  }
+
+  private String coordinates(Location location) {
+    return location.kind() == Location.Kind.ROOT ? "" : binding(location.owner()).name() + ", ";
+  }
+
+  private String read(Location location, MemoryMode mode) {
+    if (mode == MemoryMode.VOLATILE)
+      return handle(location)
+          + ".getVolatile("
+          + (location.kind() == Location.Kind.ROOT ? "" : binding(location.owner()).name())
+          + ")";
+    if (location.kind() == Location.Kind.ROOT) return "Roots." + roots.get(location.owner());
+    var owner = binding(location.owner());
+    return slot(owner.name(), owner.shape(), location.index(), location.reference());
+  }
+
+  // Use the field's Object type at signature-polymorphic call sites, including null operands.
+  private String argument(Location location, Operand value) {
+    return (location.reference() ? "(Object) " : "") + operand(value);
+  }
+
+  private void write(Location location, MemoryMode mode, String value) {
+    if (mode == MemoryMode.VOLATILE)
+      line(
+          handle(location)
+              + ".setVolatile("
+              + coordinates(location)
+              + (location.reference() ? "(Object) " : "")
+              + value
+              + ");");
+    else if (location.kind() == Location.Kind.ROOT)
+      line("Roots." + roots.get(location.owner()) + " = " + value + ";");
+    else {
+      var owner = binding(location.owner());
+      line(
+          slot(owner.name(), owner.shape(), location.index(), location.reference())
+              + " = "
+              + value
+              + ";");
+    }
+  }
+
   private void allocationCounters(List<Instruction> instructions) {
     for (var instruction : instructions)
       switch (instruction) {
@@ -212,6 +305,7 @@ public final class JavaEmitter {
           if (op.kind() != Value.ReferenceKind.STRONG)
             line("private static long w" + op.id() + ";");
         }
+        case Instruction.IfPresent present -> allocationCounters(present.body());
         case Instruction.Acquire acquire -> allocationCounters(acquire.body());
         case Instruction.Scope scope -> allocationCounters(scope.body());
         case Instruction.Repeat repeat -> allocationCounters(repeat.body());
@@ -286,11 +380,31 @@ public final class JavaEmitter {
       if (instruction instanceof Instruction.ReadData op) {
         var owner = binding(op.owner());
         String name = declare(op.name(), null, op.id());
-        line("long " + name + " = " + slot(owner.name(), owner.shape(), op.index(), false) + ";");
+        line(
+            "long "
+                + name
+                + " = "
+                + (op.mode() == MemoryMode.VOLATILE ? "(long) " : "")
+                + read(new Location(Location.Kind.DATA, op.owner(), op.index()), op.mode())
+                + ";");
         line(recorder() + ".record(" + op.id() + ", 2, " + name + ");");
         continue;
       }
       switch (instruction) {
+        case Instruction.IfPresent op -> {
+          var value = binding(op.name());
+          line(
+              recorder()
+                  + ".record("
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.BRANCH.ordinal(), "
+                  + value.name()
+                  + " == null ? 0L : 1L);");
+          line("if (" + value.name() + " != null) {");
+          block(op.body());
+          line("}");
+          continue;
+        }
         case Instruction.Acquire op -> {
           var owner = binding(op.owner());
           String ref = "reference" + op.id(), result = "b" + op.id();
@@ -314,7 +428,8 @@ public final class JavaEmitter {
           line("if (" + result + " != null) {");
           block(op.body(), op.name(), new Binding(result, shapes.get(op.shape())));
           line(
-              "session.record("
+              recorder()
+                  + ".record("
                   + op.id()
                   + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.ACQUIRE_END.ordinal(),"
                   + " 0L);");
@@ -403,39 +518,51 @@ public final class JavaEmitter {
                   + ";");
           bindArray(name, shape, op.id(), "a" + op.id());
         }
-        case Instruction.ReadRoot op ->
-            line(
-                types.get(op.shape())
-                    + " "
-                    + declare(op.name(), shapes.get(op.shape()), op.id())
-                    + " = ("
-                    + types.get(op.shape())
-                    + ") Roots."
-                    + roots.get(op.root())
-                    + ";");
-        case Instruction.WriteRoot op ->
-            line("Roots." + roots.get(op.root()) + " = " + operand(op.value()) + ";");
-        case Instruction.ReadReference op -> {
-          var owner = binding(op.owner());
+        case Instruction.ReadRoot op -> {
+          String name = declare(op.name(), shapes.get(op.shape()), op.id());
           line(
               types.get(op.shape())
                   + " "
-                  + declare(op.name(), shapes.get(op.shape()), op.id())
+                  + name
                   + " = ("
                   + types.get(op.shape())
                   + ") "
-                  + slot(owner.name(), owner.shape(), op.index(), true)
+                  + read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode())
                   + ";");
+          if (concurrent) {
+            reference(op.id(), "STRONG_READ", "0L", null, name);
+            continue;
+          }
+        }
+        case Instruction.WriteRoot op ->
+            write(new Location(Location.Kind.ROOT, op.root(), 0), op.mode(), operand(op.value()));
+        case Instruction.ReadReference op -> {
+          String name = declare(op.name(), shapes.get(op.shape()), op.id());
+          line(
+              types.get(op.shape())
+                  + " "
+                  + name
+                  + " = ("
+                  + types.get(op.shape())
+                  + ") "
+                  + read(new Location(Location.Kind.REFERENCE, op.owner(), op.index()), op.mode())
+                  + ";");
+          if (concurrent) {
+            reference(op.id(), "STRONG_READ", "0L", null, name);
+            continue;
+          }
         }
         case Instruction.WriteReference op -> {
           var owner = binding(op.owner());
           if (op.kind() != Value.ReferenceKind.STRONG) {
             String ref = "reference" + op.id();
+            String type = op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot";
             line(
-                (op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot " : "WeakSlot ")
+                type
+                    + " "
                     + ref
                     + " = new "
-                    + (op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot")
+                    + type
                     + "("
                     + worker
                     + ", "
@@ -452,19 +579,66 @@ public final class JavaEmitter {
             line(ref + " = null;");
             continue;
           }
-          line(
-              slot(owner.name(), owner.shape(), op.index(), true)
-                  + " = "
-                  + operand(op.value())
-                  + ";");
+          write(
+              new Location(Location.Kind.REFERENCE, op.owner(), op.index()),
+              op.mode(),
+              operand(op.value()));
         }
-        case Instruction.WriteData op -> {
-          var owner = binding(op.owner());
+        case Instruction.WriteData op ->
+            write(
+                new Location(Location.Kind.DATA, op.owner(), op.index()),
+                op.mode(),
+                operand(op.value()));
+        case Instruction.CompareSet op -> {
+          String name = declare(op.name(), null, op.id());
+          var location = op.location();
           line(
-              slot(owner.name(), owner.shape(), op.index(), false)
+              "long "
+                  + name
                   + " = "
-                  + operand(op.value())
-                  + ";");
+                  + handle(location)
+                  + ".compareAndSet("
+                  + coordinates(location)
+                  + argument(location, op.expected())
+                  + ", "
+                  + argument(location, op.update())
+                  + ") ? 1L : 0L;");
+          line(
+              recorder()
+                  + ".record("
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.COMPARE_SET.ordinal(), "
+                  + name
+                  + ");");
+          continue;
+        }
+        case Instruction.Exchange op -> {
+          String name =
+              declare(
+                  op.name(), op.location().reference() ? shapes.get(op.shape()) : null, op.id());
+          String type = op.location().reference() ? types.get(op.shape()) : "long";
+          line(
+              type
+                  + " "
+                  + name
+                  + " = ("
+                  + type
+                  + ") "
+                  + handle(op.location())
+                  + ".getAndSet("
+                  + coordinates(op.location())
+                  + argument(op.location(), op.update())
+                  + ");");
+          if (op.location().reference()) reference(op.id(), "STRONG_READ", "0L", null, name);
+          else
+            line(
+                recorder()
+                    + ".record("
+                    + op.id()
+                    + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.SCALAR_READ.ordinal(), "
+                    + name
+                    + ");");
+          continue;
         }
         case Instruction.Release op -> {
           var binding = binding(op.name());
@@ -528,8 +702,22 @@ public final class JavaEmitter {
                 + " == null ? 0L : "
                 + target
                 + ".idOccurrence)";
+    if (kind.equals("STRONG_READ")) {
+      line(
+          recorder()
+              + ".reference("
+              + operation
+              + ", ReferenceHistory.Kind.STRONG_READ.ordinal(), ("
+              + target
+              + " == null ? 0L : 1L), 0, 0, 0, 0L, 0, "
+              + identity
+              + ");");
+      return;
+    }
     line(
-        "reference(session, "
+        "reference("
+            + recorder()
+            + ", "
             + operation
             + ", ReferenceHistory.Kind."
             + kind

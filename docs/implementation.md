@@ -43,13 +43,13 @@ The frontend parses, formats, and statically validates [GIR](./gir.md). Its immu
 
 ### Oracle and verifier
 
-The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle records concrete slot accesses while interpreting each parallel phase and rejects cross-worker conflicts before target execution. The verifier compares its obligations with recorded reads and snapshots.
+The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle checks conflict-free phases. Contended profiles explore bounded schedules and use vector clocks to prove race freedom before launch; offline verification repeats that proof before matching evidence. Search forks preserve private scopes, identities, and budgets. Equivalent quiescent states merge after joins; live worker states remain distinct.
 
-Reference histories use a bounded frontier of cleared, pending, and delivered wrapper sets. Legal GC transitions expand it; validated choices and snapshots filter it. Ordinary payload state is shared across surviving possibilities. Detached wrappers may be retained without creating strong referent roots. Search exhaustion is inconclusive. Contended histories remain planned work.
+Reference histories track cleared, pending, and delivered wrapper sets. Legal GC transitions expand the frontier; validated choices and snapshots filter it. Concurrent states include every worker's and suspended caller's handles. Detached wrappers may survive without creating strong referent roots. Search forks share cumulative work limits; graph traversal and retained search states count toward those limits.
 
 ### Generation and emission
 
-The seeded generator constructs valid GIR. The emitter translates the same syntax into a node class per shape, direct field/array accesses, reusable worker methods, and layout metadata. It maintains no second simulated heap. The engine compiles the source against the target runtime and retains the exact classes.
+The seeded generator constructs valid GIR. The emitter generates node classes, direct accesses, reusable worker methods, and layout metadata without a second simulated heap. Volatile and atomic operations call VarHandles directly; only used variables receive handles. The engine compiles against the target runtime and retains the exact classes.
 
 The planned reducer will simplify GIR and execution settings while preserving the failure and any required stress conditions.
 
@@ -57,7 +57,7 @@ The planned reducer will simplify GIR and execution settings while preserving th
 
 The runtime coordinates workers, barriers, checkpoints, recording, and VM controls. Generated methods perform ordinary allocations and mutations in Java; native calls occur at observation and control points. Java locals represent handles, with reachability fences preserving GIR lifetimes.
 
-Each worker appends operation, visit, phase, and scalar values to a private primitive buffer. Storage is bounded by the profile's trace limit; planned counts reserve capacity without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Reference cases add sparse identity observations keyed to main-trace positions, with syntax bounds covering either acquisition outcome. Recorders retain no workload objects.
+Each worker has private primitive buffers for scalar and sparse identity observations, keyed by worker-local trace positions. Syntax bounds reserve capacity for either conditional outcome without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Strong reads record presence separately from identity. Recorders retain no workload objects.
 
 Start, barrier, phase-start, end, and join markers establish worker control flow without a global sequence counter or a shared recorder lock. Per-worker order is meaningful; cross-worker file order is not.
 

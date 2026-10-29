@@ -78,11 +78,11 @@ Reference histories with parallel blocks or array shapes, live-binding checkpoin
 
 ## 7. Support contended concurrent histories
 
-Goal: extend concurrency beyond exact post-synchronization graphs.
+Status: complete for bounded race-free ordinary-object histories. [GIR](../../../docs/gir.md#contended-histories) adds volatile access, CAS, exchange, and nullable ownership scopes. Direct VarHandles and private primitive recorders preserve concurrent execution. A bounded exhaustive SC audit proves preconditions and race freedom before launch; offline verification repeats it before matching recorded results, synchronization, and snapshots. All live worker/caller handles protect reference acquisitions.
 
-Define supported volatile, atomic, and ownership-transfer operation contracts. Add corresponding GIR operations, Java emission, trace records, and bounded history checking. Validate returned values and publication along with final graph contents. Combine these operations with supported reference acquisition only after their individual models have independent checks.
+Verified independent exhaustive CAS/exchange/store-buffering models, publication, ownership transfer, ordinary-race rejection, protected referents, barriers, incomplete/corrupted evidence, and work/state budgets. The full build, JDK 17/21 execution, strict Javadoc, native checks, offline verification, and replay pass. The selected HotSpot target establishes joint compiled/concurrent/GC coverage; interpreted execution leaves compilation unmet. [Stage 7 notes](./completed-2026-10-29-stage7.md) record the mechanisms and limits.
 
-Complete when small exhaustive concurrent models agree with the production checker, including cases with several legal outcomes and deliberately impossible reads or updates. Validate synchronization and per-worker order without treating logging timestamps as a global execution order. Keep arbitrary data races outside these profiles until their Java memory-model obligations are specified.
+History arrays, live-binding/conditional checkpoints, weaker memory modes, arbitrary data races, and reclamation assertions remain unsupported. Large searches may exhaust their bounds without a verdict. Adding contended generator diversity follows stage 11.
 
 ## 8. Expand HotSpot collector and compiler coverage
 

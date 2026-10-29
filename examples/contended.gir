@@ -1,0 +1,28 @@
+gir 1;
+shape N object 1 1;
+object 1 N [null] [0];
+root pending = 1;
+root left = null;
+root right = null;
+
+program {
+  parallel {
+    worker left {
+      exchange-root owned N pending null;
+      if-present owned {
+        collect;
+        write-data owned 0 11;
+        write-volatile-root left owned;
+      }
+    }
+    worker right {
+      exchange-root owned N pending null;
+      if-present owned {
+        collect;
+        write-data owned 0 22;
+        write-volatile-root right owned;
+      }
+    }
+  }
+  transferred: checkpoint;
+}

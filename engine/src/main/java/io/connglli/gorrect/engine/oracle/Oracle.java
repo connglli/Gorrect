@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.oracle;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
+import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.protocol.ExecutionTrace;
@@ -27,7 +28,7 @@ public final class Oracle {
    */
   public static OracleResult interpret(GirProgram program, OracleLimits limits) {
     GirValidator.validate(program);
-    if (ReferenceProgram.usesReferences(program))
+    if (HistoryProgram.usesConcurrentHistory(program) || ReferenceProgram.usesReferences(program))
       throw new GirException("Conditional references require a recorded history");
     var machine = new GraphMachine(program, limits);
     execute(program.body(), machine);
@@ -39,6 +40,11 @@ public final class Oracle {
   private static void execute(List<Instruction> instructions, GraphMachine machine) {
     for (var instruction : instructions) {
       switch (instruction) {
+        case Instruction.IfPresent present -> {
+          boolean value = machine.present(present.name());
+          machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
+          if (value) scoped(present.body(), machine);
+        }
         case Instruction.Acquire ignored ->
             throw new GirException("Acquisition requires a recorded history");
         case Instruction.Parallel parallel -> parallel(parallel, machine);
