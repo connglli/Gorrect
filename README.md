@@ -10,4 +10,4 @@ Build with JDK 21, CMake 3.24 or newer, and a C++17 compiler. Compatibility chec
 
 The build checks native loading on JDK 17 and 21.
 
-[Design](./docs/design.md) | [Implementation](./docs/implementation.md) | [AGENTS.md](./AGENTS.md) | [docs/AGENTS.md](./docs/AGENTS.md)
+[Design](./docs/design.md) | [GIR](./docs/gir.md) | [Implementation](./docs/implementation.md) | [AGENTS.md](./AGENTS.md) | [docs/AGENTS.md](./docs/AGENTS.md)

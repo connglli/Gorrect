@@ -37,11 +37,9 @@ Verified a clean source build, native loading on JDK 17 and 21 and the selected 
 
 ## 2. Implement the minimal GIR and exact oracle
 
-Goal: define and execute the smallest useful portable workload independently of Java emission.
+Status: complete. [GIR 1](../../../docs/gir.md) has immutable graph declarations and instructions, optional labels, parsing, canonical formatting, validation, and a bounded deterministic interpreter. It supports strong fields and arrays, long-valued payloads, typed handles, root lifetimes, scoped release, loops, and checkpoints. Exact verification checks required identities, shapes, slot counts, kinds, targets, and data while allowing retained garbage. Incomplete observations are inconclusive.
 
-Implement the initial-graph representation, stable object and slot identities, shapes, strong references, payload values, explicit roots and scoped handles. Add GIR parsing, canonical formatting, validation, allocation, reads and writes, bounded loops, and checkpoints. Implement a deterministic interpreter and exact graph obligations. Unsupported operations must be rejected explicitly.
-
-Complete when small cases establish aliasing, cycles, self-references, multiple slots with the same target, retargeting, null handling, and handle release. Invalid types, scopes, and shapes must fail validation. Parse-format round trips preserve semantics, and rejected candidate operations leave the model unchanged. Use independently specified expected results rather than emitter output to test the oracle.
+Verified round trips, forward references, aliases, cycles, self-references, retargeting, local lifetimes, repeated allocation identities, and rejection without state or budget changes. Independent expected snapshots, corrupted observations, exhaustive two-object graphs, and the executable documentation example exercise the oracle. The clean full build and JDK 17/21 native checks pass. Test dependencies are pinned and locked; unsupported syntax and checking limits remain explicit errors.
 
 ## 3. Prove observation and root handling
 
