@@ -49,7 +49,7 @@ Reference histories track cleared, pending, and delivered wrapper sets. Legal GC
 
 ### Generation and emission
 
-The seeded generator constructs valid GIR. The emitter generates node classes, direct accesses, reusable worker methods, and layout metadata without a second simulated heap. Volatile and atomic operations call VarHandles directly; only used variables receive handles. The engine compiles against the target runtime and retains the exact classes.
+The seeded generator constructs valid GIR. The emitter generates node classes, reusable worker methods, and layout metadata without a second simulated heap. Named roots and payload fields use plain storage and direct plain accesses. Volatile and atomic instructions call VarHandles on that storage; only used variables receive handles. The engine compiles against the target runtime and retains the exact classes.
 
 The planned reducer will simplify GIR and execution settings while preserving the failure and any required stress conditions.
 

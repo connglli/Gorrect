@@ -103,9 +103,9 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 
 Reference operands are live handles or `null`; scalar operands are live scalar bindings or signed 64-bit literals. Reference slots and named roots can hold any target shape. A non-null reference read asserts the declared destination shape exactly. Field and array access requires a live, non-null owner and an index within the corresponding reference or data count. Static validation checks all blocks, including zero-iteration loops, for names, types, slot bounds, and labels.
 
-Root, strong-reference, and data reads/writes have volatile variants with the same operands: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Compare-set and exchange always have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
+Root, strong-reference, and data reads/writes are plain unless their instruction selects volatile access: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Each instruction selects its access mode independently, including when modes share a location. Compare-set and exchange have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
 
-Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
+Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Ending a binding removes its reachability obligation, without requiring reclamation or immediate disappearance of physical references. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
 
 ## Reference histories
 

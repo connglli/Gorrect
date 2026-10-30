@@ -1,6 +1,6 @@
 # Implementation plan
 
-This proposal divides the [implementation architecture](../../../docs/implementation.md) into twelve stages. The [design](../../../docs/design.md) owns the methodology; this note owns the proposed work order and completion checks. Each stage can contain several focused commits. A stage is complete when its checks pass, including the relevant failure cases.
+This plan orders the [implementation architecture](../../../docs/implementation.md) and the accepted [mechanism review](../designs/completed-2026-10-30-mechanism-coverage-review.md) into reviewable stages. The [design](../../../docs/design.md) owns the methodology; this note owns the work order and completion checks. Each stage can contain several focused commits. A stage is complete when its checks pass, including the relevant failure cases.
 
 ## Development JVMs
 
@@ -28,7 +28,8 @@ gorrect fuzz --profile hotspot-g1.json \
 * Stage 5 delivers a minimal `fuzz` command for concurrent and JIT stress.
 * Stages 8 and 9 extend the same interface across HotSpot collectors and OpenJ9.
 * Stage 10 reviews and refactors project-wide code and documentation quality.
-* Stages 11 and 12 deliver parallel campaigns and automated failure reduction.
+* Stages 11 through 25 expand mechanism coverage before expanding generation.
+* Stages 26 and 27 deliver parallel campaigns and automated failure reduction.
 
 ## 1. Establish the build and compatibility checks
 
@@ -82,7 +83,7 @@ Status: complete for bounded race-free ordinary-object histories. [GIR](../../..
 
 Verified independent exhaustive CAS/exchange/store-buffering models, publication, ownership transfer, ordinary-race rejection, protected referents, barriers, incomplete/corrupted evidence, and work/state budgets. The full build, JDK 17/21 execution, strict Javadoc, native checks, offline verification, and replay pass. The selected HotSpot target establishes joint compiled/concurrent/GC coverage; interpreted execution leaves compilation unmet. [Stage 7 notes](./completed-2026-10-29-stage7.md) record the mechanisms and limits.
 
-History arrays, live-binding/conditional checkpoints, weaker memory modes, arbitrary data races, and reclamation assertions remain unsupported. Large searches may exhaust their bounds without a verdict. Adding contended generator diversity follows stage 11.
+History arrays, live-binding/conditional checkpoints, weaker memory modes, arbitrary data races, and reclamation assertions remain unsupported. Large searches may exhaust their bounds without a verdict. Adding contended generator diversity follows stage 26.
 
 ## 8. Expand HotSpot collector and compiler coverage
 
@@ -104,7 +105,125 @@ Status: complete. [Stage 10 notes](./completed-2026-10-30-stage10.md) record the
 
 The normal build passes 275 Java tests and native/Javadoc checks, preserving all original cases and adding nine regressions. Eleven emission baselines preserve Java bytes and layout values; selected HotSpot C1/C2, OpenJ9 contended execution, old-bundle offline verification, and exact-class replay pass. Malformed fuzz profiles report input errors before creating a campaign. Target suites run fresh against external VM builds. The OpenJ9 matrix retains its known Metronome assertion (15/16 passing), without a driver workaround. Formats remain version 1; the local bug archive stays untracked.
 
-## 11. Expand stress generation and campaign execution
+## 11. Preserve access modes and define observation boundaries
+
+Status: complete. Named roots use plain storage and direct plain accesses; volatile/atomic operations retain explicit VarHandle effects. The contracts distinguish controlled lifetimes, diagnostic binding effects, logical/physical/class identity, and unsupported natural-liveness observation. [Stage 11 notes](./completed-2026-10-30-stage11.md) record the review and checks.
+
+The full build, JDK 17/21 storage/bytecode checks, mixed-mode verification/replay, selected HotSpot C1/C2 and OpenJ9 contended cases, and old-bundle verification pass. Selected fastdebug runs need longer local startup deadlines; committed defaults are unchanged. Live-local capture remains unsupported, and formats remain version 1.
+
+## 12. Add root and observation profiles
+
+Goal: verify live caller/worker roots and semantic uses under explicit observer-effect contracts.
+
+Add validated binding mappings and coordinated root evidence, including activation identity, with controlled/diagnostic and natural-liveness profiles. Complement heap capture with read/alias witnesses. Add structured capabilities describing supported combinations, preconditions, effects, memory footprints, observation coverage, and required target evidence; availability, exercised behavior, and verified obligations remain separate.
+
+Complete when caller/worker locals survive legitimate collection points, missing optimized-root origins stay inconclusive, and no hidden strong registry changes reachability. Calibrate no-agent, tagging, witness, and capture effects. Preserve Java 17 compatibility and test unsupported VM/profile combinations.
+
+## 13. Complete history and checkpoint composition
+
+Goal: remove blanket array/history restrictions and compose observation with conditional and parallel execution.
+
+Support reference and atomic histories over arrays, including unrelated array shapes, conditional checkpoints, and coordinated mid-worker capture. Specify checkpoint phase, live-root coverage, and synchronization before extending projection or search.
+
+Complete when independent small histories cover array aliasing, publication, acquisitions, and conditional visits. Missing workers, partial captures, invalid phase evidence, races, and exhausted budgets cannot pass. Existing ordinary-object cases retain their verdicts.
+
+## 14. Add scalar control, frames, and exception semantics
+
+Goal: express decisions and call paths that exercise real Java frames.
+
+Add a compact typed arithmetic/comparison basis, scalar branches, computed indices and length queries, calls/returns, and bounded recursion. Key handles by activation, not declaration alone. Model expected Java exceptions, exceptional unwind, and finally effects separately from invalid GIR; operations specify normal/exceptional post-states and access footprints, including permitted partial effects.
+
+Complete when CAS results control execution, repeated/recursive frames keep distinct lifetimes, and generated normal/unwind behavior matches independent models. Rejected GIR operations retain transactional failure behavior.
+
+## 15. Make references and queues first-class
+
+Goal: model Reference objects as graph participants and cover asynchronous cleanup.
+
+Allow wrapper aliases, roots, container movement, wrapper referents, and lifetimes independent of their original slots. Add named/optional queues, explicit enqueue outcomes, phantom processing, and Cleaner actors with modeled effects. Phantom observation must not reuse weak/soft acquisition semantics.
+
+Complete when independently enumerated wrapper/queue histories match execution, including replacement, duplicate/delayed delivery, wrapper chains, and cleanup effects. No wrapper registry strengthens referents. Finalization and resurrection remain a separate stage.
+
+## 16. Add collection and phase controls with evidence
+
+Goal: exercise young, full, and concurrent collector paths deliberately.
+
+Add capability-gated young collection, concurrent-cycle start/await, and phase rendezvous. Record actual allocation size, generation/region placement, and mutation/phase overlap where supported. Cover old-to-young publication, mark deletion/insertion, remembered sets, relocation, evacuation/promotion, and humongous pressure. HotSpot controls come first; OpenJ9 supplies equivalent certificates or explicit unsupported results.
+
+Complete when independent VM evidence establishes each requested path and negative fixtures reject absent/incorrect phase evidence. Measurements stay stress facts; collection requests or completion never imply mandatory clearing or reclamation.
+
+## 17. Scale allocation and checking
+
+Goal: support bounded-live-set churn and larger histories without weakening proofs.
+
+Retire provably unrecoverable garbage with sound summaries, bound evidence growth, and add explicit allocation-pressure workloads with actual-allocation evidence. Extend checking through incremental obligations, exact state merging, and sound partial-order reduction where measured bottlenecks justify them. Preserve wrapper, pending-cleanup, and future-resurrection constraints.
+
+Complete when long allocate/release runs stay bounded by live state rather than cumulative garbage, and small exhaustive models agree with optimized checking. Preserve all-schedules validity/race proofs and work limits. Partial evidence may refute an obligation but cannot establish a complete pass.
+
+## 18. Add layouts, bulk operations, and identity observations
+
+Goal: reach VM copying/barrier paths and realistic layouts.
+
+Add dynamically sized and typed arrays, mixed primitive payloads, inheritance/interfaces, declared final/volatile fields, range operations, real System.arraycopy with overlap, and real array/object clone. Separate logical allocation identity from copied diagnostic fields and class-definition identity. Add alias equality and stable opaque identity-hash observations; collisions remain legal.
+
+Complete when independent normal/exceptional models check copies and clones, bytecode/runtime evidence confirms real bulk/clone calls, requested intrinsification has separate evidence, and copied metadata cannot alias distinct logical allocations. Layout measurements do not become portable semantic assumptions.
+
+## 19. Add monitors and targeted JIT transitions
+
+Goal: exercise lock/header behavior and roots through compiler transitions.
+
+Model monitor scopes and exception-safe release. Add capability-gated OSR, deoptimization, uncommon-trap, inlining, and spill-oriented workloads with relevant execution witnesses. Cover hash/lock interactions and caller/callee roots using the established frame contracts.
+
+Complete when independent synchronization models match execution and evidence identifies the requested transition or interior compiled operation. Installation and entry/exit witnesses alone cannot certify continuous compiled execution. Missing target control remains an unmet capability.
+
+## 20. Add weaker memory profiles
+
+Goal: exercise opaque, acquire/release, and weak-CAS operations under sound permitted outcomes.
+
+Define separate memory semantics, synchronization, spurious-failure rules, access footprints, and checking limits before exposing each mode. Retain the race-free SC profile and reject unsupported combinations rather than reusing its oracle for weaker ordering. Arbitrary data races require a separately justified contract.
+
+Complete when independent memory litmus models agree with allowed/rejected outcomes and emitted operations preserve each mode. Check unsupported modes, mismatched evidence, and budget exhaustion without inventing stronger synchronization.
+
+## 21. Add deliberate native roots and critical arrays
+
+Goal: cover JNI local/global/weak-global roots and critical-array access.
+
+Model native root scopes and distinguish deliberate roots from observer leaks. Add primitive-array critical regions with bounded coordination that obeys JNI call/blocking restrictions. Record whether copying/pinning and collector overlap actually occurred; requesting critical access does not establish either.
+
+Complete when scope expiry, weak-root acquisition, exceptions, and concurrent collection match independent obligations. Leak guards still reject unintended observer roots. Target/JDK differences are explicit capabilities.
+
+## 22. Add loader lifetimes and unloading
+
+Goal: verify graphs whose classes and static roots can disappear.
+
+Represent loader and class-definition identities independently of signatures. Support loader-owned types/statics, release, and unload evidence. Metadata and method registries must not retain loaders or conflate same-named classes.
+
+Complete when duplicate signatures from distinct loaders remain distinct, retained loaders prevent invalid unload claims, and released loaders can be observed without diagnostic retention. Keep the known OpenJ9 assertion visible; latest-trunk reproduction remains separate work.
+
+## 23. Add expected heap exhaustion
+
+Goal: test allocation failure and soft-reference behavior without losing diagnostics.
+
+Model expected heap-allocation failure separately from invalid GIR, checking limits, and native/metaspace/direct-memory failure. Preallocate emergency evidence and specify failure/cleanup state. Apply stronger soft-reference guarantees only to the VM failure domain that provides them.
+
+Complete when bounded-heap cases preserve usable evidence and independent checks distinguish expected heap exhaustion from unrelated crashes or failed diagnostics. Validate both normal allocation and recovery paths.
+
+## 24. Add finalization and resurrection profiles
+
+Goal: cover post-reachability callbacks and resurrection without weakening ordinary reference histories.
+
+Use a separate semantic profile with explicit asynchronous actor effects, reachability transitions, resurrection roots, and target availability. Revisit garbage retirement and cleanup ordering before enabling it; GC can change more than wrapper state in this profile.
+
+Complete when independent small models cover callback execution, resurrection, and later release, with unsupported/disabled finalization explicit. Unobserved progress is not a reclamation guarantee.
+
+## 25. Add special runtime adapters
+
+Goal: reach VM paths ordinary nodes cannot reproduce.
+
+Add focused adapters for virtual threads/continuations and thread-local roots, MethodHandle/call-site relinking, Strings/interning/deduplication, and direct-buffer cleanup. Each adapter needs portable semantic obligations, target-specific execution evidence, and a declared minimum JDK; preserve the Java 17 base profile.
+
+Complete each adapter independently with conformance and unsupported-target checks. Add only mechanisms that exercise a distinct VM path or enable a stronger sound observation; no unchecked arbitrary-Java/Unsafe escape hatch.
+
+## 26. Expand stress generation and campaign execution
 
 Goal: extend `fuzz` to diverse workloads and parallel campaigns.
 
@@ -112,7 +231,7 @@ Expand generation with varied shapes, arrays, cycles, shared targets, allocation
 
 Complete when seeds reproduce GIR inputs and retained artifacts explain each result. Concurrent jobs must isolate state, output, and deadlines; interruption must retain completed and partial runs. Crashes, timeouts, inconclusive checks, and unmet stress requirements remain visible. Rejected generation candidates must leave model state and bookkeeping consistent with the generation contract.
 
-## 12. Reduce failures and validate the complete workflow
+## 27. Reduce failures and validate the complete workflow
 
 Goal: expose `reduce` and produce compact, credible reproducers.
 
@@ -124,4 +243,4 @@ Complete when injected graph, trace, and execution defects reduce without losing
 
 Each stage includes meaningful tests, artifact handling, and negative checks. CLI commands call shared engine operations; their implementation must not duplicate configuration, execution, or verification logic. Keep prototypes small and establish their contracts before expanding generation. Accepted contract changes belong in the owning design or implementation document.
 
-The early generator uses a small supported subset. Phantom processing, finalization, resurrection, and deliberately racy programs require separate semantic profiles and follow-up plans.
+The early generator uses a small supported subset. Mechanism stages include explicit semantic profiles and capability checks before generation uses them. Each stage may contain focused commits, but support is complete only across semantics, lowering, runtime, observation, target evidence, and independent checks.

@@ -142,7 +142,8 @@ public final class JavaEmitter {
     for (var root : program.roots()) {
       String field = "r" + roots.size();
       roots.put(root.name(), field);
-      line("public static volatile Object " + field + ";");
+      // Ordering belongs to each access; volatile storage would strengthen direct plain accesses.
+      line("public static Object " + field + ";");
     }
     line("}");
     allocationCounters();

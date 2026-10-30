@@ -2,7 +2,9 @@ package io.connglli.gorrect.engine.model;
 
 /**
  * Case-local identity independent of addresses and allocation interleaving. Site zero identifies an
- * initial object; other sites identify allocation instructions.
+ * initial object; other sites identify allocation instructions. Physical movement or
+ * materialization preserves this identity; copied diagnostic fields cannot give a fresh allocation
+ * its identity.
  */
 public record ObjectId(int worker, int site, long occurrence) implements Comparable<ObjectId> {
   public ObjectId {
