@@ -221,6 +221,13 @@ public final class HistoryOracle {
           if (value) scoped(present.body());
         }
 
+        case Instruction.IfNonzero branch -> {
+          boolean value = machine.nonzero(branch.condition());
+          machine.marker(branch.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
+          expect();
+          scoped(value ? branch.thenBody() : branch.elseBody());
+        }
+
         case Instruction.Parallel ignored ->
             throw new GirException("Parallel reference histories are unsupported");
         case Instruction.Scope scope -> {

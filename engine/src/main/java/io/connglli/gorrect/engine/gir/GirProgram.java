@@ -79,6 +79,10 @@ public record GirProgram(
                 case Instruction.Repeat repeat -> pending.push(repeat.body().iterator());
                 case Instruction.Acquire acquire -> pending.push(acquire.body().iterator());
                 case Instruction.IfPresent present -> pending.push(present.body().iterator());
+                case Instruction.IfNonzero branch -> {
+                  pending.push(branch.elseBody().iterator());
+                  pending.push(branch.thenBody().iterator());
+                }
                 case Instruction.Parallel parallel -> {
                   for (int index = parallel.workers().size() - 1; index >= 0; index--)
                     pending.push(parallel.workers().get(index).body().iterator());

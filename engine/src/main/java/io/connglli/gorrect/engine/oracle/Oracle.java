@@ -45,6 +45,11 @@ public final class Oracle {
           machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
           if (value) scoped(present.body(), machine);
         }
+        case Instruction.IfNonzero branch -> {
+          boolean value = machine.nonzero(branch.condition());
+          machine.marker(branch.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
+          scoped(value ? branch.thenBody() : branch.elseBody(), machine);
+        }
         case Instruction.Acquire ignored ->
             throw new GirException("Acquisition requires a recorded history");
         case Instruction.Parallel parallel -> parallel(parallel, machine);

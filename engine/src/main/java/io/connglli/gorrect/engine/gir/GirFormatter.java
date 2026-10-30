@@ -67,6 +67,15 @@ public final class GirFormatter {
         present.body().forEach(child -> instruction(child, indent + 1));
         line(indent, "}");
       }
+      case Instruction.IfNonzero branch -> {
+        line(indent, prefix + "if-nonzero " + operand(branch.condition()) + " {");
+        branch.thenBody().forEach(child -> instruction(child, indent + 1));
+        if (!branch.elseBody().isEmpty()) {
+          line(indent, "} else {");
+          branch.elseBody().forEach(child -> instruction(child, indent + 1));
+        }
+        line(indent, "}");
+      }
       case Instruction.Acquire acquire -> {
         line(
             indent,

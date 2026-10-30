@@ -598,6 +598,11 @@ final class GraphMachine {
     };
   }
 
+  /** Reads the condition without changing model state or charging its branch step. */
+  boolean nonzero(Operand operand) {
+    return scalar(operand).value() != 0;
+  }
+
   private Value.Scalar scalar(Operand operand) {
     return switch (operand) {
       case Operand.Literal literal -> new Value.Scalar(literal.value());

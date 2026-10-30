@@ -126,6 +126,13 @@ public final class GirValidator {
             block(present.body(), depth + 1);
             conditionalDepth--;
           }
+          case Instruction.IfNonzero branch -> {
+            operand(branch.condition(), false);
+            conditionalDepth++;
+            block(branch.thenBody(), depth + 1);
+            block(branch.elseBody(), depth + 1);
+            conditionalDepth--;
+          }
           case Instruction.Acquire acquire -> {
             slot(acquire.owner(), acquire.index(), true);
             var shape = shape(acquire.shape());

@@ -404,6 +404,15 @@ public final class ConcurrentHistory {
               }
             }
 
+            case Instruction.IfNonzero branch -> {
+              boolean value = machine.nonzero(branch.condition());
+              machine.marker(branch.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
+              emit(worker);
+              machine.enterScope();
+              thread.tasks.push(new Leave(0));
+              thread.body(value ? branch.thenBody() : branch.elseBody());
+            }
+
             case Instruction.Scope scope -> {
               machine.step(scope.id(), false);
               emit(worker);

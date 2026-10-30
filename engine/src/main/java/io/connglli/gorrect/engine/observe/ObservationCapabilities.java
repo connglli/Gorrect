@@ -64,6 +64,7 @@ public final class ObservationCapabilities {
           .anyMatch(
               instruction ->
                   instruction instanceof Instruction.IfPresent
+                      || instruction instanceof Instruction.IfNonzero
                       || instruction instanceof Instruction.Acquire))
         reasons.add("Natural liveness requires unconditional control flow");
     }

@@ -137,6 +137,16 @@ public final class GirParser {
             case "exchange-data" ->
                 new Instruction.Exchange(id, name(), null, location(opcode), operand());
             case "if-present" -> new Instruction.IfPresent(id, name(), block(depth + 1));
+            case "if-nonzero" -> {
+              var condition = operand();
+              var thenBody = block(depth + 1);
+              // A keyword followed by ':' remains a source label, including else.
+              var elseBody =
+                  !lookahead.text().equals(":") && take("else")
+                      ? block(depth + 1)
+                      : List.<Instruction>of();
+              yield new Instruction.IfNonzero(id, condition, thenBody, elseBody);
+            }
             case "read-root" -> new Instruction.ReadRoot(id, name(), name(), name());
             case "write-root" -> new Instruction.WriteRoot(id, name(), operand());
             case "read-ref" -> new Instruction.ReadReference(id, name(), name(), name(), integer());

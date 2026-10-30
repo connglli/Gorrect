@@ -129,7 +129,7 @@ Complete when independent small histories cover array aliasing, publication, acq
 
 Goal: express decisions and call paths that exercise real Java frames.
 
-Add a compact typed arithmetic/comparison basis, scalar branches, computed indices and length queries, calls/returns, and bounded recursion. Key handles by activation, not declaration alone. Model expected Java exceptions, exceptional unwind, and finally effects separately from invalid GIR; operations specify normal/exceptional post-states and access footprints, including permitted partial effects.
+Start with `if-nonzero` over existing numeric results. Defer arithmetic and extra numeric types until a concrete workload needs them. Later independent slices cover computed indices/length queries, calls/returns, and bounded recursion. Key handles by activation, not declaration alone. Model expected Java exceptions, exceptional unwind, and finally effects separately from invalid GIR; operations specify normal/exceptional post-states and access footprints, including permitted partial effects.
 
 Complete when CAS results control execution, repeated/recursive frames keep distinct lifetimes, and generated normal/unwind behavior matches independent models. Rejected GIR operations retain transactional failure behavior.
 

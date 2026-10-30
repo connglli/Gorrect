@@ -438,6 +438,26 @@ public final class JavaEmitter {
         return;
       }
 
+      case Instruction.IfNonzero op -> {
+        String decision = "branch" + op.id();
+        line("boolean " + decision + " = " + operand(op.condition()) + " != 0L;");
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.BRANCH.ordinal(), "
+                + decision
+                + " ? 1L : 0L);");
+        line("if (" + decision + ") {");
+        block(op.thenBody());
+        if (!op.elseBody().isEmpty()) {
+          line("} else {");
+          block(op.elseBody());
+        }
+        line("}");
+        return;
+      }
+
       case Instruction.Acquire op -> {
         var owner = binding(op.owner());
         String ref = "reference" + op.id(), result = "b" + op.id();

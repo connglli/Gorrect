@@ -103,6 +103,12 @@ public final class HistoryPlan {
           event(present.id(), ExecutionTrace.Kind.BRANCH);
           block(present.body(), null, 0);
         }
+        case Instruction.IfNonzero branch -> {
+          event(branch.id(), ExecutionTrace.Kind.BRANCH);
+          // Reserve either arm without interpreting placeholder scalar values as a choice.
+          block(branch.thenBody(), null, 0);
+          block(branch.elseBody(), null, 0);
+        }
         case Instruction.Scope scope -> {
           event(scope.id(), ExecutionTrace.Kind.OPERATION);
           block(scope.body(), null, 0);

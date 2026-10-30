@@ -179,6 +179,21 @@ public sealed interface Instruction {
   }
 
   /**
+   * Evaluates an existing scalar or signed long literal once. Zero selects the else arm; every
+   * nonzero value selects the then arm. Records one branch step with value zero or one. Each arm
+   * has its own scope, exports no bindings, and cannot release outer bindings; heap/root writes
+   * persist. Both arms require static validation even when the condition is constant.
+   */
+  record IfNonzero(
+      int id, Operand condition, List<Instruction> thenBody, List<Instruction> elseBody)
+      implements Instruction {
+    public IfNonzero {
+      thenBody = List.copyOf(thenBody);
+      elseBody = List.copyOf(elseBody);
+    }
+  }
+
+  /**
    * Requires a live reference or scalar binding declared in the current scope. Makes it unavailable
    * for subsequent reads and removes its handle obligation, if any. Its name remains reserved until
    * scope exit. Roots and heap slots referencing the same object retain their values.

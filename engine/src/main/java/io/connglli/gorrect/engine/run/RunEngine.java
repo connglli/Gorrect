@@ -15,6 +15,7 @@ import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
@@ -353,9 +354,15 @@ public final class RunEngine {
     Files.writeString(directory.resolve("generated/Case.java"), emission.source());
     JsonFiles.write(directory.resolve("generated/layout.json"), emission.layout());
 
+    // Exact obligations still select one path; recorder capacity also covers the other arm.
+    var storage =
+        !recordReferences
+                && program.instructions().anyMatch(Instruction.IfNonzero.class::isInstance)
+            ? HistoryPlan.plan(program, OracleLimits.DEFAULT)
+            : oracle;
     var recorderCounts = new TreeMap<Integer, Long>();
     recorderCounts.put(0, 0L);
-    oracle.events().forEach(event -> recorderCounts.merge(event.worker(), 1L, Long::sum));
+    storage.events().forEach(event -> recorderCounts.merge(event.worker(), 1L, Long::sum));
     var recorderPlan = new StringBuilder();
     recorderCounts.forEach(
         (worker, count) -> recorderPlan.append(worker).append('=').append(count).append('\n'));

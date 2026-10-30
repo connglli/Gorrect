@@ -94,6 +94,7 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `exchange-ref old N owner index update;` | Atomically replace a strong slot and bind its old target. |
 | `exchange-data old owner index update;` | Atomically replace a long slot and bind its old value. |
 | `if-present h { ... }` | Execute a child scope when the existing strong handle is non-null. |
+| `if-nonzero value { ... } else { ... }` | Execute the first child scope for a nonzero scalar, otherwise the optional else scope. |
 | `release name;` | End the lifetime of a binding in the current scope. |
 | `scope { ... }` | Execute a block with its own bindings. |
 | `repeat count { ... }` | Execute a block a nonnegative, literal number of times. |
@@ -106,9 +107,18 @@ Reference operands are live handles or `null`; scalar operands are live scalar b
 
 Root, strong-reference, and data reads/writes are plain unless their instruction selects volatile access: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Each instruction selects its access mode independently, including when modes share a location. Compare-set and exchange have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
 
+`if-nonzero` evaluates a numeric binding or signed 64-bit literal once: zero selects `else`, and every nonzero value, including a negative value, selects the first arm. Each arm has a child scope and exports no bindings; heap and root writes persist. Both arms require static validation. For example, a CAS result can guard mutation:
+
+```text
+compare-set-root won shared candidate null;
+if-nonzero won {
+  write-data candidate 0 7;
+}
+```
+
 Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Ending a binding removes its reachability obligation, without requiring reclamation or immediate disappearance of physical references. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
 
-Main-thread checkpoints inside `acquire` and `if-present` execute only when their enclosing bodies execute. A skipped body contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. These checkpoints require [controlled binding observation](./observation.md#coverage-and-observer-effects), including coverage of the acquired handle.
+Main-thread checkpoints inside `acquire`, `if-present`, or `if-nonzero` execute only on the selected path. A skipped arm contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. These checkpoints require [controlled observation](./observation.md#coverage-and-observer-effects), with binding coverage for live reference handles, including acquired handles.
 
 ## Reference histories
 
@@ -142,7 +152,7 @@ program {
 
 Barriers and worker checkpoints appear directly in worker bodies. Every worker must have the same ordered sequence of barrier/checkpoint kinds. Both preserve bindings and make preceding phase writes visible before any following phase starts. A worker checkpoint pauses every worker and the caller for one combined capture, then begins the next phase. The first declared worker's checkpoint site and actual visit identify that capture. [concurrent.gir](../examples/concurrent.gir) exercises ordinary barriers; [worker-capture.gir](../examples/worker-capture.gir) captures caller and worker bindings.
 
-Worker checkpoints require `roots-diagnostic`. A capture-bearing parallel block may appear within a literal repeat or ordinary scope, but not under `if-present` or `acquire`. Checkpoints inside worker-local repeats, scopes, or conditional bodies are unsupported. Missing participant or physical-root evidence is inconclusive; it cannot establish that a binding was lost.
+Worker checkpoints require `roots-diagnostic`. A capture-bearing parallel block may appear within a literal repeat or ordinary scope, but not under `if-present`, `if-nonzero`, or `acquire`. Checkpoints inside worker-local repeats, scopes, or conditional bodies are unsupported. Missing participant or physical-root evidence is inconclusive; it cannot establish that a binding was lost.
 
 ## Contended histories
 
