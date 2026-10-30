@@ -18,6 +18,7 @@ import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
+import io.connglli.gorrect.engine.oracle.CheckpointPlan;
 import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.HistoryLimitException;
@@ -88,6 +89,7 @@ final class RunVerifier {
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       var problems = new ArrayList<String>();
       var unmet = new ArrayList<String>();
+      var captures = new CaptureReader(directory, run, profile, layout);
       unmet.addAll(VmDriver.requirements(profile, target(directory)));
 
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
@@ -109,17 +111,12 @@ final class RunVerifier {
 
       if (references || concurrent) {
 
-        controls(directory, run, oracle);
+        var messages = controls(directory, run, oracle, program, trace, true);
+        var checkpoints = new CheckpointPlan(oracle);
         var observations = new ArrayList<HistoryOracle.Observation>();
-        for (int index = 1; index <= oracle.checkpoints().size() + 1; index++) {
-          var snapshot = snapshot(directory, run, index);
-          compilationCoverage(snapshot, profile, unmet);
-          var expectedBindings =
-              index <= oracle.checkpoints().size()
-                  ? oracle.checkpoints().get(index - 1).graph().handles().keySet()
-                  : Set.<Integer>of();
-          var projection =
-              projection(directory, snapshot, layout, observation, expectedBindings, exercised);
+        for (int index = 1; index < messages.length - 1; index++) {
+          var expectedBindings = checkpoints.declarations(messages[index].operation());
+          var projection = captures.read(index, expectedBindings);
           observations.add(
               new HistoryOracle.Observation(projection.graph(), projection.problems()));
         }
@@ -136,6 +133,7 @@ final class RunVerifier {
                     program, trace, history, observations, historyLimits(profile));
 
         problems.addAll(result.problems());
+        captures.merge(exercised, unmet, problems);
         if (result.execution() != null) {
           var coverage =
               StressVerifier.verify(directory, run, program, result.execution(), profile);
@@ -152,10 +150,14 @@ final class RunVerifier {
 
         report =
             new RunReport(
-                result.invalidWorkload()
-                    ? RunReport.Outcome.INVALID_WORKLOAD
-                    : RunReport.Outcome.COMPLETED,
-                result.verdict(),
+                captures.failed()
+                    ? RunReport.Outcome.EXTRACTION_ERROR
+                    : result.invalidWorkload()
+                        ? RunReport.Outcome.INVALID_WORKLOAD
+                        : RunReport.Outcome.COMPLETED,
+                captures.failed() && result.verdict() != ExactVerifier.Verdict.VIOLATED
+                    ? ExactVerifier.Verdict.INCONCLUSIVE
+                    : result.verdict(),
                 unmet,
                 problems);
         if (result.verdict() == ExactVerifier.Verdict.SATISFIED) exercised.add("named-roots");
@@ -190,7 +192,7 @@ final class RunVerifier {
       var verified = new HashSet<String>();
       if (!violated) verified.addAll(exercised);
 
-      controls(directory, run, oracle);
+      controls(directory, run, oracle, program, trace, false);
       boolean inconclusive = false;
       var natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
       for (int i = 0; i <= oracle.checkpoints().size(); i++) {
@@ -198,16 +200,11 @@ final class RunVerifier {
             i < oracle.checkpoints().size()
                 ? oracle.checkpoints().get(i)
                 : new OracleResult.Checkpoint(0, 1, oracle.finalGraph());
-        var snapshot = snapshot(directory, run, i + 1L);
-        compilationCoverage(snapshot, profile, unmet);
-
         var expected =
             natural == null
                 ? visit.graph()
                 : natural.obligations(visit.graph(), visit.operation(), visit.occurrence());
-        var projection =
-            projection(
-                directory, snapshot, layout, observation, expected.handles().keySet(), exercised);
+        var projection = captures.read(i + 1L, expected.handles().keySet());
         if (projection.graph().isPresent()) exercised.add("named-roots");
         var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
@@ -216,6 +213,8 @@ final class RunVerifier {
           problems.add("Checkpoint " + (i + 1) + ": " + problem);
       }
 
+      captures.merge(exercised, unmet, problems);
+
       // Extraction gaps cannot become a pass, even when another checkpoint is fully covered.
       var verdict =
           violated
@@ -223,7 +222,12 @@ final class RunVerifier {
               : inconclusive ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED;
       if (verdict == ExactVerifier.Verdict.SATISFIED) verified.addAll(exercised);
       requiredObservations(profile, exercised, unmet, problems);
-      report = new RunReport(RunReport.Outcome.COMPLETED, verdict, unmet, problems);
+      report =
+          new RunReport(
+              captures.failed() ? RunReport.Outcome.EXTRACTION_ERROR : RunReport.Outcome.COMPLETED,
+              verdict,
+              unmet,
+              problems);
       observationReport(directory, program, observation, exercised, verified);
     } catch (OracleLimitException | HistoryLimitException exception) {
       report = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
@@ -236,6 +240,51 @@ final class RunVerifier {
     }
     JsonFiles.write(directory.resolve("result.json"), report);
     return report;
+  }
+
+  /** Loads independent captures without letting a later gap erase an earlier refutation. */
+  private static final class CaptureReader {
+    private final Path directory;
+    private final long run;
+    private final TargetProfile profile;
+    private final ObservationLayout layout;
+    private final Set<String> exercised = new HashSet<>();
+    private final List<String> unmet = new ArrayList<>(), errors = new ArrayList<>();
+
+    CaptureReader(Path directory, long run, TargetProfile profile, ObservationLayout layout) {
+      this.directory = directory;
+      this.run = run;
+      this.profile = profile;
+      this.layout = layout;
+    }
+
+    SnapshotProjector.Projection read(long sequence, Set<Integer> declarations) {
+      try {
+        var capture = snapshot(directory, run, sequence);
+        compilationCoverage(capture, profile, unmet);
+        return projection(
+            directory,
+            capture,
+            layout,
+            ObservationProfile.parse(profile.observation()),
+            declarations,
+            exercised);
+      } catch (IOException | RuntimeException failure) {
+        String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
+        errors.add(problem);
+        return new SnapshotProjector.Projection(Optional.empty(), List.of(problem));
+      }
+    }
+
+    boolean failed() {
+      return !errors.isEmpty();
+    }
+
+    void merge(Set<String> exercised, List<String> unmet, List<String> problems) {
+      exercised.addAll(this.exercised);
+      for (String gap : this.unmet) if (!unmet.contains(gap)) unmet.add(gap);
+      for (String error : errors) if (!problems.contains(error)) problems.add(error);
+    }
   }
 
   /** Coverage uses declaration keys only; values come exclusively from target evidence. */
@@ -309,15 +358,20 @@ final class RunVerifier {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
 
-      var plan = HistoryPlan.plan(program, OracleLimits.DEFAULT);
+      var plan = new CheckpointPlan(HistoryPlan.plan(program, OracleLimits.DEFAULT));
+      var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
+      var recorded = CheckpointPlan.recorded(program, trace);
+      prefixControls(directory, run, plan, recorded);
       var observations = new ArrayList<HistoryOracle.Observation>();
       for (int index = 1;
           Files.exists(directory.resolve("snapshots/" + index + ".gsnap"));
           index++) {
-        var expectedBindings =
-            index <= plan.checkpoints().size()
-                ? plan.checkpoints().get(index - 1).graph().handles().keySet()
-                : Set.<Integer>of();
+        if (index > recorded.size())
+          throw new IOException("Capture has no recorded checkpoint marker");
+        var visit = recorded.get(index - 1);
+        if (!plan.permits(visit.operation(), visit.occurrence()))
+          throw new IOException("Recorded checkpoint exceeds syntax bounds");
+        var expectedBindings = plan.declarations(visit.operation());
         var projection =
             projection(
                 directory,
@@ -332,7 +386,7 @@ final class RunVerifier {
       var result =
           HistoryOracle.checkFailure(
               program,
-              ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run),
+              trace,
               ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run),
               observations,
               new HistoryLimits(
@@ -352,33 +406,74 @@ final class RunVerifier {
     return execution;
   }
 
-  private static ControlMessage[] controls(Path directory, long run, OracleResult oracle)
+  /** Failure diagnosis needs the complete checkpoint prefix, without an invented final capture. */
+  private static void prefixControls(
+      Path directory, long run, CheckpointPlan plan, List<CheckpointPlan.Visit> recorded)
       throws IOException {
+    var messages = controlMessages(directory, run);
+    int checkpoints = recorded.size() - 1;
+    if (messages.length != checkpoints + 2
+        || messages[0].kind() != ControlMessage.Kind.HELLO
+        || messages[0].sequence() != 0
+        || messages[messages.length - 1].kind() != ControlMessage.Kind.FAILED
+        || messages[messages.length - 1].sequence() != checkpoints)
+      throw new IOException("Failure control prefix is incomplete");
+    for (int index = 0; index < checkpoints; index++) {
+      var message = messages[index + 1];
+      var visit = recorded.get(index);
+      if (message.kind() != ControlMessage.Kind.CHECKPOINT
+          || message.sequence() != index + 1L
+          || message.operation() != visit.operation()
+          || message.occurrence() != visit.occurrence()
+          || !plan.permits(visit.operation(), visit.occurrence()))
+        throw new IOException("Failure checkpoint identity differs from recorded markers");
+    }
+  }
+
+  private static ControlMessage[] controlMessages(Path directory, long run) throws IOException {
     var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
     if (JsonFiles.number(JsonFiles.required(transcript, "version")) != 1
         || JsonFiles.number(JsonFiles.required(transcript, "run")) != run)
       throw new IOException("Control transcript identity mismatch");
     var messages =
         JsonFiles.GSON.fromJson(JsonFiles.required(transcript, "messages"), ControlMessage[].class);
-    if (messages.length != oracle.checkpoints().size() + 3
+    if (messages == null) throw new IOException("Control transcript omits messages");
+    for (var message : messages)
+      if (message == null || message.run() != run)
+        throw new IOException("Control transcript contains another run");
+    return messages;
+  }
+
+  /** Cross-checks capture identities without accepting the trace's branch choices as legal. */
+  private static ControlMessage[] controls(
+      Path directory,
+      long run,
+      OracleResult oracle,
+      GirProgram program,
+      ExecutionTrace trace,
+      boolean bounded)
+      throws IOException {
+    var messages = controlMessages(directory, run);
+    var plan = new CheckpointPlan(oracle);
+    var recorded = CheckpointPlan.recorded(program, trace);
+    if (messages.length != recorded.size() + 2
+        || messages.length > plan.visits().size() + 2
         || messages[0].kind() != ControlMessage.Kind.HELLO
         || messages[0].sequence() != 0
         || messages[messages.length - 1].kind() != ControlMessage.Kind.COMPLETE
-        || messages[messages.length - 1].sequence() != oracle.checkpoints().size() + 1L)
+        || messages[messages.length - 1].sequence() != recorded.size())
       throw new IOException("Control transcript is incomplete");
-    for (var message : messages)
-      if (message.run() != run) throw new IOException("Control transcript contains another run");
-    for (int index = 0; index <= oracle.checkpoints().size(); index++) {
-      var expected =
-          index < oracle.checkpoints().size()
-              ? oracle.checkpoints().get(index)
-              : new OracleResult.Checkpoint(0, 1, oracle.finalGraph());
+    for (int index = 0; index < recorded.size(); index++) {
+      var visit = recorded.get(index);
       var message = messages[index + 1];
       if (message.kind() != ControlMessage.Kind.CHECKPOINT
           || message.sequence() != index + 1L
-          || message.operation() != expected.operation()
-          || message.occurrence() != expected.occurrence())
-        throw new IOException("Control checkpoint identity mismatch");
+          || message.operation() != visit.operation()
+          || message.occurrence() != visit.occurrence()
+          || !plan.permits(visit.operation(), visit.occurrence()))
+        throw new IOException("Control checkpoint identity differs from recorded markers");
+      if (!bounded && (index >= plan.visits().size() || !plan.visits().get(index).equals(visit)))
+        throw new IOException("Control checkpoint identity differs from the exact oracle");
     }
     return messages;
   }

@@ -45,8 +45,7 @@ class AtomicGirTest {
         "compare-set-ref x owner 1 null null;",
         "exchange-data old owner 0 owner;",
         "exchange-root old Missing r null;",
-        "read-data n owner 0; if-present n {}",
-        "if-present owner { checkpoint; }"
+        "read-data n owner 0; if-present n {}"
       })
   void rejectsInvalidContracts(String body) {
     assertThrows(

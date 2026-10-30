@@ -29,7 +29,6 @@ public final class GirValidator {
   private int nextOperation = 1;
   private int nextWorker = 1;
   private int workerDepth = -1;
-  private int conditionalDepth;
 
   private record Binding(Shape shape, boolean live, boolean pinned) {
     Binding(Shape shape, boolean live) {
@@ -122,22 +121,12 @@ public final class GirValidator {
           case Instruction.IfPresent present -> {
             if (binding(present.name()).shape() == null)
               fail("if-present requires a reference handle");
-            conditionalDepth++;
-            try {
-              block(present.body(), depth + 1);
-            } finally {
-              conditionalDepth--;
-            }
+            block(present.body(), depth + 1);
           }
           case Instruction.Acquire acquire -> {
             slot(acquire.owner(), acquire.index(), true);
             var shape = shape(acquire.shape());
-            conditionalDepth++;
-            try {
-              block(acquire.body(), depth + 1, acquire.name(), shape);
-            } finally {
-              conditionalDepth--;
-            }
+            block(acquire.body(), depth + 1, acquire.name(), shape);
           }
           case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
           case Instruction.Scope scope -> block(scope.body(), depth + 1);
@@ -151,8 +140,6 @@ public final class GirValidator {
               fail("Barriers must be direct worker statements");
             if (operation instanceof Instruction.Checkpoint && workerDepth >= 0)
               fail("Worker checkpoints are unsupported; observe after join");
-            if (operation instanceof Instruction.Checkpoint && conditionalDepth > 0)
-              fail("Observe after conditional scopes have ended");
             operation(operation);
           }
         }

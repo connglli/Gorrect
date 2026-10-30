@@ -88,8 +88,9 @@ public sealed interface Instruction {
   /**
    * Reads a soft/weak slot exactly once. A non-null result must have the declared shape and is held
    * strongly in the child scope while its body executes; null skips the body. The result's binding
-   * expires at scope exit and cannot be released early. Checkpoints inside the body are
-   * unsupported. Acquisitions consume one step and a successful scope exit consumes one.
+   * expires at scope exit and cannot be released early. Checkpoints in the body include the
+   * acquired handle among their binding obligations. Acquisitions consume one step and a successful
+   * scope exit consumes one.
    */
   record Acquire(int id, String name, String shape, String owner, int index, List<Instruction> body)
       implements Instruction {
@@ -169,8 +170,7 @@ public sealed interface Instruction {
 
   /**
    * Consumes one branch step, executing a child scope iff the existing strong handle is non-null.
-   * It does not reread a slot or change the handle's lifetime. Checkpoints in the body are
-   * unsupported.
+   * It does not reread a slot or change the handle's lifetime.
    */
   record IfPresent(int id, String name, List<Instruction> body) implements Instruction {
     public IfPresent {
@@ -188,9 +188,11 @@ public sealed interface Instruction {
   /**
    * Records immutable obligations after preceding statements: named roots, live reference handles,
    * and their accessible closure with exact contents under the selected legal history. Each
-   * execution appends a visit numbered from one for this instruction. Heap and bindings are
-   * unchanged; step and snapshot budgets are charged. Physical binding obligations depend on the
-   * observation profile. It does not request garbage collection.
+   * execution appends a visit numbered from one for this instruction; skipped conditional bodies
+   * contribute no visits. Heap and bindings are unchanged; step and snapshot budgets are charged.
+   * Physical binding obligations depend on the observation profile. Conditional checkpoints require
+   * controlled binding observation; worker checkpoints are unsupported. It does not request garbage
+   * collection.
    */
   record Checkpoint(int id) implements Operation {}
 

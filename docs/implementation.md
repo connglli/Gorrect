@@ -81,7 +81,9 @@ Commands select `--profile`; its fields have no CLI overrides. An integration ca
 
 The runner enforces startup, compilation, and run deadlines, captures output, terminates processes, and retains partial artifacts. The engine and target exchange versioned control frames over a Unix domain socket. Its short temporary path is independent of the run directory and is removed on success or failure. Bulk traces and snapshots are files.
 
-Frames identify the run and checkpoint operation/visit. The target writes a snapshot and waits for acknowledgement at each checkpoint; completion requires every expected checkpoint and the final observation after outer-scope release. Version, identity, bounds, and completion checks detect malformed, missing, or mixed-run evidence. The [protocol module](../protocol/src/main/java/io/connglli/gorrect/protocol/) owns the codecs.
+Frames identify the run, capture sequence, and checkpoint operation/visit. The target writes a snapshot and waits for acknowledgement at each executed checkpoint. `HistoryPlan` treats conditional bodies as taken to reserve maximum storage and per-site visit counts; its event payloads and graph targets are placeholders. For histories, the runner accepts actual visits within those bounds, with consecutive capture sequences and per-site visit numbers. Exact programs retain their known checkpoint order. Completion requires a final capture after outer-scope release, and no later capture is accepted. The [protocol module](../protocol/src/main/java/io/connglli/gorrect/protocol/) owns the codecs.
+
+For completed runs, offline verification cross-checks control identities against actual main-thread checkpoint markers in the scalar trace and requires the final capture. This establishes capture correspondence; the independent oracle/history checker still validates branch choices, graph states, and the complete trace. Inconsistent control evidence is an extraction error; the live runner reports protocol failures. Binding coverage follows the [observation contract](./observation.md#coverage-and-observer-effects).
 
 ## Artifacts and results
 

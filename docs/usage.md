@@ -63,7 +63,7 @@ Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/co
 
 Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) requests cycle-completion evidence. For HotSpot `gc-completion`, every executed `collect` must contain a completed qualifying whole-heap/major VM cycle with the requested cause. Ignored requests, partial cycles, pauses alone, and missing JFR evidence leave coverage unmet. Write `collect; checkpoint;` to observe after such a request; completion does not force reference clearing, queue delivery, or reclamation. OpenJ9 cycle-completion evidence is unsupported.
 
-Use a binding observation profile for checkpoints with live reference handles. Named-root capture requires their release; scalars can remain live. Contended histories support objects and arrays and require a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
+Use a binding observation profile for checkpoints with live reference handles, and `roots-diagnostic` for checkpoints inside `acquire` or `if-present`. Named-root capture requires their release; scalars can remain live. Contended histories support objects and arrays and require a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md#coverage-and-observer-effects) defines capture effects and natural-profile restrictions.
 
 [locals.gir](../examples/locals.gir) keeps an object in a caller local across collection, checks its alias and data, then publishes it through a named root. Run it with `roots-diagnostic` or `roots-natural`.
 
@@ -83,7 +83,11 @@ Set `support.whitebox` to the JAR path. Each bundle records its checksum and the
 
 Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements. `observation-capabilities.json` records supported combinations, preconditions, effects, evidence requirements, and separate availability, exercise, and verification facts. This derived report is never an input to verification.
 
-A conflicting graph, scalar read, or impossible reference choice is a violation. Incomplete coverage or exhausted search is inconclusive; malformed evidence or altered executables is an extraction error. A rejected conditional precondition is an invalid workload when its recorded prefix establishes a legal path; otherwise the runtime failure remains. A confirmed violation stays visible alongside inconclusive checkpoints.
+A conflicting graph, scalar read, or impossible reference choice is a violation. A confirmed violation remains visible alongside later incomplete coverage or extraction errors. Incomplete coverage or exhausted search is inconclusive.
+
+Inconsistent control/trace markers, malformed evidence, or altered executables cause an extraction error during offline verification; live control violations are protocol failures.
+
+A rejected conditional precondition is an invalid workload only when its recorded prefix establishes a legal path and every preceding graph observation is present, usable, and fully matched. Missing, inconclusive, impossible, or unconsumed checkpoint evidence preserves the runtime failure.
 
 | Exit status | Meaning |
 | --- | --- |

@@ -154,7 +154,10 @@ public final class ConcurrentHistory {
       List<HistoryOracle.Observation> observations,
       HistoryLimits limits) {
     GirValidator.validate(program);
-    if (!trace.complete() || !history.complete() || trace.run() != history.run())
+    if (!trace.complete()
+        || !history.complete()
+        || trace.run() != history.run()
+        || !HistoryOracle.linked(trace, history))
       return new HistoryOracle.Result(
           ExactVerifier.Verdict.INCONCLUSIVE,
           List.of("Incomplete or mixed-run history"),
@@ -162,14 +165,6 @@ public final class ConcurrentHistory {
           false);
 
     try {
-      if (observations.size()
-          != HistoryPlan.plan(program, OracleLimits.DEFAULT).checkpoints().size() + 1)
-        return new HistoryOracle.Result(
-            ExactVerifier.Verdict.INCONCLUSIVE,
-            List.of("Missing or extra graph observations"),
-            null,
-            false);
-
       var budget = new HistoryBudget(limits);
       // Share the verification budget across proof and matching, not just across their forks.
       new ConcurrentHistory(budget, null, null, List.of()).explore(program);
@@ -182,6 +177,8 @@ public final class ConcurrentHistory {
             ExactVerifier.Verdict.VIOLATED, List.of(search.mismatch), null, false);
 
       var problems = new ArrayList<String>();
+      if (observations.size() != found.checkpoint)
+        problems.add("Missing or extra graph observations for the validated path");
       for (var observation : observations)
         if (observation.graph().isEmpty()) problems.addAll(observation.problems());
 
@@ -624,7 +621,11 @@ public final class ConcurrentHistory {
         checkpoint++;
         return;
       }
-      require(checkpoint < observations.size(), "Missing graph observation");
+      if (checkpoint >= observations.size()) {
+        checkpoint++;
+        incomplete = true;
+        return;
+      }
       var observation = observations.get(checkpoint++);
       if (observation.graph().isEmpty()) {
         incomplete = true;
@@ -655,7 +656,7 @@ public final class ConcurrentHistory {
     }
 
     void complete() {
-      require(checkpoint == observations.size(), "Unexpected graph observation suffix");
+      if (checkpoint != observations.size()) incomplete = true;
       for (var entry : traces.entrySet())
         require(
             cursor(entry.getKey()).scalar == entry.getValue().size(),
