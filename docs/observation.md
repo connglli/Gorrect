@@ -20,7 +20,7 @@ Logical projection covers named static roots. Stack/JNI records retain available
 
 Heap walking freezes the mutator heap view and can affect optimization. HotSpot may materialize eliminated objects through an escape barrier. A snapshot cannot establish unchanged compiled frames or physical allocation before the walk. Fixtures compare allocation with no agent, with tagging, and after capture, and retain escaped locals across GC/capture.
 
-Compilation events measure installation; GC counters measure pauses. Compiled invocation and concurrent-collection completion require additional evidence. The [JVMTI specification](https://docs.oracle.com/en/java/javase/21/docs/specs/jvmti.html#FollowReferences) defines traversal and callback rules.
+Compilation events measure installation; GC counters measure pauses. Compiled invocation needs frame evidence, and [cycle completion](./usage.md#profiles) needs VM GC events matched to requests. The [JVMTI specification](https://docs.oracle.com/en/java/javase/21/docs/specs/jvmti.html#FollowReferences) defines traversal and callback rules.
 
 ## Snapshot format
 

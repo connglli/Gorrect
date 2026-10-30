@@ -86,11 +86,11 @@ History arrays, live-binding/conditional checkpoints, weaker memory modes, arbit
 
 ## 8. Expand HotSpot collector and compiler coverage
 
-Goal: run supported workloads across the intended HotSpot profiles through the common CLI.
+Status: complete for available Serial, Parallel, G1, ZGC generations, and Shenandoah SATB/IU/passive profiles. Target-side facts queries resolve mode and flag availability; the workload handshake confirms selection and the saved profile freezes replay mode. GC request policy works independently of JIT, without falling back from unavailable controls.
 
-Extend `probe`, collector profiles, collection and compilation controls, and evidence interpretation. Cover Serial, Parallel, G1, ZGC, and Shenandoah where the selected build provides them. Resolve modes per JDK build, use matching WhiteBox support where needed, and distinguish stop-the-world pause notifications from concurrent-phase evidence.
+JFR request spans and VM GC events provide completed whole-heap/major-cycle coverage separately from pause counters and graph verdicts. The full build, 260 Java tests, native checks, strict Javadoc, and JDK 17/21 matrix pass. Selected HotSpot C1/C2 runs cover all families, ZGC modes, and Shenandoah SATB/IU; interpreted execution leaves compilation unmet. Offline checking, replay, unavailable/ignored controls, and missing/unusable completion evidence are verified. [Stage 8 notes](./completed-2026-10-30-stage8.md) record the checks and build-specific limits.
 
-Complete when common cases pass for every claimed profile using the same commands. Verify actual collector selection and report unavailable controls without substitution. Include JDK 17 and supported newer builds, reclamation-sensitive checkpoints, and JIT transition tests whose evidence the integration can establish.
+Collection-complete checkpoints follow an explicit collect with validated cycle evidence. Completion does not force clearing, queue delivery, or reclamation; physical reclamation assertions remain unsupported without stronger evidence.
 
 ## 9. Complete the OpenJ9 integration
 

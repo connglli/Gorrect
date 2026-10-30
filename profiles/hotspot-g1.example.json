@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "vm": "hotspot",
+  "java": "<jdk>/bin/java",
+  "collector": "g1",
+  "collectorMode": "default",
+  "observation": "named-roots-diagnostic",
+  "vmArgs": ["-Xmx128m"],
+  "support": {
+    "runtime": "../../engine/build/install/gorrect/support/runtime.jar",
+    "protocol": "../../engine/build/install/gorrect/support/protocol.jar",
+    "observer": "../../engine/build/install/gorrect/support/libgorrect_observer.so"
+  },
+  "gc": {"control": "system"},
+  "requirements": ["tagging", "named-roots", "gc-completion"]
+}

@@ -503,7 +503,7 @@ public final class JavaEmitter {
           continue;
         }
         case Instruction.Collect ignored ->
-            line((worker == 0 ? "session" : "worker") + ".collect();");
+            line((worker == 0 ? "session" : "worker") + ".collect(" + ignored.id() + ");");
         case Instruction.Allocate op -> {
           var shape = shapes.get(op.shape());
           String name = declare(op.name(), shape, op.id());

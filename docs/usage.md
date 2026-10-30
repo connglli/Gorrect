@@ -1,6 +1,6 @@
 # Running Gorrect
 
-The CLI supports exact and bounded concurrent [GIR](./gir.md) on HotSpot Serial GC, JDK 17+, including volatile/atomic operations and soft/weak acquisition. Other collectors and OpenJ9 remain planned work.
+The CLI supports exact and bounded concurrent [GIR](./gir.md) on HotSpot Serial, Parallel, G1, ZGC, and Shenandoah, JDK 17+, where the build provides them. OpenJ9 remains planned work.
 
 ## Build and configure
 
@@ -48,16 +48,20 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | --- | --- |
 | `version` | Profile format version, currently 1. |
 | `vm`, `collector` | Requested integration and collector. The implementation checks the collector reported by the running VM. |
+| `collectorMode` | Optional `default`, resolved on the target and frozen for replay. ZGC accepts `generational` / `non-generational`; Shenandoah accepts `satb`, `iu`, or `passive`. Other collectors use `default`. Unavailable selections return unsupported. |
 | `java` | Target executable path. |
 | `observation` | `named-roots-diagnostic`, explicitly permitting the [observer effects](./observation.md#coverage-and-observer-effects), including array identity binding. |
 | `support` | Paths named `runtime`, `protocol`, and `observer`, plus optional `whitebox`. Copies enter the run bundle. |
 | `vmArgs` | Optional VM argument array. Collector selection, agents, classpath, entry point, and crash destination belong to the driver. Use one array element per argument. |
 | `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. The resolved launch environment is retained. |
-| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `compilation-events`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `gc-completion`, and `reference-reclamation` remain unsupported. |
+| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `compilation-events`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings` and `reference-reclamation` remain unsupported. |
 | `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
 | `jit` | Optional HotSpot controls: `level`, `warmupRounds`, and `deadlineMillis`. Requires `support.whitebox`; the driver supplies bootstrap and WhiteBox flags. |
+| `gc` | Optional `control`: `system` requests `System.gc()`; `whitebox-full` requires a matching `support.whitebox` client. The default is `system` without JIT controls, `whitebox-full` with them. GC controls work independently of JIT. |
 
 Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
+
+Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) requests cycle-completion evidence. For `gc-completion`, every executed `collect` must contain a completed qualifying whole-heap/major VM cycle with the requested cause. Ignored requests, partial cycles, pauses alone, and missing JFR evidence leave coverage unmet. Write `collect; checkpoint;` to observe after such a request; completion does not force reference clearing, queue delivery, or reclamation.
 
 Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. Contended histories require ordinary-object shapes and a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
 

@@ -17,13 +17,15 @@ public record TargetProfile(
     String vm,
     String java,
     String collector,
+    String collectorMode,
     String observation,
     List<String> vmArgs,
     Map<String, String> environment,
     Support support,
     List<String> requirements,
     Limits limits,
-    Jit jit) {
+    Jit jit,
+    Gc gc) {
   public static final Set<String> ENVIRONMENT_OPTIONS =
       Set.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH");
 
@@ -35,6 +37,34 @@ public record TargetProfile(
 
   /** HotSpot installation requests; actual compiled execution requires separate frame evidence. */
   public record Jit(int level, int warmupRounds, int deadlineMillis) {}
+
+  /** Collection request policy; completion still requires independently decoded VM events. */
+  public record Gc(String control) {}
+
+  public boolean usesWhiteBox() {
+    return jit != null || gc.control().equals("whitebox-full");
+  }
+
+  public boolean collectionEvidence() {
+    return jit != null || requirements.contains("gc-completion");
+  }
+
+  public TargetProfile withCollectorMode(String mode) {
+    return new TargetProfile(
+        version,
+        vm,
+        java,
+        collector,
+        mode,
+        observation,
+        vmArgs,
+        environment,
+        support,
+        requirements,
+        limits,
+        jit,
+        gc);
+  }
 
   public record Limits(
       int startupSeconds,
@@ -67,13 +97,15 @@ public record TargetProfile(
         "vm",
         "java",
         "collector",
+        "collectorMode",
         "observation",
         "vmArgs",
         "environment",
         "support",
         "requirements",
         "limits",
-        "jit");
+        "jit",
+        "gc");
     if (JsonFiles.number(JsonFiles.required(object, "version")) != 1)
       throw new IllegalArgumentException("Unsupported profile version");
     String vm = text(object, "vm"), collector = text(object, "collector");
@@ -94,6 +126,15 @@ public record TargetProfile(
     if (Set.of("serial", "parallel", "g1", "zgc", "shenandoah").contains(collector)
         != vm.equals("hotspot"))
       throw new IllegalArgumentException("Collector does not belong to VM integration");
+    String mode = object.has("collectorMode") ? text(object, "collectorMode") : "default";
+    var modes =
+        collector.equals("zgc")
+            ? Set.of("default", "generational", "non-generational")
+            : collector.equals("shenandoah")
+                ? Set.of("default", "satb", "iu", "passive")
+                : Set.of("default");
+    if (!modes.contains(mode))
+      throw new IllegalArgumentException("Invalid collector mode " + mode + " for " + collector);
     String observation = text(object, "observation");
     if (!observation.equals("named-roots-diagnostic"))
       throw new IllegalArgumentException("Unknown observation profile " + observation);
@@ -103,7 +144,7 @@ public record TargetProfile(
       if (argument.indexOf('\0') >= 0
           || !argument.startsWith("-")
           || argument.matches(
-              "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-XX:[+-]Use.*GC|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
+              "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-XX:[+-]Use.*GC|-XX:[+-]ZGenerational|-XX:ShenandoahGCMode=.*|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
         throw new IllegalArgumentException("Conflicting or reserved VM argument " + argument);
     }
     var environment = new HashMap<String, String>();
@@ -172,6 +213,29 @@ public record TargetProfile(
               .contains(requirement)
           && !Set.of("concurrent-overlap", "gc-during-workers").contains(requirement))
         throw new IllegalArgumentException("Unknown requirement " + requirement);
+    var gcSettings =
+        object.has("gc") && !object.get("gc").isJsonNull()
+            ? object.getAsJsonObject("gc")
+            : new JsonObject();
+    JsonFiles.fields(gcSettings, "control");
+    String gcControl =
+        gcSettings.has("control")
+            ? text(gcSettings, "control")
+            : jit == null ? "system" : "whitebox-full";
+    if (!Set.of("system", "whitebox-full").contains(gcControl))
+      throw new IllegalArgumentException("Unknown GC control " + gcControl);
+    if (gcControl.equals("whitebox-full")
+        && (!vm.equals("hotspot") || artifacts.whitebox() == null))
+      throw new IllegalArgumentException(
+          "WhiteBox GC control requires HotSpot and support.whitebox");
+    if ((jit != null || gcControl.equals("whitebox-full"))
+        && args.contains("-XX:-UnlockDiagnosticVMOptions"))
+      throw new IllegalArgumentException("WhiteBox control requires diagnostic VM options");
+    if (Set.of("iu", "passive").contains(mode) && args.contains("-XX:-UnlockExperimentalVMOptions"))
+      throw new IllegalArgumentException(
+          "Selected Shenandoah mode requires experimental VM options");
+    if (mode.equals("passive") && args.contains("-XX:-UnlockDiagnosticVMOptions"))
+      throw new IllegalArgumentException("Passive mode requires diagnostic VM options");
     JsonObject limits = object.has("limits") ? object.getAsJsonObject("limits") : new JsonObject();
     JsonFiles.fields(
         limits,
@@ -198,13 +262,15 @@ public record TargetProfile(
         vm,
         resolve(base, text(object, "java")),
         collector,
+        mode,
         observation,
         args,
         environment,
         artifacts,
         requirements,
         bounds,
-        jit);
+        jit,
+        new Gc(gcControl));
   }
 
   private static int limit(JsonObject object, String name, int fallback, int maximum) {
