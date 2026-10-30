@@ -62,6 +62,33 @@ class TargetProfileTest {
   }
 
   @Test
+  void gcControlAndModesAreExplicitProfileSettings() throws IOException {
+    var path = directory.resolve("gc.json");
+    Files.writeString(path, PROFILE);
+    var raw = JsonFiles.read(path);
+    raw.addProperty("collector", "zgc");
+    raw.addProperty("collectorMode", "generational");
+    JsonFiles.write(path, raw);
+    assertEquals("generational", TargetProfile.read(path).collectorMode());
+    var gc = new com.google.gson.JsonObject();
+    gc.addProperty("control", "whitebox-full");
+    raw.add("gc", gc);
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+    raw.getAsJsonObject("support").addProperty("whitebox", "client.jar");
+    JsonFiles.write(path, raw);
+    assertTrue(TargetProfile.read(path).usesWhiteBox());
+    assertNull(TargetProfile.read(path).jit());
+    raw.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of("-XX:+ZGenerational")));
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+    raw.remove("vmArgs");
+    raw.addProperty("collectorMode", "iu");
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+  }
+
+  @Test
   void resolvesPathsWithoutTouchingInstallations() throws IOException {
     var path = directory.resolve("profile.json");
     Files.writeString(path, PROFILE);

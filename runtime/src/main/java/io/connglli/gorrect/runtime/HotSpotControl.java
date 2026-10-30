@@ -1,5 +1,6 @@
 package io.connglli.gorrect.runtime;
 
+import io.connglli.gorrect.protocol.CollectionEvidence;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import java.io.IOException;
 import java.lang.reflect.Executable;
@@ -12,12 +13,13 @@ import java.util.List;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import jdk.jfr.Event;
+import jdk.jfr.FlightRecorder;
 import jdk.jfr.Name;
 import jdk.jfr.Recording;
 import jdk.jfr.StackTrace;
 
-/** WhiteBox requests compilation; JFR records actual generated-method frames at witness points. */
-final class HotSpotControl implements JitControl {
+/** HotSpot requests use optional WhiteBox APIs; JFR records VM cycles and actual worker frames. */
+final class HotSpotControl implements VmControl {
   @Name("gorrect.WorkerExecution")
   @StackTrace(true)
   static final class Witness extends Event {
@@ -26,6 +28,18 @@ final class HotSpotControl implements JitControl {
     public int worker, group, phase, point;
   }
 
+  @Name(CollectionEvidence.REQUEST_EVENT)
+  @StackTrace(false)
+  static final class CollectionRequest extends Event {
+    public int version = CollectionEvidence.VERSION;
+    public long run, round, collection;
+    public int worker, group, phase, operation;
+    public String control;
+    public boolean returned;
+  }
+
+  private final boolean jitConfigured;
+  private final String gcControl;
   private final Object whitebox;
   private final Method dontInline, enqueue, compilationLevel, fullGC;
   private final int level, warmup, timeout;
@@ -34,28 +48,56 @@ final class HotSpotControl implements JitControl {
   private final Recording recording;
   private boolean finished;
 
-  HotSpotControl(Path directory, long run, Properties settings)
+  HotSpotControl(
+      Path directory, long run, Properties settings, String gcControl, boolean gcEvidence)
       throws ReflectiveOperationException {
     this.run = run;
+    this.gcControl = gcControl;
+    jitConfigured = settings != null;
     output = directory.resolve("traces/workers.jfr");
-    level = Integer.parseInt(settings.getProperty("level"));
-    warmup = Integer.parseInt(settings.getProperty("warmupRounds"));
-    timeout = Integer.parseInt(settings.getProperty("deadlineMillis"));
-    Class<?> type;
-    try {
-      type = Class.forName("jdk.test.whitebox.WhiteBox", true, null);
-    } catch (ClassNotFoundException missing) {
-      type = Class.forName("sun.hotspot.WhiteBox", true, null);
+    level = settings == null ? 0 : Integer.parseInt(settings.getProperty("level"));
+    warmup = settings == null ? 0 : Integer.parseInt(settings.getProperty("warmupRounds"));
+    timeout = settings == null ? 0 : Integer.parseInt(settings.getProperty("deadlineMillis"));
+    Class<?> type = null;
+    if (jitConfigured || gcControl.equals("whitebox-full")) {
+      try {
+        type = Class.forName("jdk.test.whitebox.WhiteBox", true, null);
+      } catch (ClassNotFoundException missing) {
+        type = Class.forName("sun.hotspot.WhiteBox", true, null);
+      }
     }
-    whitebox = type.getMethod("getWhiteBox").invoke(null);
-    dontInline = type.getMethod("testSetDontInlineMethod", Executable.class, boolean.class);
-    enqueue = type.getMethod("enqueueMethodForCompilation", Executable.class, int.class);
-    compilationLevel = type.getMethod("getMethodCompilationLevel", Executable.class);
-    fullGC = type.getMethod("fullGC");
+    whitebox = type == null ? null : type.getMethod("getWhiteBox").invoke(null);
+    dontInline =
+        jitConfigured
+            ? type.getMethod("testSetDontInlineMethod", Executable.class, boolean.class)
+            : null;
+    enqueue =
+        jitConfigured
+            ? type.getMethod("enqueueMethodForCompilation", Executable.class, int.class)
+            : null;
+    compilationLevel =
+        jitConfigured ? type.getMethod("getMethodCompilationLevel", Executable.class) : null;
+    fullGC = gcControl.equals("whitebox-full") ? type.getMethod("fullGC") : null;
+    // A declared native method need not be registered by this client/VM pair. Probe before any
+    // workload exists; its cycle is outside every modeled request and cannot satisfy coverage.
+    if (fullGC != null) fullGC.invoke(whitebox);
+    // Request policy is usable independently of evidence collection and compiler control.
+    if (!jitConfigured && !gcEvidence) {
+      recording = null;
+      return;
+    }
+    if (!FlightRecorder.isAvailable()) throw new IllegalStateException("JFR unavailable");
     recording = new Recording();
     try {
+      if (FlightRecorder.getFlightRecorder().getEventTypes().stream()
+          .noneMatch(event -> event.getName().equals("jdk.GarbageCollection")))
+        throw new IllegalStateException("JFR GC events unavailable");
       recording.setMaxSize(8L * 1024 * 1024);
-      recording.enable(Witness.class).withThreshold(Duration.ZERO).withStackTrace();
+      if (jitConfigured)
+        recording.enable(Witness.class).withThreshold(Duration.ZERO).withStackTrace();
+      recording.enable(CollectionRequest.class).withThreshold(Duration.ZERO);
+      recording.enable("jdk.GarbageCollection").withThreshold(Duration.ZERO);
+      recording.enable("jdk.JVMInformation").with("period", "beginChunk");
       recording.start();
     } catch (RuntimeException | Error failure) {
       recording.close();
@@ -66,6 +108,7 @@ final class HotSpotControl implements JitControl {
   @Override
   public List<ExecutionEvidence.Compilation> prepare(long round, int[] workers, Method[] methods)
       throws InterruptedException {
+    if (!jitConfigured) return List.of();
     var result = new ArrayList<ExecutionEvidence.Compilation>();
     var requested = new boolean[methods.length];
     var problems = new String[methods.length];
@@ -116,6 +159,7 @@ final class HotSpotControl implements JitControl {
 
   @Override
   public void witness(int worker, int group, long round, int phase, int point, long collection) {
+    if (!jitConfigured) return;
     var event = new Witness();
     event.run = run;
     event.worker = worker;
@@ -128,22 +172,63 @@ final class HotSpotControl implements JitControl {
   }
 
   @Override
-  public void collect() {
+  public void collect(
+      int operation, int worker, int group, long round, int phase, long collection) {
+    if (recording == null) {
+      requestCollection();
+      return;
+    }
+    var event = new CollectionRequest();
+    event.run = run;
+    event.worker = worker;
+    event.group = group;
+    event.round = round;
+    event.phase = phase;
+    event.operation = operation;
+    event.collection = collection;
+    event.control = gcControl;
+    event.begin();
     try {
-      fullGC.invoke(whitebox);
+      requestCollection();
+      event.returned = true;
+    } finally {
+      event.end();
+      event.commit();
+    }
+  }
+
+  private void requestCollection() {
+    try {
+      if (fullGC == null) System.gc();
+      else fullGC.invoke(whitebox);
     } catch (IllegalAccessException | InvocationTargetException failure) {
       throw new IllegalStateException("WhiteBox collection failed", failure);
     }
   }
 
   @Override
-  public String problem() {
+  public String collectionControl() {
+    return gcControl;
+  }
+
+  @Override
+  public String gcProblem() {
     return "";
   }
 
   @Override
+  public boolean collectionEvidence() {
+    return recording != null;
+  }
+
+  @Override
+  public String problem() {
+    return jitConfigured ? "" : "JIT control is not configured";
+  }
+
+  @Override
   public void finish() throws IOException {
-    if (!finished) {
+    if (recording != null && !finished) {
       recording.stop();
       recording.dump(output);
       finished = true;
@@ -152,6 +237,6 @@ final class HotSpotControl implements JitControl {
 
   @Override
   public void close() {
-    recording.close();
+    if (recording != null) recording.close();
   }
 }

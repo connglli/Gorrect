@@ -22,10 +22,10 @@ final class HotSpotDriver {
     var arguments = new ArrayList<String>();
     arguments.add(profile.java());
     arguments.addAll(profile.vmArgs());
-    arguments.add("-XX:+UseSerialGC");
+    arguments.addAll(collectorArguments(profile, targetFacts(directory)));
     arguments.add("-XX:ErrorFile=" + directory.resolve("logs/hs_err_pid%p.log"));
     arguments.add("-agentpath:" + directory.resolve("support/" + observer));
-    if (profile.jit() != null) {
+    if (profile.usesWhiteBox()) {
       arguments.add("-XX:+UnlockDiagnosticVMOptions");
       arguments.add("-XX:+WhiteBoxAPI");
       arguments.add("-Xbootclasspath/a:" + directory.resolve("support/whitebox.jar"));
@@ -33,12 +33,100 @@ final class HotSpotDriver {
     return arguments;
   }
 
+  static String flag(String collector) {
+    return switch (collector) {
+      case "serial" -> "UseSerialGC";
+      case "parallel" -> "UseParallelGC";
+      case "g1" -> "UseG1GC";
+      case "zgc" -> "UseZGC";
+      case "shenandoah" -> "UseShenandoahGC";
+      default -> throw new IllegalArgumentException("Unsupported HotSpot collector " + collector);
+    };
+  }
+
+  static List<String> collectorArguments(TargetProfile profile, Properties facts) {
+    var flags = new ArrayList<String>();
+    String mode = profile.collectorMode();
+    if (profile.collector().equals("shenandoah") && Set.of("iu", "passive").contains(mode))
+      flags.add("-XX:+UnlockExperimentalVMOptions");
+    if (mode.equals("passive")) flags.add("-XX:+UnlockDiagnosticVMOptions");
+    flags.add("-XX:+" + flag(profile.collector()));
+    if (profile.collector().equals("zgc") && !mode.equals("default")) {
+      if (facts.containsKey("flag.ZGenerational"))
+        flags.add("-XX:" + (mode.equals("generational") ? "+" : "-") + "ZGenerational");
+      else if (!mode.equals(mode("zgc", facts)))
+        throw new IllegalArgumentException("ZGC mode unavailable: " + mode);
+    }
+    if (profile.collector().equals("shenandoah") && !mode.equals("default"))
+      flags.add("-XX:ShenandoahGCMode=" + mode);
+    return flags;
+  }
+
+  static String mode(String collector, Properties facts) {
+    var beans = Set.copyOf(List.of(facts.getProperty("collectors", "").split(",")));
+    // Bean identities distinguish pre-generational and generational-only VMs when the toggle
+    // itself is absent; the engine JDK version cannot resolve the selected target mode.
+    if (collector.equals("zgc")) {
+      if (beans.equals(Set.of("ZGC Cycles", "ZGC Pauses"))) return "non-generational";
+      if (beans.equals(
+          Set.of("ZGC Minor Cycles", "ZGC Minor Pauses", "ZGC Major Cycles", "ZGC Major Pauses")))
+        return "generational";
+      throw new IllegalArgumentException("Unrecognized ZGC mode/beans: " + beans);
+    }
+    if (collector.equals("shenandoah")) {
+      String mode = facts.getProperty("flag.ShenandoahGCMode", "");
+      if (!Set.of("satb", "iu", "passive").contains(mode))
+        throw new IllegalArgumentException("Unrecognized Shenandoah mode: " + mode);
+      return mode;
+    }
+    return "default";
+  }
+
+  static boolean selected(String collector, Properties facts) {
+    for (String family : List.of("serial", "parallel", "g1", "zgc", "shenandoah")) {
+      String value = facts.getProperty("flag." + flag(family));
+      if (family.equals(collector)
+          ? !"true".equals(value)
+          : value != null && !"false".equals(value)) return false;
+    }
+    var beans = Set.copyOf(List.of(facts.getProperty("collectors", "").split(",")));
+    return switch (collector) {
+      case "serial" -> beans.equals(Set.of("Copy", "MarkSweepCompact"));
+      case "parallel" -> beans.equals(Set.of("PS Scavenge", "PS MarkSweep"));
+      case "g1" ->
+          beans.containsAll(Set.of("G1 Young Generation", "G1 Old Generation"))
+              && Set.of("G1 Young Generation", "G1 Old Generation", "G1 Concurrent GC")
+                  .containsAll(beans);
+      case "zgc" -> {
+        try {
+          mode(collector, facts);
+          yield true;
+        } catch (IllegalArgumentException failure) {
+          yield false;
+        }
+      }
+      case "shenandoah" -> beans.equals(Set.of("Shenandoah Pauses", "Shenandoah Cycles"));
+      default -> false;
+    };
+  }
+
+  private static Properties targetFacts(Path directory) {
+    var facts = new Properties();
+    Path file = directory.resolve("collector.properties");
+    if (java.nio.file.Files.exists(file))
+      try (var in = java.nio.file.Files.newInputStream(file)) {
+        facts.load(in);
+      } catch (IOException failure) {
+        throw new IllegalArgumentException("Cannot read collector resolution", failure);
+      }
+    return facts;
+  }
+
   static List<String> unsupported(TargetProfile profile) {
     var problems = new ArrayList<String>();
     if (!profile.vm().equals("hotspot"))
       problems.add("VM integration is not implemented: " + profile.vm());
-    if (!profile.collector().equals("serial"))
-      problems.add("Collector integration is not implemented: " + profile.collector());
+
     return problems;
   }
 
@@ -49,15 +137,27 @@ final class HotSpotDriver {
       unmet.add("Expected HotSpot, observed " + vm);
     if (Integer.parseInt(target.getProperty("java.feature")) < 17)
       unmet.add("Target JDK is older than 17");
-    if (!new java.util.HashSet<>(List.of(target.getProperty("collectors", "").split(",")))
-        .equals(java.util.Set.of("Copy", "MarkSweepCompact")))
-      unmet.add("Serial collector was not confirmed: " + target.getProperty("collectors"));
+    String family = profile.collector();
+    if (!selected(family, target)) unmet.add("Requested collector was not confirmed: " + family);
+    try {
+      String mode = mode(family, target);
+      if (!profile.collectorMode().equals("default") && !profile.collectorMode().equals(mode))
+        unmet.add(
+            "Collector mode differs: requested " + profile.collectorMode() + ", observed " + mode);
+    } catch (IllegalArgumentException failure) {
+      unmet.add(failure.getMessage());
+    }
+    if (!target.getProperty("gc.control", "").equals(profile.gc().control())
+        || !target.getProperty("gc.problem", "").isEmpty())
+      unmet.add(
+          "GC control unavailable: " + target.getProperty("gc.problem", "missing control report"));
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
     if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
     for (String requirement : profile.requirements()) {
       boolean available =
           switch (requirement) {
             case "tagging", "named-roots" -> (bits & HeapSnapshot.TAGGING) != 0;
+            case "gc-completion" -> target.getProperty("gc.evidence", "false").equals("true");
             case "gc-events" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
             case "compilation-events" ->
                 (bits & HeapSnapshot.COMPILATION_EVENTS) != 0

@@ -69,9 +69,11 @@ The engine projects raw records under the [observation contract](./observation.m
 
 ## JVM integration
 
-An integration has a host driver and target-side control bridge. The driver resolves the [profile](./usage.md#profiles), launches the target, and confirms the actual VM, collector, and capabilities before releasing execution. The bridge implements collection and compilation requests. VM-specific APIs and frame interpretation stay behind this boundary; another integration must supply equivalent evidence or report an unmet requirement.
+An integration has a host driver and target-side control bridge. HotSpot mode resolution queries the selected VM's options and collector beans in a bounded helper process, then freezes the mode for replay. The workload handshake rechecks actual selection before execution. VM-specific controls and evidence interpretation stay behind this boundary; another integration must provide equivalent evidence or report unmet requirements.
 
-HotSpot uses an optional external WhiteBox client for full collection and method installation. JFR stack witnesses establish compiled execution independently of installation queries. Frame matching checks generated class, method, descriptor, thread, worker, visit, phase, and collection-request identity. Counter summaries retain one completed collection request per phase; missing frames or recording loss cannot satisfy the [stress requirements](./gir.md#stress-requirements).
+The VM bridge separates optional JIT settings from GC request policy. WhiteBox supplies full-GC and method-installation controls. JFR frames establish compiled invocation independently of installation queries. Frame matching checks method, thread, worker, visit, phase, and request identity. Pause-counter summaries retain one request per phase; missing frames or recording loss cannot satisfy [stress requirements](./gir.md#stress-requirements).
+
+Cycle-completion coverage decodes every JFR collection-request span and VM GC event. It verifies VM/run identity and the exact executed request sequence, then requires a matching complete whole-heap/major cycle within each request. This proof is independent of JVMTI pause counts and graph contents. Cycle completion supplies no reclamation assertion.
 
 Commands select `--profile`; its fields have no CLI overrides. An integration can replace the observer while preserving GIR semantics and the common protocol.
 
@@ -99,7 +101,7 @@ runs/<run-id>/
     result.json
 ```
 
-The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. Generated source, classes, layouts, and copied support libraries preserve the executable case. Replay uses those bytes and settings; offline verification derives obligations from saved GIR without a target installation.
+The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. `collector.properties` retains preflight facts; `target.properties` records actual options and VM identity. Generated source, classes, layouts, and support libraries preserve the executable case. Replay reuses those bytes and settings; offline verification needs no target installation.
 
 `traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for reference cases, and JFR witnesses when enabled. `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
 

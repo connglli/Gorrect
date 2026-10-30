@@ -142,6 +142,11 @@ public final class RunEngine {
                 java.util.Set.of());
         text = GirFormatter.format(probe);
       }
+      // A combined capability probe still needs an unconditional, quiescent request.
+      if (profile.requirements().contains("gc-completion")) {
+        int end = text.lastIndexOf('}');
+        text = text.substring(0, end) + "collect;\n" + text.substring(end);
+      }
     }
     return prepare(text, profile, raw, output.toAbsolutePath().normalize(), null);
   }
@@ -246,6 +251,13 @@ public final class RunEngine {
         Files.writeString(directory.resolve("generated/recorders.properties"), recorderPlan);
         if (references || concurrent)
           Files.writeString(directory.resolve("generated/references.properties"), "enabled=true\n");
+        Files.writeString(
+            directory.resolve("generated/gc.properties"),
+            "control="
+                + profile.gc().control()
+                + "\nevidence="
+                + profile.collectionEvidence()
+                + "\n");
         if (profile.jit() != null)
           Files.writeString(
               directory.resolve("generated/jit.properties"),
@@ -413,6 +425,10 @@ public final class RunEngine {
     try (var control = new LocalControl()) {
       manifest.addProperty("controlTransport", "unix");
       manifest.addProperty("controlSocket", control.address().toString());
+      var resolution = HotSpotProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
+      if (resolution.failure() != null) return resolution.failure();
+      profile = resolution.profile();
+      manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
       var command = new ArrayList<>(HotSpotDriver.launchArguments(profile, directory, OBSERVER));
       command.addAll(
           List.of(
@@ -609,6 +625,12 @@ public final class RunEngine {
           for (String requirement : coverage.unmet())
             if (!unmet.contains(requirement)) unmet.add(requirement);
           problems.addAll(coverage.problems());
+          var completion =
+              CollectionVerifier.verify(
+                  directory, run, program, result.execution(), profile, target(directory));
+          for (String requirement : completion.unmet())
+            if (!unmet.contains(requirement)) unmet.add(requirement);
+          problems.addAll(completion.problems());
         }
         report =
             new RunReport(
@@ -625,6 +647,11 @@ public final class RunEngine {
       for (String requirement : stress.unmet())
         if (!unmet.contains(requirement)) unmet.add(requirement);
       problems.addAll(stress.problems());
+      var completion =
+          CollectionVerifier.verify(directory, run, program, oracle, profile, target(directory));
+      for (String requirement : completion.unmet())
+        if (!unmet.contains(requirement)) unmet.add(requirement);
+      problems.addAll(completion.problems());
       boolean violated =
           !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
@@ -824,7 +851,7 @@ public final class RunEngine {
         System.getProperty("os.name").startsWith("Windows") ? "javac.exe" : "javac");
   }
 
-  private static void cleanEnvironment(ProcessBuilder builder, Map<String, String> additions) {
+  static void cleanEnvironment(ProcessBuilder builder, Map<String, String> additions) {
     builder
         .environment()
         .keySet()
@@ -835,7 +862,7 @@ public final class RunEngine {
     builder.environment().putAll(additions);
   }
 
-  private static int milliseconds(long deadline) throws SocketTimeoutException {
+  static int milliseconds(long deadline) throws SocketTimeoutException {
     long remaining = TimeUnit.NANOSECONDS.toMillis(deadline - System.nanoTime());
     if (remaining <= 0) throw new SocketTimeoutException("Run deadline exceeded");
     return (int) Math.min(remaining, Integer.MAX_VALUE);
@@ -846,7 +873,7 @@ public final class RunEngine {
     new ControlMessage(ControlMessage.Kind.ACK, run, sequence, 0, 0, "").write(out);
   }
 
-  private static void terminate(Process process) {
+  static void terminate(Process process) {
     if (!process.isAlive()) return;
     process.descendants().forEach(child -> child.destroyForcibly());
     process.destroy();

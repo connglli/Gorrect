@@ -8,7 +8,6 @@ import io.connglli.gorrect.runtime.observe.NativeObserver;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
-import java.lang.management.ManagementFactory;
 import java.lang.reflect.Method;
 import java.net.UnixDomainSocketAddress;
 import java.nio.channels.Channels;
@@ -35,10 +34,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final Map<Integer, TraceRecorder> recorders = new TreeMap<>();
   private final List<ExecutionEvidence.Group> groups = new ArrayList<>();
   private final List<ExecutionEvidence.Window> windows = new ArrayList<>();
-  private JitControl jit;
+  private VmControl control;
   private final boolean referenceRecording;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
+  private long collections;
   private boolean complete;
 
   private TargetSession(String[] args) throws IOException {
@@ -56,29 +56,21 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     out = new DataOutputStream(Channels.newOutputStream(socket));
     try {
       System.load(args[3]);
-      jit = JitControl.open(directory, run);
-      var properties = new Properties();
-      for (String name :
-          new String[] {
-            "java.version", "java.vm.name", "java.vm.version", "java.vendor", "os.name", "os.arch"
-          }) properties.setProperty(name, System.getProperty(name));
-      properties.setProperty("java.feature", Integer.toString(Runtime.version().feature()));
+      control = VmControl.open(directory, run);
+      var properties = HotSpotFacts.read();
+      properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
-      properties.setProperty("jit.problem", jit.problem());
-      properties.setProperty(
-          "collectors",
-          String.join(
-              ",",
-              ManagementFactory.getGarbageCollectorMXBeans().stream()
-                  .map(bean -> bean.getName())
-                  .toList()));
+      properties.setProperty("jit.problem", control.problem());
+      properties.setProperty("gc.control", control.collectionControl());
+      properties.setProperty("gc.problem", control.gcProblem());
+      properties.setProperty("gc.evidence", Boolean.toString(control.collectionEvidence()));
       try (var stream = Files.newOutputStream(directory.resolve("target.properties"))) {
         properties.store(stream, "Target identity");
       }
       send(ControlMessage.Kind.HELLO, 0, 0, "");
       acknowledge(0);
     } catch (Throwable failure) {
-      if (jit != null) jit.close();
+      if (control != null) control.close();
       socket.close();
       throw failure;
     }
@@ -168,7 +160,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       methods[index] =
           owner.getDeclaredMethod(
               ExecutionEvidence.workerMethod(ids[index]), TargetSession.class, WorkerContext.class);
-    var compilations = jit.prepare(round, ids, methods);
+    var compilations = control.prepare(round, ids, methods);
     var phaser = new Phaser(ids.length);
     var failure = new AtomicReference<Throwable>();
     var contexts = new ArrayList<WorkerContext>();
@@ -177,7 +169,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       int id = ids[index];
       var recorder = recorders.get(id);
       if (recorder == null) throw new IllegalStateException("Missing recorder for worker " + id);
-      var context = new WorkerContext(recorder, phaser, jit, id, operation, round);
+      var context = new WorkerContext(recorder, phaser, control, id, operation, round);
       contexts.add(context);
       var task = tasks[index];
       threads.add(
@@ -239,8 +231,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   }
 
   /** A collection control point receives no graph object arguments. */
-  public void collect() {
-    jit.collect();
+  public void collect(int operation) {
+    control.collect(operation, 0, 0, 0, 0, ++collections);
   }
 
   /** Call at a named-root checkpoint; generated code must have no live GIR reference bindings. */
@@ -255,14 +247,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
   public void complete() throws IOException {
     writeTrace(true);
-    jit.finish();
+    control.finish();
     send(ControlMessage.Kind.COMPLETE, 0, 0, "");
     complete = true;
   }
 
   public void fail(Throwable failure) throws IOException {
     writeTrace(false);
-    jit.finish();
+    control.finish();
     // Bound failure text to the modified-UTF length used by control frames.
     String detail = failure.getClass().getName() + ": " + failure.getMessage();
     send(ControlMessage.Kind.FAILED, 0, 0, detail.substring(0, Math.min(detail.length(), 4000)));
@@ -298,7 +290,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     try {
       if (!complete) writeTrace(false);
     } finally {
-      if (jit != null) jit.close();
+      if (control != null) control.close();
       socket.close();
     }
   }
