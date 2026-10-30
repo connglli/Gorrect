@@ -191,8 +191,11 @@ public sealed interface Instruction {
    * execution appends a visit numbered from one for this instruction; skipped conditional bodies
    * contribute no visits. Heap and bindings are unchanged; step and snapshot budgets are charged.
    * Physical binding obligations depend on the observation profile. Conditional checkpoints require
-   * controlled binding observation; worker checkpoints are unsupported. It does not request garbage
-   * collection.
+   * controlled binding observation. A direct worker checkpoint pauses every worker and the caller
+   * at a matched synchronization cut, captures their combined bindings, then starts the next phase.
+   * The first worker's site and visit identify that single capture. Worker synchronization kinds
+   * must match in declaration order; conditional capture groups are unsupported. It does not
+   * request garbage collection.
    */
   record Checkpoint(int id) implements Operation {}
 
@@ -204,15 +207,16 @@ public sealed interface Instruction {
 
   /**
    * Worker barrier, permitted only directly in a worker body. All workers finish the preceding
-   * phase before any starts the next. Bindings survive. Every worker must have the same barrier
-   * count. A barrier and the following phase-start marker each consume one step.
+   * phase before any starts the next. Bindings survive. Every worker must have the same sequence of
+   * barrier and checkpoint kinds. A barrier and its following phase-start marker each consume one
+   * step.
    */
   record Barrier(int id) implements Operation {}
 
   /**
    * Starts workers together with independent scopes and shared roots; the caller continues after
-   * all join. Capturing caller bindings, nested parallelism, and worker checkpoints are
-   * unsupported.
+   * all join. Coordinated worker checkpoints include suspended caller bindings. Nested parallelism
+   * is unsupported.
    *
    * <p>The exact profile requires conflict-free phases; history profiles require race freedom under
    * explicit synchronization. Concrete checks include aliases and precede target execution. The

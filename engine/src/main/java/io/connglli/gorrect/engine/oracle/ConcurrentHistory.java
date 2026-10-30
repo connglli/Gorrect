@@ -62,6 +62,8 @@ public final class ConcurrentHistory {
     final GraphMachine.Context context;
     final ArrayDeque<Task> tasks = new ArrayDeque<>();
     int phase;
+    int captureOperation;
+    long captureVisit;
     // The caller waits for a join; workers wait at phase barriers.
     boolean blocked, ended;
 
@@ -73,6 +75,8 @@ public final class ConcurrentHistory {
       context = GraphMachine.copyContext(source.context);
       tasks.addAll(source.tasks);
       phase = source.phase;
+      captureOperation = source.captureOperation;
+      captureVisit = source.captureVisit;
       blocked = source.blocked;
       ended = source.ended;
     }
@@ -436,8 +440,15 @@ public final class ConcurrentHistory {
               machine.marker(point.id(), ExecutionTrace.Kind.OPERATION, 0);
               emit(worker);
               long visit = machine.visit(point.id());
-              capture();
-              checkpoints.add(new OracleResult.Checkpoint(point.id(), visit, graph()));
+              if (worker == 0) {
+                capture();
+                checkpoints.add(new OracleResult.Checkpoint(point.id(), visit, graph()));
+              } else {
+                thread.captureOperation = point.id();
+                thread.captureVisit = visit;
+                thread.blocked = true;
+                thread.tasks.push(new Phase(point.id()));
+              }
             }
 
             case Instruction.PollQueue poll -> poll(worker, poll);
@@ -646,10 +657,18 @@ public final class ConcurrentHistory {
         group = null;
         races = new PhaseRace(budget);
       } else if (workers.stream().allMatch(thread -> thread.blocked)) {
-        // Static validation requires equal, top-level barriers, so these workers share a phase.
+        // Static synchronization-kind matching guarantees a single cut across all workers.
+        var first = workers.getFirst();
+        if (first.captureOperation != 0) {
+          capture();
+          checkpoints.add(
+              new OracleResult.Checkpoint(first.captureOperation, first.captureVisit, graph()));
+        }
         for (var thread : workers) {
           thread.blocked = false;
           thread.phase++;
+          thread.captureOperation = 0;
+          thread.captureVisit = 0;
         }
         races = new PhaseRace(budget);
       }

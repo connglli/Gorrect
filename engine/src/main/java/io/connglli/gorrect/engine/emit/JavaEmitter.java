@@ -477,6 +477,7 @@ public final class JavaEmitter {
 
       case Instruction.Parallel parallel -> {
         record(parallel.id(), false);
+        if (HistoryProgram.hasWorkerCheckpoints(parallel)) checkpointBindings(parallel.id());
         String ids =
             parallel.workers().stream()
                 .map(declaration -> Integer.toString(declaration.id()))
@@ -726,9 +727,9 @@ public final class JavaEmitter {
       }
 
       case Instruction.Checkpoint op -> {
-        record(op.id(), false);
+        if (worker == 0) record(op.id(), false);
         checkpointBindings(op.id());
-        line("session.checkpoint(" + op.id() + ");");
+        line(recorder() + ".checkpoint(" + op.id() + ");");
         return;
       }
 
@@ -817,7 +818,14 @@ public final class JavaEmitter {
           }
           condition = "if (" + String.join(" || ", ranges) + ") ";
         }
-        line(condition + "session.binding(" + binding.id() + ", " + binding.name() + " != null);");
+        line(
+            condition
+                + recorder()
+                + ".binding("
+                + binding.id()
+                + ", "
+                + binding.name()
+                + " != null);");
       }
   }
 

@@ -41,6 +41,8 @@ public final class ObservationCapabilities {
     var reasons = new ArrayList<String>();
     boolean history =
         ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program);
+    if (HistoryProgram.hasWorkerCheckpoints(program) && !profile.bindings())
+      reasons.add("Worker checkpoints require controlled local-binding observation");
     if (!profile.controlled() && history)
       reasons.add("Natural reference/contended histories require path-sensitive liveness rules");
     if (!profile.controlled()) {
@@ -97,7 +99,8 @@ public final class ObservationCapabilities {
               verified.contains(mechanism) && exercised.contains(mechanism) && reasons.isEmpty(),
               reasons,
               local
-                  ? "Quiescent main-thread checkpoint; unique activation and local mapping"
+                  ? "Quiescent checkpoint; complete participants, unique activations and local"
+                      + " mapping"
                   : "Validated GIR and supported profile combination",
               local
                   ? "Observe bindings without acquiring their objects"

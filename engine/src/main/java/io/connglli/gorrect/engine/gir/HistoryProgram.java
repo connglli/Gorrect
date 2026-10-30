@@ -8,7 +8,23 @@ public final class HistoryProgram {
 
   public static boolean usesConcurrentHistory(GirProgram program) {
     return program.instructions().anyMatch(HistoryProgram::shared)
+        || hasWorkerCheckpoints(program)
         || ReferenceProgram.usesReferences(program) && ReferenceProgram.hasParallel(program);
+  }
+
+  /** Direct worker cuts require the all-schedules audit even without contended operations. */
+  public static boolean hasWorkerCheckpoints(GirProgram program) {
+    return program
+        .instructions()
+        .filter(instruction -> instruction instanceof Instruction.Parallel)
+        .map(instruction -> (Instruction.Parallel) instruction)
+        .anyMatch(HistoryProgram::hasWorkerCheckpoints);
+  }
+
+  public static boolean hasWorkerCheckpoints(Instruction.Parallel parallel) {
+    return parallel.workers().stream()
+        .flatMap(worker -> worker.body().stream())
+        .anyMatch(instruction -> instruction instanceof Instruction.Checkpoint);
   }
 
   private static boolean shared(Instruction instruction) {

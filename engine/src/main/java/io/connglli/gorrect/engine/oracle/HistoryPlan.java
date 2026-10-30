@@ -28,6 +28,7 @@ public final class HistoryPlan {
   private long objects, slots;
   private int worker, group, phase;
   private long round;
+  private List<OracleResult.Checkpoint> workerCheckpoints;
 
   private HistoryPlan(GirProgram program, OracleLimits limits) {
     this.program = program;
@@ -65,15 +66,31 @@ public final class HistoryPlan {
           event(parallel.id(), ExecutionTrace.Kind.OPERATION);
           long visit = visits.merge(parallel.id(), 1L, Long::sum);
           var callerScopes = scopes;
+          var cuts = new ArrayList<List<OracleResult.Checkpoint>>();
           for (var declaration : parallel.workers()) {
             scopes = new ArrayDeque<>();
             worker = declaration.id();
             group = parallel.id();
             round = visit;
             phase = 0;
+            workerCheckpoints = new ArrayList<>();
             event(parallel.id(), ExecutionTrace.Kind.WORKER_START);
             block(declaration.body(), null, 0);
             event(parallel.id(), ExecutionTrace.Kind.WORKER_END);
+            cuts.add(workerCheckpoints);
+          }
+          workerCheckpoints = null;
+          for (int index = 0; index < cuts.getFirst().size(); index++) {
+            var canonical = cuts.getFirst().get(index);
+            var handles = new HashMap<Integer, Value.Reference>();
+            callerScopes.forEach(
+                scope -> scope.values().forEach(id -> handles.put(id, Value.Reference.NULL)));
+            for (var workerCuts : cuts) handles.putAll(workerCuts.get(index).graph().handles());
+            checkpoints.add(
+                new OracleResult.Checkpoint(
+                    canonical.operation(),
+                    canonical.occurrence(),
+                    new Graph(Map.of(), Map.of(), handles)));
           }
           scopes = callerScopes;
           worker = 0;
@@ -134,11 +151,16 @@ public final class HistoryPlan {
             var handles = new HashMap<Integer, Value.Reference>();
             scopes.forEach(
                 scope -> scope.values().forEach(id -> handles.put(id, Value.Reference.NULL)));
-            checkpoints.add(
-                new OracleResult.Checkpoint(
-                    checkpoint.id(),
-                    visits.merge(checkpoint.id(), 1L, Long::sum),
-                    new Graph(Map.of(), Map.of(), handles)));
+            (worker == 0 ? checkpoints : workerCheckpoints)
+                .add(
+                    new OracleResult.Checkpoint(
+                        checkpoint.id(),
+                        visits.merge(checkpoint.id(), 1L, Long::sum),
+                        new Graph(Map.of(), Map.of(), handles)));
+            if (worker != 0) {
+              phase++;
+              event(operation.id(), ExecutionTrace.Kind.PHASE_START);
+            }
           }
         }
       }

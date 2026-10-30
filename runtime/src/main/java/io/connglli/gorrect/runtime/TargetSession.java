@@ -1,6 +1,7 @@
 package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.BindingEvidence;
+import io.connglli.gorrect.protocol.CaptureEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
@@ -18,21 +19,21 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.TreeMap;
-import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicReference;
 
 /**
- * Main-thread endpoint for one generated case. Open it before graph construction, execute and join
- * workers, capture the final checkpoint, then call {@link #complete} and close it. Generated
- * failure paths call {@link #fail} before closing instead.
+ * Main-thread endpoint for one generated case. Open it before graph construction, execute and
+ * coordinate workers, capture the final checkpoint, then call {@link #complete} and close it.
+ * Generated failure paths call {@link #fail} before closing instead.
  *
  * <p>Control and persistence methods belong to the main thread. Worker observations go through
- * their {@link WorkerContext}; only joined workers' buffers are serialized. Session bookkeeping
- * retains no workload object references.
+ * their {@link WorkerContext}; worker buffers are read only while paused at a coordinated cut or
+ * after joining. Session bookkeeping retains no workload object references.
  */
 public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final SocketChannel socket;
@@ -50,9 +51,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private long checkpoint;
   private long collections;
   private boolean complete;
-  private final int[] bindingIds;
-  private final boolean[] bindingPresence;
-  private int bindingCount;
+  private final BindingRecorder bindings;
+  private final int bindingCapacity;
 
   private TargetSession(String[] args) throws IOException {
     if (args.length != 6) throw new IllegalArgumentException("Invalid target launch arguments");
@@ -67,8 +67,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     boolean localBindings =
         !System.getProperty("gorrect.observation", "named-roots-diagnostic")
             .equals("named-roots-diagnostic");
-    bindingIds = new int[localBindings ? BindingEvidence.MAX_BINDINGS : 0];
-    bindingPresence = new boolean[bindingIds.length];
+    bindingCapacity = localBindings ? BindingEvidence.MAX_BINDINGS : 0;
+    bindings = new BindingRecorder(bindingCapacity);
     recorders(capacity);
 
     socket = SocketChannel.open(UnixDomainSocketAddress.of(args[0]));
@@ -188,14 +188,30 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    * generated worker method used for compilation preparation.
    *
    * <p>Each task must record normal completion through its context. A worker failure cancels peer
-   * barriers; the session joins peers and rethrows the first observed failure. Main-thread
+   * rendezvous; the session joins peers and rethrows the first observed failure. Every worker must
+   * execute matching startup, barrier/capture, and completion rendezvous. The main thread owns
+   * native capture and control acknowledgements while every worker remains paused. Main-thread
    * interruption cancels and joins workers before propagating. Once execution starts, group/window
    * evidence is retained for both successful and failed visits.
    */
   public void parallel(int operation, int[] ids, WorkerTask[] tasks, Class<?> owner)
       throws Exception {
-    if (ids.length != tasks.length || ids.length == 0 || ids.length > 16)
+    try {
+      parallelVisit(operation, ids, tasks, owner);
+    } finally {
+      bindings.clear();
+    }
+  }
+
+  private void parallelVisit(int operation, int[] ids, WorkerTask[] tasks, Class<?> owner)
+      throws Exception {
+    if (operation <= 0 || ids.length != tasks.length || ids.length == 0 || ids.length > 16)
       throw new IllegalArgumentException("Invalid worker group");
+
+    var unique = new HashSet<Integer>();
+    for (int id : ids)
+      if (id <= 0 || id > 64 || !unique.add(id) || !recorders.containsKey(id))
+        throw new IllegalArgumentException("Invalid, duplicate, or missing worker recorder");
 
     long round = visits.merge(operation, 1L, Long::sum);
     Method[] methods = new Method[ids.length];
@@ -206,7 +222,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
     var compilations = control.prepare(round, ids, methods);
 
-    var phaser = new Phaser(ids.length);
+    var rendezvous = new WorkerRendezvous(ids.length);
     var failure = new AtomicReference<Throwable>();
     var contexts = new ArrayList<WorkerContext>();
     var threads = new ArrayList<Thread>();
@@ -215,7 +231,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       int id = ids[index];
       var recorder = recorders.get(id);
       if (recorder == null) throw new IllegalStateException("Missing recorder for worker " + id);
-      var context = new WorkerContext(recorder, phaser, control, id, operation, round);
+      var context =
+          new WorkerContext(
+              recorder, rendezvous, control, id, operation, round, index, bindingCapacity);
       contexts.add(context);
       var task = tasks[index];
       threads.add(
@@ -227,7 +245,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
                     throw new IllegalStateException("Worker omitted completion");
                 } catch (Throwable error) {
                   failure.compareAndSet(null, error);
-                  phaser.forceTermination();
+                  rendezvous.cancel();
                 }
               },
               "gorrect-worker-" + id + "-" + round));
@@ -237,15 +255,26 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     boolean joined = false;
     try {
       for (var thread : threads) thread.start();
+      int cut = 0;
+      while (true) {
+        int kind = rendezvous.await();
+        if (kind == WorkerRendezvous.CAPTURE)
+          captureWorkers(operation, round, ++cut, ids, contexts, rendezvous);
+        rendezvous.release();
+        if (kind == WorkerRendezvous.END) break;
+      }
       for (int index = 0; index < threads.size(); index++) {
         threads.get(index).join();
         record(operation, ExecutionTrace.Kind.JOIN.ordinal(), ids[index]);
       }
       joined = failure.get() == null;
-    } catch (InterruptedException | RuntimeException | Error error) {
-      phaser.forceTermination();
+    } catch (Exception | Error error) {
+      Throwable first = failure.get();
+      rendezvous.cancel();
       threads.forEach(Thread::interrupt);
       joinCancelled(threads);
+      if (first instanceof Exception workerFailure) throw workerFailure;
+      if (first instanceof Error workerFailure) throw workerFailure;
       throw error;
     } finally {
       long gcAfter = NativeObserver.gcFinishes();
@@ -264,6 +293,40 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     if (failure.get() instanceof Exception error) throw error;
 
     if (failure.get() instanceof Error error) throw error;
+  }
+
+  private void captureWorkers(
+      int group,
+      long round,
+      int cut,
+      int[] ids,
+      List<WorkerContext> contexts,
+      WorkerRendezvous rendezvous)
+      throws IOException {
+    checkpoint++;
+    var participants = new ArrayList<CaptureEvidence.Participant>();
+    participants.add(
+        new CaptureEvidence.Participant(
+            0, group, round, Thread.currentThread().getId(), 1, bindings.snapshot()));
+    for (int index = 0; index < ids.length; index++) {
+      int operation = rendezvous.operation(index);
+      long occurrence = visits.merge(operation, 1L, Long::sum);
+      participants.add(
+          new CaptureEvidence.Participant(
+              ids[index],
+              operation,
+              occurrence,
+              rendezvous.thread(index),
+              round,
+              contexts.get(index).bindings()));
+    }
+    new CaptureEvidence(run, checkpoint, group, round, cut, rendezvous.phase(), participants)
+        .write(directory.resolve("snapshots/" + checkpoint + ".gcut"));
+    byte[] bytes = NativeObserver.capture(run, checkpoint, records);
+    Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), bytes);
+    var canonical = participants.get(1);
+    send(ControlMessage.Kind.CHECKPOINT, canonical.operation(), canonical.occurrence(), "");
+    acknowledge(checkpoint);
   }
 
   private static void joinCancelled(List<Thread> threads) {
@@ -297,29 +360,24 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     long occurrence = visits.merge(operation, 1L, Long::sum);
     checkpoint++;
 
-    if (bindingIds.length != 0) {
-      var bindings = new ArrayList<BindingEvidence.Binding>();
-      for (int index = 0; index < bindingCount; index++)
-        bindings.add(new BindingEvidence.Binding(bindingIds[index], bindingPresence[index]));
-      new BindingEvidence(run, checkpoint, Thread.currentThread().getId(), 0, 1, bindings)
-          .write(directory.resolve("snapshots/" + checkpoint + ".gbind"));
-      bindingCount = 0;
+    try {
+      if (bindingCapacity != 0)
+        new BindingEvidence(
+                run, checkpoint, Thread.currentThread().getId(), 0, 1, bindings.snapshot())
+            .write(directory.resolve("snapshots/" + checkpoint + ".gbind"));
+
+      byte[] bytes = NativeObserver.capture(run, checkpoint, records);
+      Files.write(directory.resolve("snapshots").resolve(checkpoint + ".gsnap"), bytes);
+      send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
+      acknowledge(checkpoint);
+    } finally {
+      bindings.clear();
     }
-
-    byte[] bytes = NativeObserver.capture(run, checkpoint, records);
-    Files.write(directory.resolve("snapshots").resolve(checkpoint + ".gsnap"), bytes);
-
-    send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
-
-    acknowledge(checkpoint);
   }
 
   /** Records only nullness before capture, without acquiring or retaining a workload reference. */
   public void binding(int declaration, boolean present) {
-    if (declaration <= 0 || bindingCount == bindingIds.length)
-      throw new IllegalStateException("Binding evidence capacity exhausted or invalid declaration");
-    bindingIds[bindingCount] = declaration;
-    bindingPresence[bindingCount++] = present;
+    bindings.record(declaration, present);
   }
 
   /** Persists complete traces and VM witnesses, then reports success after the final checkpoint. */
