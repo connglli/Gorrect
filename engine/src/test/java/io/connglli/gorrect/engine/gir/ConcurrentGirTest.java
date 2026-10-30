@@ -53,7 +53,7 @@ class ConcurrentGirTest {
         "gir 1; program { parallel { worker a { barrier; } worker b {} } }",
         "gir 1; program { parallel { worker a { scope { barrier; } } } }",
         "gir 1; program { parallel { worker a { repeat 0 { barrier; } } } }",
-        "gir 1; program { parallel { worker a { checkpoint; } } }",
+        "gir 1; program { parallel { worker a { scope { checkpoint; } } } }",
         "gir 1; program { parallel { worker a { parallel { worker b {} } } } }",
         "gir 1; shape N object 0 0; program { allocate outer N; parallel { worker a { write-root"
             + " missing outer; } } }",

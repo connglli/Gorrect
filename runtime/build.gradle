@@ -71,3 +71,18 @@ dependencies {
     }
 
 }
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    def workerCheck = tasks.register("workerCaptureCheck${javaVersion}", JavaExec) {
+        group = 'verification'
+        description = "Checks coordinated worker rendezvous and primitive evidence on Java ${javaVersion}."
+        dependsOn tasks.named('smokeClasses')
+        classpath = sourceSets.smoke.runtimeClasspath
+        mainClass = 'io.connglli.gorrect.runtime.WorkerCaptureCheck'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(javaVersion)
+        }
+        timeout = Duration.ofSeconds(30)
+    }
+    tasks.named('check') { dependsOn workerCheck }
+}

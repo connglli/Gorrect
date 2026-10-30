@@ -97,7 +97,7 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `release name;` | End the lifetime of a binding in the current scope. |
 | `scope { ... }` | Execute a block with its own bindings. |
 | `repeat count { ... }` | Execute a block a nonnegative, literal number of times. |
-| `checkpoint;` | Record the graph obligations at this point. |
+| `checkpoint;` | Capture graph obligations at a main-thread point or a coordinated worker cut. |
 | `collect;` | Request collection without changing the logical strong graph. Actual progress is recorded separately. |
 | `parallel { worker name { ... } ... }` | Start workers together and join all before continuing. |
 | `barrier;` | Finish a worker phase and wait for every peer before the next phase. |
@@ -120,7 +120,7 @@ Clearing, queue delivery, and reclamation are separate. Empty queue polls prove 
 
 ## Parallel workers
 
-Workers have independent scopes and share state through named roots, without capturing caller bindings. Names are unique within each block; numeric IDs are internal. Limits are 16 workers per block and 64 declarations per program. Nested parallel blocks and worker checkpoints are unsupported; observe after joining.
+Workers have independent scopes and access shared state through named roots; their code cannot read caller bindings. Names are unique within each block; numeric IDs are internal. Limits are 16 workers per block and 64 declarations per program. Nested parallel blocks are unsupported.
 
 The exact profile requires conflict-free phases: a slot written by one worker cannot be read or written by another, even with the same value. This covers roots and reference/data fields or elements, including aliases. Shared reads and distinct-slot writes are allowed. The oracle rejects concrete conflicts before launch, making graph contents and per-worker reads independent of interleaving.
 
@@ -140,11 +140,13 @@ program {
 }
 ```
 
-Barriers appear directly in worker bodies, with equal counts per worker. They preserve bindings and make all preceding phase writes visible before any following phase starts. [concurrent.gir](../examples/concurrent.gir) exercises local retention and publication across GC, allocation, calls, and a barrier.
+Barriers and worker checkpoints appear directly in worker bodies. Every worker must have the same ordered sequence of barrier/checkpoint kinds. Both preserve bindings and make preceding phase writes visible before any following phase starts. A worker checkpoint pauses every worker and the caller for one combined capture, then begins the next phase. The first declared worker's checkpoint site and actual visit identify that capture. [concurrent.gir](../examples/concurrent.gir) exercises ordinary barriers; [worker-capture.gir](../examples/worker-capture.gir) captures caller and worker bindings.
+
+Worker checkpoints require `roots-diagnostic`. A capture-bearing parallel block may appear within a literal repeat or ordinary scope, but not under `if-present` or `acquire`. Checkpoints inside worker-local repeats, scopes, or conditional bodies are unsupported. Missing participant or physical-root evidence is inconclusive; it cannot establish that a binding was lost.
 
 ## Contended histories
 
-Volatile/atomic operations or parallel reference processing select bounded history checking. Before launch, exhaustive exploration must establish that every sequentially consistent schedule satisfies preconditions and has no ordinary data race. Any possible ordinary race is unsupported; a rejected precondition is invalid input. Exhausting the proof budget is inconclusive.
+Volatile/atomic operations, parallel reference processing, or worker checkpoints select bounded history checking. Before launch, exhaustive exploration must establish that every sequentially consistent schedule satisfies preconditions and has no ordinary data race. Any possible ordinary race is unsupported; a rejected precondition is invalid input. Exhausting the proof budget is inconclusive.
 
 The checker matches worker order, returned identities/values, branches, barriers, and snapshots to a legal schedule. File order and timestamps impose no extra cross-worker order. All live worker and caller handles protect referents. [contended.gir](../examples/contended.gir) transfers ownership using exchange-to-null.
 

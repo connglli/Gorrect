@@ -1,20 +1,24 @@
 package io.connglli.gorrect.runtime;
 
+import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
+import java.io.IOException;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.concurrent.Phaser;
 
 /**
  * A generated worker's recording and phase context for one parallel-block visit. The worker calls
- * {@link #begin} once, executes matching top-level barriers, then calls {@link #end} once. The
- * session reads its windows only after joining it. This context stores no graph references.
+ * {@link #begin} once, executes matching top-level barriers and checkpoints, then calls {@link
+ * #end} once. The session reads bindings only at paused cuts and windows after joining. This
+ * context stores no graph references.
  */
 public final class WorkerContext implements ObservationRecorder {
   private final TraceRecorder recorder;
-  private final Phaser phaser;
+  private final WorkerRendezvous rendezvous;
+  private final BindingRecorder bindings;
+  private final int participant;
   private final VmControl control;
   private final int worker, group;
   private final long round;
@@ -26,9 +30,18 @@ public final class WorkerContext implements ObservationRecorder {
   private boolean ended;
 
   WorkerContext(
-      TraceRecorder recorder, Phaser phaser, VmControl control, int worker, int group, long round) {
+      TraceRecorder recorder,
+      WorkerRendezvous rendezvous,
+      VmControl control,
+      int worker,
+      int group,
+      long round,
+      int participant,
+      int bindingCapacity) {
     this.recorder = recorder;
-    this.phaser = phaser;
+    this.rendezvous = rendezvous;
+    this.participant = participant;
+    bindings = new BindingRecorder(bindingCapacity);
     this.control = control;
     this.worker = worker;
     this.group = group;
@@ -71,7 +84,7 @@ public final class WorkerContext implements ObservationRecorder {
 
   /** Waits for peer startup, opens phase zero's active interval, and records the entry witness. */
   public void begin() {
-    await();
+    rendezvous.arrive(participant, WorkerRendezvous.START, group, phase);
     begin = System.nanoTime();
     record(group, ExecutionTrace.Kind.WORKER_START.ordinal(), 0);
     control.witness(worker, group, round, phase, ExecutionEvidence.ENTER, 0);
@@ -85,8 +98,29 @@ public final class WorkerContext implements ObservationRecorder {
     record(operation, ExecutionTrace.Kind.BARRIER.ordinal(), 0);
     finishWindow();
 
-    await();
+    rendezvous.arrive(participant, WorkerRendezvous.BARRIER, operation, phase);
 
+    nextPhase(operation);
+  }
+
+  /** Records only primitive binding nullness for the next coordinated cut. */
+  public void binding(int declaration, boolean present) {
+    bindings.record(declaration, present);
+  }
+
+  /**
+   * Pauses with all peers while the main thread captures and acknowledges the graph. Failure
+   * cancels every rendezvous waiter. Records the checkpoint marker and resumed phase itself.
+   */
+  public void checkpoint(int operation) throws IOException {
+    record(operation, ExecutionTrace.Kind.OPERATION.ordinal(), 0);
+    finishWindow();
+    rendezvous.arrive(participant, WorkerRendezvous.CAPTURE, operation, phase);
+    bindings.clear();
+    nextPhase(operation);
+  }
+
+  private void nextPhase(int operation) {
     phase++;
     begin = System.nanoTime();
     gcBefore = -1;
@@ -95,11 +129,12 @@ public final class WorkerContext implements ObservationRecorder {
     record(operation, ExecutionTrace.Kind.PHASE_START.ordinal(), 0);
   }
 
-  /** Records normal worker completion and the exit witness; it does not join other workers. */
+  /** Records completion and its exit witness, then waits for matched peer completion. */
   public void end() {
     record(group, ExecutionTrace.Kind.WORKER_END.ordinal(), 0);
     finishWindow();
     control.witness(worker, group, round, phase, ExecutionEvidence.EXIT, 0);
+    rendezvous.arrive(participant, WorkerRendezvous.END, group, phase);
     ended = true;
   }
 
@@ -134,9 +169,8 @@ public final class WorkerContext implements ObservationRecorder {
     return List.copyOf(windows);
   }
 
-  private void await() {
-    if (phaser.arriveAndAwaitAdvance() < 0)
-      throw new IllegalStateException("Worker phase was cancelled");
+  List<BindingEvidence.Binding> bindings() {
+    return bindings.snapshot();
   }
 
   private void finishWindow() {

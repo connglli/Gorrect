@@ -94,6 +94,14 @@ final class RunVerifier {
 
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
+      boolean workerEvidenceFailed = false;
+      try {
+        StressVerifier.checkEnvelope(directory, run, program, trace);
+      } catch (IOException | RuntimeException failure) {
+        // Envelope failure must not hide a refutation from independent graph evidence.
+        workerEvidenceFailed = true;
+        problems.add("Worker synchronization evidence extraction failed: " + failure);
+      }
       var exercised = new HashSet<String>();
       var observedOperations = new HashSet<Integer>();
       for (var event : trace.events())
@@ -114,9 +122,16 @@ final class RunVerifier {
         var messages = controls(directory, run, oracle, program, trace, true);
         var checkpoints = new CheckpointPlan(oracle);
         var observations = new ArrayList<HistoryOracle.Observation>();
+        var cuts = CheckpointPlan.recordedCuts(program, trace);
         for (int index = 1; index < messages.length - 1; index++) {
           var expectedBindings = checkpoints.declarations(messages[index].operation());
-          var projection = captures.read(index, expectedBindings);
+          var projection =
+              captures.read(
+                  index,
+                  expectedBindings,
+                  cuts.get(
+                      new CheckpointPlan.Visit(
+                          messages[index].operation(), messages[index].occurrence())));
           observations.add(
               new HistoryOracle.Observation(projection.graph(), projection.problems()));
         }
@@ -134,7 +149,7 @@ final class RunVerifier {
 
         problems.addAll(result.problems());
         captures.merge(exercised, unmet, problems);
-        if (result.execution() != null) {
+        if (result.execution() != null && !workerEvidenceFailed) {
           var coverage =
               StressVerifier.verify(directory, run, program, result.execution(), profile);
           for (String requirement : coverage.unmet())
@@ -150,21 +165,22 @@ final class RunVerifier {
 
         report =
             new RunReport(
-                captures.failed()
+                captures.failed() || workerEvidenceFailed
                     ? RunReport.Outcome.EXTRACTION_ERROR
                     : result.invalidWorkload()
                         ? RunReport.Outcome.INVALID_WORKLOAD
                         : RunReport.Outcome.COMPLETED,
-                captures.failed() && result.verdict() != ExactVerifier.Verdict.VIOLATED
+                (captures.failed() || workerEvidenceFailed)
+                        && result.verdict() != ExactVerifier.Verdict.VIOLATED
                     ? ExactVerifier.Verdict.INCONCLUSIVE
                     : result.verdict(),
                 unmet,
                 problems);
-        if (result.verdict() == ExactVerifier.Verdict.SATISFIED) exercised.add("named-roots");
+        if (report.verdict() == ExactVerifier.Verdict.SATISFIED) exercised.add("named-roots");
         var verified = new HashSet<String>();
         if (result.execution() != null) {
           verified.addAll(exercised);
-          if (result.verdict() != ExactVerifier.Verdict.SATISFIED) {
+          if (report.verdict() != ExactVerifier.Verdict.SATISFIED) {
             verified.remove("named-roots");
             verified.remove("local-bindings");
           }
@@ -176,15 +192,17 @@ final class RunVerifier {
         return report;
       }
 
-      var stress = StressVerifier.verify(directory, run, program, oracle, profile);
-      for (String requirement : stress.unmet())
-        if (!unmet.contains(requirement)) unmet.add(requirement);
-      problems.addAll(stress.problems());
-      var completion =
-          CollectionVerifier.verify(directory, run, program, oracle, profile, target(directory));
-      for (String requirement : completion.unmet())
-        if (!unmet.contains(requirement)) unmet.add(requirement);
-      problems.addAll(completion.problems());
+      if (!workerEvidenceFailed) {
+        var stress = StressVerifier.verify(directory, run, program, oracle, profile);
+        for (String requirement : stress.unmet())
+          if (!unmet.contains(requirement)) unmet.add(requirement);
+        problems.addAll(stress.problems());
+        var completion =
+            CollectionVerifier.verify(directory, run, program, oracle, profile, target(directory));
+        for (String requirement : completion.unmet())
+          if (!unmet.contains(requirement)) unmet.add(requirement);
+        problems.addAll(completion.problems());
+      }
 
       boolean violated =
           !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
@@ -193,7 +211,7 @@ final class RunVerifier {
       if (!violated) verified.addAll(exercised);
 
       controls(directory, run, oracle, program, trace, false);
-      boolean inconclusive = false;
+      boolean inconclusive = workerEvidenceFailed;
       var natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
       for (int i = 0; i <= oracle.checkpoints().size(); i++) {
         var visit =
@@ -224,7 +242,9 @@ final class RunVerifier {
       requiredObservations(profile, exercised, unmet, problems);
       report =
           new RunReport(
-              captures.failed() ? RunReport.Outcome.EXTRACTION_ERROR : RunReport.Outcome.COMPLETED,
+              captures.failed() || workerEvidenceFailed
+                  ? RunReport.Outcome.EXTRACTION_ERROR
+                  : RunReport.Outcome.COMPLETED,
               verdict,
               unmet,
               problems);
@@ -259,6 +279,11 @@ final class RunVerifier {
     }
 
     SnapshotProjector.Projection read(long sequence, Set<Integer> declarations) {
+      return read(sequence, declarations, null);
+    }
+
+    SnapshotProjector.Projection read(
+        long sequence, Set<Integer> declarations, CheckpointPlan.Cut cut) {
       try {
         var capture = snapshot(directory, run, sequence);
         compilationCoverage(capture, profile, unmet);
@@ -268,7 +293,8 @@ final class RunVerifier {
             layout,
             ObservationProfile.parse(profile.observation()),
             declarations,
-            exercised);
+            exercised,
+            cut);
       } catch (IOException | RuntimeException failure) {
         String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
         errors.add(problem);
@@ -296,6 +322,23 @@ final class RunVerifier {
       Set<Integer> expectedBindings,
       Set<String> exercised)
       throws IOException {
+    return projection(directory, snapshot, layout, profile, expectedBindings, exercised, null);
+  }
+
+  private static SnapshotProjector.Projection projection(
+      Path directory,
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      ObservationProfile profile,
+      Set<Integer> expectedBindings,
+      Set<String> exercised,
+      CheckpointPlan.Cut cut)
+      throws IOException {
+    if (cut != null)
+      return WorkerCaptureVerifier.project(
+          directory, snapshot, layout, profile, expectedBindings, exercised, cut);
+    if (Files.exists(directory.resolve("snapshots/" + snapshot.checkpoint() + ".gcut")))
+      throw new IOException("Unexpected coordinated capture envelope");
     BindingEvidence bindings = null;
     if (profile.bindings()) {
       bindings =

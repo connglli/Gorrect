@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.BindingEvidence;
+import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -83,11 +84,29 @@ public final class SnapshotProjector {
   /** Maps explicit presence and raw stack origins without consulting expected identities. */
   public static Projection project(
       HeapSnapshot snapshot, ObservationLayout layout, BindingEvidence bindings) {
+    if (bindings != null && (bindings.worker() != 0 || bindings.activation() != 1))
+      return new Projection(Optional.empty(), List.of("Unsupported main binding activation"));
+    return projectParticipants(snapshot, layout, bindings == null ? List.of() : List.of(bindings));
+  }
+
+  /** Projects every required participant against its own physical thread and generated method. */
+  public static Projection projectParticipants(
+      HeapSnapshot snapshot, ObservationLayout layout, List<BindingEvidence> participants) {
     try {
       var decoder = new Decoder(snapshot, layout);
       var graph = decoder.decode();
-      var handles =
-          bindings == null ? Map.<Integer, Value.Reference>of() : decoder.bindings(bindings);
+      var handles = new HashMap<Integer, Value.Reference>();
+      var workers = new HashSet<Integer>();
+      var threads = new HashSet<Long>();
+      for (var participant : participants) {
+        require(
+            workers.add(participant.worker()) && threads.add(participant.thread()),
+            "Duplicate capture participant");
+        for (var binding : decoder.bindings(participant).entrySet())
+          require(
+              handles.putIfAbsent(binding.getKey(), binding.getValue()) == null,
+              "Duplicate binding participant declaration");
+      }
       return new Projection(
           Optional.of(new Graph(graph.objects(), graph.roots(), handles)), List.of());
     } catch (IllegalArgumentException exception) {
@@ -130,7 +149,8 @@ public final class SnapshotProjector {
           evidence.run() == snapshot.run() && evidence.checkpoint() == snapshot.checkpoint(),
           "Binding capture identity mismatch");
       require(
-          evidence.worker() == 0 && evidence.activation() == 1, "Unsupported binding activation");
+          evidence.worker() != 0 || evidence.activation() == 1,
+          "Unsupported caller binding activation");
       if (evidence.bindings().isEmpty()) return Map.of();
       var declarations = new HashMap<Integer, ObservationLayout.LocalBinding>();
       for (var binding : layout.bindings())
@@ -206,8 +226,11 @@ public final class SnapshotProjector {
             || root.e() > 65_535
             || root.g() < 0) continue;
         var method = methods.get(root.f());
-        if (method == null || !method.owner().equals("LCase;") || !method.name().equals("execute"))
-          continue;
+        String expectedMethod =
+            evidence.worker() == 0 ? "execute" : ExecutionEvidence.workerMethod(evidence.worker());
+        if (method == null
+            || !method.owner().equals("LCase;")
+            || !method.name().equals(expectedMethod)) continue;
         var current = new Frame(root.f(), root.d());
         if (frame == null) {
           frame = current;
@@ -221,7 +244,7 @@ public final class SnapshotProjector {
             previous == null || previous.equals(root), "Conflicting physical stack-slot evidence");
         if (previous != null) continue;
 
-        // The generated caller invokes execute once; multiple frames cannot share activation 1.
+        // Generated methods are nonrecursive and each worker visit uses a fresh Java thread.
         // Index once per physical slot, rather than scanning every root for every binding.
         boolean found = false;
         for (var local : variables.getOrDefault(slot, List.of())) {

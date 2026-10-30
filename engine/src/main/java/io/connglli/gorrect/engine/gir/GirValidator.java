@@ -29,6 +29,7 @@ public final class GirValidator {
   private int nextOperation = 1;
   private int nextWorker = 1;
   private int workerDepth = -1;
+  private int conditionalDepth;
 
   private record Binding(Shape shape, boolean live, boolean pinned) {
     Binding(Shape shape, boolean live) {
@@ -121,12 +122,16 @@ public final class GirValidator {
           case Instruction.IfPresent present -> {
             if (binding(present.name()).shape() == null)
               fail("if-present requires a reference handle");
+            conditionalDepth++;
             block(present.body(), depth + 1);
+            conditionalDepth--;
           }
           case Instruction.Acquire acquire -> {
             slot(acquire.owner(), acquire.index(), true);
             var shape = shape(acquire.shape());
+            conditionalDepth++;
             block(acquire.body(), depth + 1, acquire.name(), shape);
+            conditionalDepth--;
           }
           case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
           case Instruction.Scope scope -> block(scope.body(), depth + 1);
@@ -138,8 +143,9 @@ public final class GirValidator {
             if (operation instanceof Instruction.Barrier
                 && (workerDepth < 0 || depth != workerDepth))
               fail("Barriers must be direct worker statements");
-            if (operation instanceof Instruction.Checkpoint && workerDepth >= 0)
-              fail("Worker checkpoints are unsupported; observe after join");
+            if (operation instanceof Instruction.Checkpoint
+                && workerDepth >= 0
+                && depth != workerDepth) fail("Checkpoints must be direct worker statements");
             operation(operation);
           }
         }
@@ -155,7 +161,8 @@ public final class GirValidator {
       fail("Parallel blocks require 1..16 workers");
     var names = new HashSet<String>();
     var callerScopes = new ArrayDeque<>(scopes);
-    int barriers = -1;
+    List<Boolean> synchronization = null;
+    boolean conditional = conditionalDepth > 0;
     try {
       for (var worker : parallel.workers()) {
         name(worker.name());
@@ -167,10 +174,17 @@ public final class GirValidator {
         scopes.clear();
         workerDepth = depth;
         block(worker.body(), depth);
-        int count =
-            (int) worker.body().stream().filter(op -> op instanceof Instruction.Barrier).count();
-        if (barriers >= 0 && barriers != count) fail("Workers must have equal barrier counts");
-        barriers = count;
+        var kinds =
+            worker.body().stream()
+                .filter(
+                    op -> op instanceof Instruction.Barrier || op instanceof Instruction.Checkpoint)
+                .map(op -> op instanceof Instruction.Checkpoint)
+                .toList();
+        if (conditional && kinds.contains(true))
+          fail("Worker capture groups cannot be conditional");
+        if (synchronization != null && !synchronization.equals(kinds))
+          fail("Workers must have matching barrier and checkpoint sequences");
+        synchronization = kinds;
       }
     } finally {
       workerDepth = -1;

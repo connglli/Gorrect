@@ -59,7 +59,7 @@ The runtime coordinates workers, barriers, checkpoints, recording, and VM contro
 
 Each worker has private primitive buffers for scalar and sparse identity observations, keyed by worker-local trace positions. Syntax bounds reserve capacity for either conditional outcome without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Strong reads record presence separately from identity. Recorders retain no workload objects.
 
-Start, barrier, phase-start, end, and join markers establish worker control flow without a global sequence counter or a shared recorder lock. Per-worker order is meaningful; cross-worker file order is not.
+Start, barrier, checkpoint, phase-start, end, and join markers establish worker control flow without a global sequence counter or a shared recorder lock. Per-worker order is meaningful; cross-worker file order is not. A main-owned two-phase rendezvous first publishes worker arrivals, then keeps them paused through capture and acknowledgement. Primitive caller presence stays fixed while it waits for the group. Failure cancels waiters and joins workers before propagation; the initiating worker failure is published before cancellation.
 
 ## Native observer
 
@@ -83,7 +83,7 @@ The runner enforces startup, compilation, and run deadlines, captures output, te
 
 Frames identify the run, capture sequence, and checkpoint operation/visit. The target writes a snapshot and waits for acknowledgement at each executed checkpoint. `HistoryPlan` treats conditional bodies as taken to reserve maximum storage and per-site visit counts; its event payloads and graph targets are placeholders. For histories, the runner accepts actual visits within those bounds, with consecutive capture sequences and per-site visit numbers. Exact programs retain their known checkpoint order. Completion requires a final capture after outer-scope release, and no later capture is accepted. The [protocol module](../protocol/src/main/java/io/connglli/gorrect/protocol/) owns the codecs.
 
-For completed runs, offline verification cross-checks control identities against actual main-thread checkpoint markers in the scalar trace and requires the final capture. This establishes capture correspondence; the independent oracle/history checker still validates branch choices, graph states, and the complete trace. Inconsistent control evidence is an extraction error; the live runner reports protocol failures. Binding coverage follows the [observation contract](./observation.md#coverage-and-observer-effects).
+For completed runs, offline verification cross-checks control identities against actual main checkpoint markers or coordinated worker arrivals in the scalar trace and requires the final capture. A worker cut is ordered within its actual group visit and identified by the first declared worker's site/visit. This establishes capture correspondence; the independent oracle/history checker still validates branch choices, graph states, and the complete trace. Inconsistent control evidence is an extraction error; the live runner reports protocol failures. Binding coverage follows the [observation contract](./observation.md#coverage-and-observer-effects).
 
 ## Artifacts and results
 

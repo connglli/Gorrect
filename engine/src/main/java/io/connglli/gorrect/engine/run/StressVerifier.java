@@ -33,6 +33,38 @@ final class StressVerifier {
 
   private StressVerifier() {}
 
+  /** Checks framing and whole-run completion without accepting the trace's claimed path. */
+  static void checkEnvelope(Path directory, long run, GirProgram program, ExecutionTrace trace)
+      throws IOException {
+    var groups = new HashSet<Integer>();
+    program
+        .instructions()
+        .forEach(
+            instruction -> {
+              if (instruction instanceof Instruction.Parallel parallel) groups.add(parallel.id());
+            });
+    boolean expected =
+        trace.events().stream()
+            .anyMatch(
+                event ->
+                    event.worker() != 0
+                        || event.kind() == ExecutionTrace.Kind.OPERATION
+                            && groups.contains(event.operation()));
+    evidence(directory, run, expected);
+  }
+
+  private static ExecutionEvidence evidence(Path directory, long run, boolean expected)
+      throws IOException {
+    Path path = directory.resolve("traces/workers.gevidence");
+    var evidence =
+        Files.exists(path)
+            ? ExecutionEvidence.read(path, run)
+            : new ExecutionEvidence(run, !expected, List.of(), List.of());
+    if (!evidence.complete())
+      throw new IOException("Worker synchronization evidence is incomplete");
+    return evidence;
+  }
+
   /**
    * Checks the executed worker/group/phase structure, then evaluates the union of GIR/profile
    * stress requirements in one group visit. Oracle supplies the validated execution path for
@@ -78,12 +110,8 @@ final class StressVerifier {
                 ignored -> new HashSet<>())
             .add(ordinal);
       }
-    Path path = directory.resolve("traces/workers.gevidence");
-    var evidence =
-        Files.exists(path)
-            ? ExecutionEvidence.read(path, run)
-            : new ExecutionEvidence(run, expected.isEmpty(), List.of(), List.of());
-    if (!evidence.complete() || evidence.groups().size() != expected.size())
+    var evidence = evidence(directory, run, !expected.isEmpty());
+    if (evidence.groups().size() != expected.size())
       throw new IOException("Worker synchronization evidence is incomplete");
     var windows = new HashMap<WindowKey, ExecutionEvidence.Window>();
     for (var window : evidence.windows()) {
@@ -115,7 +143,10 @@ final class StressVerifier {
           1
               + (int)
                   declaration.workers().getFirst().body().stream()
-                      .filter(op -> op instanceof Instruction.Barrier)
+                      .filter(
+                          op ->
+                              op instanceof Instruction.Barrier
+                                  || op instanceof Instruction.Checkpoint)
                       .count();
       var threads = new HashMap<Integer, Long>();
       long previousEnd = Long.MIN_VALUE;
@@ -166,7 +197,10 @@ final class StressVerifier {
           int last =
               (int)
                   declarations.get(frame.group()).workers().getFirst().body().stream()
-                      .filter(op -> op instanceof Instruction.Barrier)
+                      .filter(
+                          op ->
+                              op instanceof Instruction.Barrier
+                                  || op instanceof Instruction.Checkpoint)
                       .count();
           if (frame.point() == ExecutionEvidence.EXIT && frame.phase() != last)
             throw new IOException("VM exit witness has a nonfinal phase");

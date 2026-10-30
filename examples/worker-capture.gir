@@ -1,0 +1,24 @@
+gir 1;
+shape N object 0 1;
+program {
+  scope {
+    allocate caller N;
+    repeat 2 {
+      parallel {
+        worker left {
+          allocate held N;
+          checkpoint;
+          release held;
+          checkpoint;
+        }
+        worker right {
+          allocate held N;
+          checkpoint;
+          release held;
+          checkpoint;
+        }
+      }
+    }
+  }
+  checkpoint;
+}
