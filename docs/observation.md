@@ -20,11 +20,19 @@ Wrappers carry primitive [incarnation fields](../engine/src/main/java/io/conngll
 
 ## Coverage and observer effects
 
-The supported `named-roots-diagnostic` profile uses reachability fences to preserve [GIR binding lifetimes](./gir.md#instructions). Diagnostic array binding passes arrays through JNI and can force escape or materialization. These effects are permitted by this profile, not evidence of natural allocation or liveness. The observer keeps no hidden strong registry of workload objects.
+All profiles capture named static roots at quiescent checkpoints. Additional binding obligations depend on the profile:
 
-Logical projection covers named static roots at quiescent checkpoints. Stack/JNI records retain available thread, method, depth, location, and slot evidence, but lack GIR binding mappings; checks requiring those handles are inconclusive. Missing compiled-local origins cannot establish liveness violations. Natural-liveness checking is unsupported: it would need obligations derived from semantic uses and independently validated binding evidence, without relying on diagnostic fences or bindings to keep objects alive.
+| Profile | Main-frame binding obligations | Lifetime fences |
+| --- | --- | --- |
+| `named-roots-diagnostic` | Unsupported; release handles before capture. | Yes. |
+| `roots-diagnostic` | Every live reference binding. | Yes. |
+| `roots-natural` | Active bindings with future uses before release or scope exit. | No. |
 
-Heap walking freezes the mutator heap view and can affect optimization. HotSpot may materialize eliminated objects through an escape barrier. A snapshot cannot establish unchanged compiled frames or physical allocation before the walk. Fixtures compare allocation with no agent, with tagging, and after capture, and retain escaped locals across GC/capture.
+Lifetime fences enforce [GIR minimum lifetimes](./gir.md#instructions). Natural analysis follows bounded literal control flow and distinguishes successive loop activations; unused lexical locals carry no heap-presence obligation. Binding profiles exclude reference/contended histories. Natural mode also excludes conditional control and array allocation requiring diagnostic identity binding. Diagnostic array binding passes arrays through JNI and can force escape or materialization. The observer keeps no hidden strong registry of workload objects.
+
+Binding capture records primitive presence and matches generated local names against actual JVMTI method, slot, bytecode scope, thread, and activation evidence. Every non-null binding needs a unique physical root mapping; null needs an explicit presence witness without a contradictory root. Missing optimized-local origins or debug metadata are inconclusive, never liveness violations. Worker data/alias uses have independent scalar traces; heap checkpoints remain subject to the [worker restrictions](./gir.md#parallel-workers).
+
+Heap walking freezes the mutator heap view and can affect optimization. HotSpot may materialize eliminated objects through an escape barrier. Binding profiles also enable JVMTI local-variable metadata access. Natural mode describes semantic-use lifetimes, without promising transparent allocation or unchanged compiled frames. Calibration compares no-agent, tagging, primitive-witness, and capture modes; retention fixtures check released nodes and arrays with and without local-variable access.
 
 Compilation events measure installation; GC counters measure pauses. Compiled invocation needs frame evidence; OpenJ9 witnesses inspect the current stack through a JVMTI extension, copying method metadata without workload references. Stack inspection and recording affect timing and may affect optimization. [Cycle completion](./usage.md#profiles) needs VM GC events matched to requests. The [JVMTI specification](https://docs.oracle.com/en/java/javase/21/docs/specs/jvmti.html#FollowReferences) defines traversal and callback rules.
 
@@ -41,6 +49,8 @@ The envelope contains, in order:
 5. Raw records, each containing a kind followed by seven cells `a` through `g`.
 6. Footer `0x454e44534e415031`. Truncation, trailing data, incompatible versions, and mismatched run/checkpoint tokens are extraction errors.
 
+Capability `LOCAL_VARIABLES` (32) adds a 32-bit local count after each method description, followed by entries containing 64-bit start location, 32-bit scope length and slot, and name/descriptor strings. Locations must use JVM bytecode indices. Captures without the bit retain the original version 1 method entries.
+
 Class kinds are object, reference array, data array, root holder, soft wrapper, and weak wrapper, numbered from zero. Ordinary physical object tags are positive; a registered class object uses the negative of its class ID. Zero is reserved. Method tokens and tags belong to their target JVM, not another run.
 
 | Record kind | Cells |
@@ -53,6 +63,10 @@ Class kinds are object, reference array, data array, root holder, soft wrapper, 
 | `ARRAY_ELEMENT` (5) | `a` tag, `b` index, `c` primitive type, `d` value, `e` class tag. The prototype records long elements. |
 | `CLASS_VISIT` (6) | `a` registered class ID. Establishes that the class was visited before null static roots can be inferred. |
 
-Unlisted cells are zero. Reference and root kind values and primitive type codes are JVMTI values. Capability bits are tagging (1), GC events (2), compilation events (4), compilation-evidence overflow (8), and non-strengthening reference-field capture (16). Status values are complete (0), record limit (1), and JVMTI error (2); complete describes traversal, not full GIR binding coverage.
+Unlisted cells are zero. Reference and root kind values and primitive type codes are JVMTI values. Capability bits are tagging (1), GC events (2), compilation events (4), compilation-evidence overflow (8), non-strengthening reference-field capture (16), and local-variable metadata (32). Status values are complete (0), record limit (1), and JVMTI error (2); complete describes traversal, not full GIR binding coverage.
 
 The shared [golden fixture](../protocol/src/test/resources/snapshot-v1.hex) checks Java/C++ byte compatibility. Integration checks preserve native bytes and compare decoded graphs against independently specified fixtures, including deliberately damaged evidence.
+
+## Binding evidence
+
+Binding profiles write `snapshots/<sequence>.gbind` before each capture. Its big-endian envelope contains 32-bit magic `0x47424e31` and version 1; 64-bit run, checkpoint, and thread IDs; 32-bit worker; 64-bit activation; 32-bit binding count; pairs of 32-bit declaration ID and presence (0/1); and footer `0x454e4442494e4431`. Run, checkpoint, thread, activation, and declaration IDs are positive; declarations are unique, and the count is bounded by [BindingEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/BindingEvidence.java). Capture context must match the snapshot and control transcript. Current main-frame capture uses worker 0 and activation 1; recursive frames and worker checkpoints are unsupported.

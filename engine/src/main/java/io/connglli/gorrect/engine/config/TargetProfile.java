@@ -2,6 +2,7 @@ package io.connglli.gorrect.engine.config;
 
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
+import io.connglli.gorrect.engine.observe.ObservationProfile;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -157,13 +158,13 @@ public record TargetProfile(
     if (!modes.contains(mode))
       throw new IllegalArgumentException("Invalid collector mode " + mode + " for " + collector);
     String observation = text(object, "observation");
-    if (!observation.equals("named-roots-diagnostic"))
-      throw new IllegalArgumentException("Unknown observation profile " + observation);
+    ObservationProfile.parse(observation);
     var args = strings(object.get("vmArgs"));
     for (String argument : args) {
       // The driver owns the main class, classpath, observer, collector, and crash destination.
       if (argument.indexOf('\0') >= 0
           || !argument.startsWith("-")
+          || argument.startsWith("-Dgorrect.observation=")
           || argument.matches(
               "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-Xoptionsfile.*|-Xdump.*|-XX:[+-]Use.*GC|-XX:[+-]ZGenerational|-XX:ShenandoahGCMode=.*|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
         throw new IllegalArgumentException("Conflicting or reserved VM argument " + argument);
@@ -273,6 +274,8 @@ public record TargetProfile(
                   "gc-events",
                   "compilation-events",
                   "local-bindings",
+                  "semantic-reads",
+                  "alias-checks",
                   "compiled-execution",
                   "gc-completion",
                   "contended-histories",

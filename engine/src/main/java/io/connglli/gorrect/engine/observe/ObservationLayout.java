@@ -7,16 +7,39 @@ import java.util.Map;
 
 /** Emitted field descriptions only; this contains no predicted targets or payload values. */
 public record ObservationLayout(
-    List<ObjectType> objects, List<Shape> arrays, Roots roots, List<ReferenceType> references) {
+    List<ObjectType> objects,
+    List<Shape> arrays,
+    Roots roots,
+    List<ReferenceType> references,
+    List<LocalBinding> bindings) {
   public ObservationLayout {
     objects = List.copyOf(objects);
     arrays = List.copyOf(arrays);
     references = references == null ? List.of() : List.copyOf(references);
+    bindings = bindings == null ? List.of() : List.copyOf(bindings);
+  }
+
+  public ObservationLayout(
+      List<ObjectType> objects, List<Shape> arrays, Roots roots, List<ReferenceType> references) {
+    this(objects, arrays, roots, references, List.of());
   }
 
   public ObservationLayout(List<ObjectType> objects, List<Shape> arrays, Roots roots) {
     this(objects, arrays, roots, List.of());
   }
+
+  /**
+   * Structural mapping for a GIR declaration and worker (zero for main). Method descriptor and
+   * local type use JVM descriptors; variable is the compiler local's name. Runtime values and stack
+   * slots are never predicted here.
+   */
+  public record LocalBinding(
+      int declaration,
+      int worker,
+      String method,
+      String descriptor,
+      String variable,
+      String type) {}
 
   /** Actual wrapper metadata roles; inherited fields use captured JVMTI indices. */
   public record ReferenceType(

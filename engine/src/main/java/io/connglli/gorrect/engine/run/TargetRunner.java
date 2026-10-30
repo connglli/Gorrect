@@ -69,6 +69,7 @@ final class TargetRunner {
       manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
 
       var command = new ArrayList<>(VmDriver.launchArguments(profile, directory, OBSERVER));
+      command.add("-Dgorrect.observation=" + profile.observation());
       command.addAll(
           List.of(
               "-cp",

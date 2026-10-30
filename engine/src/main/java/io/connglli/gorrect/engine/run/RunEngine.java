@@ -16,7 +16,8 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
-import io.connglli.gorrect.engine.model.Shape;
+import io.connglli.gorrect.engine.observe.ObservationCapabilities;
+import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.HistoryLimitException;
@@ -125,7 +126,8 @@ public final class RunEngine {
       throw new IOException("Invalid profile: " + exception.getMessage(), exception);
     }
 
-    if (text == null) {
+    boolean probing = text == null;
+    if (probing) {
       text =
           profile.requirements().stream()
                   .anyMatch(
@@ -156,6 +158,25 @@ public final class RunEngine {
         int end = text.lastIndexOf('}');
         text = text.substring(0, end) + "collect;\n" + text.substring(end);
       }
+    }
+
+    if (probing
+        && profile.requirements().stream()
+            .anyMatch(Set.of("local-bindings", "semantic-reads", "alias-checks")::contains)) {
+      int declaration = text.indexOf("program");
+      text =
+          text.substring(0, declaration)
+              + "shape BindingProbe object 0 1;\n"
+              + text.substring(declaration);
+      int end = text.lastIndexOf('}');
+      String capture =
+          ObservationProfile.parse(profile.observation()).bindings() ? "checkpoint;" : "";
+      text =
+          text.substring(0, end)
+              + "scope { allocate local BindingProbe; write-data local 0 42; collect; "
+              + capture
+              + " read-data value local 0; same-object alias local local; }\n"
+              + text.substring(end);
     }
 
     return prepare(text, profile, raw, output.toAbsolutePath().normalize(), null);
@@ -224,16 +245,17 @@ public final class RunEngine {
       var program = GirParser.parse(text);
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
+      var observation = ObservationProfile.parse(profile.observation());
 
-      if ((references || concurrent)
-          && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
+      var combination = ObservationCapabilities.unsupported(program, observation);
+      if (!combination.isEmpty())
         return finish(
             directory,
             manifest,
             new RunReport(
                 RunReport.Outcome.UNSUPPORTED,
                 ExactVerifier.Verdict.INCONCLUSIVE,
-                List.of("History programs currently require ordinary-object shapes"),
+                combination,
                 List.of()));
 
       manifest.addProperty("referenceHistory", references);
@@ -247,8 +269,9 @@ public final class RunEngine {
       var unsupported = new ArrayList<String>();
       if (program.requirements().contains("compiled-execution") && profile.jit() == null)
         unsupported.add("compiled-execution requires profile JIT control");
-      if (oracle.checkpoints().stream()
-          .anyMatch(checkpoint -> !checkpoint.graph().handles().isEmpty()))
+      if (!observation.bindings()
+          && oracle.checkpoints().stream()
+              .anyMatch(checkpoint -> !checkpoint.graph().handles().isEmpty()))
         unsupported.add("local-bindings: a checkpoint has live GIR reference bindings");
 
       if (!unsupported.isEmpty())
@@ -326,7 +349,7 @@ public final class RunEngine {
       boolean recordReferences,
       JsonObject manifest)
       throws IOException {
-    var emission = JavaEmitter.emit(program);
+    var emission = JavaEmitter.emit(program, ObservationProfile.parse(profile.observation()));
     Files.writeString(directory.resolve("generated/Case.java"), emission.source());
     JsonFiles.write(directory.resolve("generated/layout.json"), emission.layout());
 

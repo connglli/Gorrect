@@ -50,11 +50,11 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | `vm`, `collector` | Requested integration and collector. The implementation checks the collector reported by the running VM. |
 | `collectorMode` | Optional `default`, resolved on the target and frozen for replay. ZGC accepts `generational` / `non-generational`; Shenandoah accepts `satb`, `iu`, or `passive`. Other collectors use `default`. Unavailable selections return unsupported. |
 | `java` | Target executable path. |
-| `observation` | `named-roots-diagnostic`, explicitly permitting the [observer effects](./observation.md#coverage-and-observer-effects), including array identity binding. |
+| `observation` | `named-roots-diagnostic`, `roots-diagnostic`, or `roots-natural`; the [observation contract](./observation.md#coverage-and-observer-effects) defines binding coverage and permitted effects. |
 | `support` | Paths named `runtime`, `protocol`, and `observer`, plus optional `whitebox`. Copies enter the run bundle. |
 | `vmArgs` | Optional VM argument array. Collector selection, agents, classpath, entry point, and crash destination belong to the driver. Use one array element per argument. |
 | `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. The resolved launch environment is retained. |
-| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `compilation-events`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings` and `reference-reclamation` remain unsupported. |
+| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `compilation-events`, `local-bindings`, `semantic-reads`, `alias-checks`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `semantic-reads`, and `alias-checks` must be exercised, not merely available. `reference-reclamation` remains unsupported. |
 | `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
 | `jit` | Optional `level`, `warmupRounds`, and `deadlineMillis`. HotSpot levels 1–4 require `support.whitebox`. OpenJ9 accepts only level 1, meaning installed code without an optimization-tier claim; it needs no WhiteBox client. |
 | `gc` | Optional `control`: `system` requests `System.gc()`; HotSpot `whitebox-full` requires a matching `support.whitebox` client. The default is `whitebox-full` for HotSpot JIT profiles, `system` otherwise. GC controls work independently of JIT. |
@@ -63,7 +63,9 @@ Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/co
 
 Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) requests cycle-completion evidence. For HotSpot `gc-completion`, every executed `collect` must contain a completed qualifying whole-heap/major VM cycle with the requested cause. Ignored requests, partial cycles, pauses alone, and missing JFR evidence leave coverage unmet. Write `collect; checkpoint;` to observe after such a request; completion does not force reference clearing, queue delivery, or reclamation. OpenJ9 cycle-completion evidence is unsupported.
 
-Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. Contended histories require ordinary-object shapes and a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
+Use a binding observation profile for checkpoints with live reference handles. Named-root capture requires their release; scalars can remain live. Contended histories require ordinary-object shapes and a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
+
+[locals.gir](../examples/locals.gir) keeps an object in a caller local across collection, checks its alias and data, then publishes it through a named root. Run it with `roots-diagnostic` or `roots-natural`.
 
 For HotSpot JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. OpenJ9 users can copy [openj9-gencon.example.json](../profiles/openj9-gencon.example.json) and add `"jit": {}`. The OpenJ9 driver requests compilation on the first modeled worker calls and disables shared-cache/AOT reuse. `warmupRounds` counts modeled visits to each parallel block before checking installation; warm-up adds no unmodeled mutations. Actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
 
@@ -79,7 +81,7 @@ Set `support.whitebox` to the JAR path. Each bundle records its checksum and the
 
 ## Artifacts and results
 
-Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements.
+Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements. `observation-capabilities.json` records supported combinations, preconditions, effects, evidence requirements, and separate availability, exercise, and verification facts. This derived report is never an input to verification.
 
 A conflicting graph, scalar read, or impossible reference choice is a violation. Incomplete coverage or exhausted search is inconclusive; malformed evidence or altered executables is an extraction error. A rejected conditional precondition is an invalid workload when its recorded prefix establishes a legal path; otherwise the runtime failure remains. A confirmed violation stays visible alongside inconclusive checkpoints.
 

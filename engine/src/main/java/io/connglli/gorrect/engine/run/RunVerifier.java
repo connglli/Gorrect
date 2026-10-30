@@ -9,9 +9,14 @@ import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirParser;
+import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
+import io.connglli.gorrect.engine.observe.NaturalLiveness;
+import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
+import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
@@ -24,6 +29,7 @@ import io.connglli.gorrect.engine.oracle.OracleLimitException;
 import io.connglli.gorrect.engine.oracle.OracleLimits;
 import io.connglli.gorrect.engine.oracle.OracleResult;
 import io.connglli.gorrect.engine.oracle.UnsupportedHistoryException;
+import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.HeapSnapshot;
@@ -32,7 +38,9 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashSet;
 import java.util.List;
+import java.util.Set;
 
 /** Checks saved execution evidence without launching or consulting the target JVM. */
 final class RunVerifier {
@@ -62,6 +70,10 @@ final class RunVerifier {
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+      var observation = ObservationProfile.parse(profile.observation());
+      var unsupported = ObservationCapabilities.unsupported(program, observation);
+      if (!unsupported.isEmpty())
+        throw new UnsupportedHistoryException(String.join("; ", unsupported));
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -78,6 +90,20 @@ final class RunVerifier {
 
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
+      var exercised = new HashSet<String>();
+      var observedOperations = new HashSet<Integer>();
+      for (var event : trace.events())
+        if (event.kind() == ExecutionTrace.Kind.SCALAR_READ)
+          observedOperations.add(event.operation());
+      program
+          .instructions()
+          .forEach(
+              instruction -> {
+                if (observedOperations.contains(instruction.id())) {
+                  if (instruction instanceof Instruction.ReadData) exercised.add("semantic-reads");
+                  if (instruction instanceof Instruction.SameObject) exercised.add("alias-checks");
+                }
+              });
 
       if (references || concurrent) {
 
@@ -125,6 +151,15 @@ final class RunVerifier {
                 result.verdict(),
                 unmet,
                 problems);
+        if (result.verdict() == ExactVerifier.Verdict.SATISFIED) exercised.add("named-roots");
+        var verified = new HashSet<String>();
+        if (result.execution() != null) {
+          verified.addAll(exercised);
+          if (result.verdict() != ExactVerifier.Verdict.SATISFIED) verified.remove("named-roots");
+        }
+        requiredObservations(profile, exercised, unmet, problems);
+        report = new RunReport(report.execution(), report.verdict(), unmet, problems);
+        observationReport(directory, program, observation, exercised, verified);
         JsonFiles.write(directory.resolve("result.json"), report);
         return report;
       }
@@ -142,9 +177,12 @@ final class RunVerifier {
       boolean violated =
           !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
+      var verified = new HashSet<String>();
+      if (!violated) verified.addAll(exercised);
 
       controls(directory, run, oracle);
       boolean inconclusive = false;
+      var natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
       for (int i = 0; i <= oracle.checkpoints().size(); i++) {
         var visit =
             i < oracle.checkpoints().size()
@@ -153,7 +191,24 @@ final class RunVerifier {
         var snapshot = snapshot(directory, run, i + 1L);
         compilationCoverage(snapshot, profile, unmet);
 
-        var result = SnapshotProjector.project(snapshot, layout).verify(visit.graph());
+        var expected =
+            natural == null
+                ? visit.graph()
+                : natural.obligations(visit.graph(), visit.operation(), visit.occurrence());
+        BindingEvidence bindings = null;
+        if (observation.bindings()) {
+          bindings =
+              BindingEvidence.read(
+                  directory.resolve("snapshots/" + (i + 1) + ".gbind"), run, i + 1L);
+          if (bindings.thread() != Long.parseLong(target(directory).getProperty("main.thread"))
+              || bindings.worker() != 0
+              || bindings.activation() != 1)
+            throw new IOException("Binding thread/activation mismatch");
+          if (!bindings.bindings().isEmpty()) exercised.add("local-bindings");
+        }
+        var projection = SnapshotProjector.project(snapshot, layout, bindings);
+        if (projection.graph().isPresent()) exercised.add("named-roots");
+        var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
         if (result.verdict() == ExactVerifier.Verdict.VIOLATED) violated = true;
         for (String problem : result.differences())
@@ -165,7 +220,10 @@ final class RunVerifier {
           violated
               ? ExactVerifier.Verdict.VIOLATED
               : inconclusive ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED;
+      if (verdict == ExactVerifier.Verdict.SATISFIED) verified.addAll(exercised);
+      requiredObservations(profile, exercised, unmet, problems);
       report = new RunReport(RunReport.Outcome.COMPLETED, verdict, unmet, problems);
+      observationReport(directory, program, observation, exercised, verified);
     } catch (OracleLimitException | HistoryLimitException exception) {
       report = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
     } catch (UnsupportedHistoryException exception) {
@@ -177,6 +235,27 @@ final class RunVerifier {
     }
     JsonFiles.write(directory.resolve("result.json"), report);
     return report;
+  }
+
+  private static void observationReport(
+      Path directory,
+      GirProgram program,
+      ObservationProfile profile,
+      Set<String> exercised,
+      Set<String> verified)
+      throws IOException {
+    JsonFiles.write(
+        directory.resolve("observation-capabilities.json"),
+        ObservationCapabilities.describe(program, profile, target(directory), exercised, verified));
+  }
+
+  private static void requiredObservations(
+      TargetProfile profile, Set<String> exercised, List<String> unmet, List<String> problems) {
+    for (String requirement : List.of("local-bindings", "semantic-reads", "alias-checks"))
+      if (profile.requirements().contains(requirement) && !exercised.contains(requirement)) {
+        if (!unmet.contains(requirement)) unmet.add(requirement);
+        problems.add("Required mechanism was not exercised: " + requirement);
+      }
   }
 
   private static RunReport diagnoseReferenceFailure(

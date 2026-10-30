@@ -55,7 +55,7 @@ The planned reducer will simplify GIR and execution settings while preserving th
 
 ## Target runtime
 
-The runtime coordinates workers, barriers, checkpoints, recording, and VM controls. Generated methods perform ordinary allocations and mutations in Java; native calls occur at observation and control points. Java locals represent handles, with reachability fences preserving GIR lifetimes.
+The runtime coordinates workers, barriers, checkpoints, recording, and VM controls. Generated methods perform ordinary allocations and mutations in Java; native calls occur at observation and control points. Java locals represent handles; the observation profile selects lifetime fences and primitive checkpoint-presence recording.
 
 Each worker has private primitive buffers for scalar and sparse identity observations, keyed by worker-local trace positions. Syntax bounds reserve capacity for either conditional outcome without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Strong reads record presence separately from identity. Recorders retain no workload objects.
 
@@ -65,7 +65,7 @@ Start, barrier, phase-start, end, and join markers establish worker control flow
 
 JNI exposes capture requests; JVMTI heap callbacks fill bounded native buffers using VM field metadata and emitted layout roles. They receive no expected graph, perform no JNI calls, allocation, or locking, and retain no persistent strong references to workload objects. C++ exceptions are contained at JNI boundaries.
 
-The engine projects raw records under the [observation contract](./observation.md), preserving raw evidence for diagnosis. That contract defines supported layouts, incomplete captures, GC/compilation counter coverage, and heap-walk effects.
+Requested local-variable metadata is copied after heap callbacks; the observer never acquires the local objects. Compiler debug tables supply actual names and scopes. The engine projects captures and primitive binding evidence under the [observation contract](./observation.md), preserving raw bytes and reporting unsupported or incomplete coverage.
 
 ## JVM integration
 

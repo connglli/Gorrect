@@ -130,6 +130,13 @@ public sealed interface Instruction {
   }
 
   /**
+   * Binds scalar 1 when the two strong operands denote the same object, including two nulls;
+   * otherwise binds 0. Requires a fresh scalar name. Reads existing handles, never a heap slot, and
+   * neither acquires a referent nor extends a binding's lifetime.
+   */
+  record SameObject(int id, String name, Operand left, Operand right) implements Operation {}
+
+  /**
    * Requires a valid data slot and scalar operand. Replaces that slot with the operand's current
    * signed 64-bit value.
    */
@@ -182,7 +189,8 @@ public sealed interface Instruction {
    * Records immutable obligations after preceding statements: named roots, live reference handles,
    * and their accessible closure with exact contents under the selected legal history. Each
    * execution appends a visit numbered from one for this instruction. Heap and bindings are
-   * unchanged; step and snapshot budgets are charged. It does not request garbage collection.
+   * unchanged; step and snapshot budgets are charged. Physical binding obligations depend on the
+   * observation profile. It does not request garbage collection.
    */
   record Checkpoint(int id) implements Operation {}
 

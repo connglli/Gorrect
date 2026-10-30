@@ -25,6 +25,7 @@ public record HeapSnapshot(
   public static final long COMPILATION_EVENTS = 4;
   public static final long COMPILATION_OVERFLOW = 8;
   public static final long REFERENCE_FIELDS = 16;
+  public static final long LOCAL_VARIABLES = 32;
 
   /** Capture completion only; COMPLETE does not establish GIR binding coverage. */
   public enum Status {
@@ -65,7 +66,19 @@ public record HeapSnapshot(
   public record ArrayIdentity(long tag, String shape, int worker, int site, long occurrence) {}
 
   /** Method tokens are opaque and local to the target process; they are not execution evidence. */
-  public record MethodInfo(long token, String owner, String name, String descriptor) {}
+  public record MethodInfo(
+      long token, String owner, String name, String descriptor, List<LocalVariable> locals) {
+    public MethodInfo {
+      locals = List.copyOf(locals);
+    }
+
+    public MethodInfo(long token, String owner, String name, String descriptor) {
+      this(token, owner, name, descriptor, List.of());
+    }
+  }
+
+  /** Compiler local-variable scope, in bytecode indices; it does not establish a live root. */
+  public record LocalVariable(long start, int length, int slot, String name, String descriptor) {}
 
   /**
    * Fixed-width native records. Unknown origins retain their raw tags and indices. The wire

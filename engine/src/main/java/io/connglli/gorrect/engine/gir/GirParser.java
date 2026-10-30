@@ -153,6 +153,7 @@ public final class GirParser {
             case "is-cleared" -> new Instruction.ReferenceState(id, name(), name(), integer());
             case "poll-queue" -> new Instruction.PollQueue(id);
             case "read-data" -> new Instruction.ReadData(id, name(), name(), integer());
+            case "same-object" -> new Instruction.SameObject(id, name(), operand(), operand());
             case "write-data" -> new Instruction.WriteData(id, name(), integer(), operand());
             case "release" -> new Instruction.Release(id, name());
             case "checkpoint" -> new Instruction.Checkpoint(id);
