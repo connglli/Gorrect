@@ -20,6 +20,48 @@ class TargetProfileTest {
       """;
 
   @Test
+  void openJ9ControlsDoNotAssumeWhiteBoxOrHotSpotTiers() throws IOException {
+    Path path = directory.resolve("openj9.json");
+    Files.writeString(path, PROFILE);
+    var raw = JsonFiles.read(path);
+    raw.addProperty("vm", "openj9");
+    raw.addProperty("collector", "gencon");
+    var jit = new com.google.gson.JsonObject();
+    raw.add("jit", jit);
+    JsonFiles.write(path, raw);
+    var profile = TargetProfile.read(path);
+    assertEquals(1, profile.jit().level());
+    assertFalse(profile.usesWhiteBox());
+    assertEquals("system", profile.gc().control());
+    assertEquals(
+        profile,
+        TargetProfile.parse(JsonFiles.GSON.toJsonTree(profile).getAsJsonObject(), directory));
+    jit.addProperty("level", 4);
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+    jit.remove("level");
+    for (String option : java.util.List.of("-Xjit:count=0", "-Xaot", "-Xshareclasses:name=test")) {
+      raw.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of(option)));
+      JsonFiles.write(path, raw);
+      assertThrows(IOException.class, () -> TargetProfile.read(path));
+    }
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"OPENJ9_JAVA_OPTIONS", "IBM_JAVA_OPTIONS"})
+  void rejectsAmbientOpenJ9OptionsInProfileEnvironment(String name) throws IOException {
+    Path path = directory.resolve("environment.json");
+    Files.writeString(path, PROFILE);
+    var raw = JsonFiles.read(path);
+    var environment = new com.google.gson.JsonObject();
+    environment.addProperty(name, "-Xgcpolicy:gencon");
+    raw.add("environment", environment);
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+    assertTrue(TargetProfile.ENVIRONMENT_OPTIONS.contains(name));
+  }
+
+  @Test
   void jitControlsRequireAnExplicitWhiteBoxClientAndStayOutOfVmArgs() throws IOException {
     Path path = directory.resolve("profile.json");
     Files.writeString(path, PROFILE);

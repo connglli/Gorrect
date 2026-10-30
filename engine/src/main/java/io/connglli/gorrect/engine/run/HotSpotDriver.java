@@ -2,7 +2,6 @@ package io.connglli.gorrect.engine.run;
 
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
-import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
@@ -122,21 +121,10 @@ final class HotSpotDriver {
     return facts;
   }
 
-  static List<String> unsupported(TargetProfile profile) {
-    var problems = new ArrayList<String>();
-    if (!profile.vm().equals("hotspot"))
-      problems.add("VM integration is not implemented: " + profile.vm());
-
-    return problems;
-  }
-
-  static List<String> requirements(TargetProfile profile, Properties target) {
-    var unmet = new ArrayList<String>();
+  static void identity(TargetProfile profile, Properties target, List<String> unmet) {
     String vm = target.getProperty("java.vm.name", "");
     if (!(vm.contains("HotSpot") || vm.contains("OpenJDK")) || vm.contains("OpenJ9"))
       unmet.add("Expected HotSpot, observed " + vm);
-    if (Integer.parseInt(target.getProperty("java.feature")) < 17)
-      unmet.add("Target JDK is older than 17");
     String family = profile.collector();
     if (!selected(family, target)) unmet.add("Requested collector was not confirmed: " + family);
     try {
@@ -147,31 +135,5 @@ final class HotSpotDriver {
     } catch (IllegalArgumentException failure) {
       unmet.add(failure.getMessage());
     }
-    if (!target.getProperty("gc.control", "").equals(profile.gc().control())
-        || !target.getProperty("gc.problem", "").isEmpty())
-      unmet.add(
-          "GC control unavailable: " + target.getProperty("gc.problem", "missing control report"));
-    long bits = Long.parseLong(target.getProperty("observer.capabilities"));
-    if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
-    for (String requirement : profile.requirements()) {
-      boolean available =
-          switch (requirement) {
-            case "tagging", "named-roots" -> (bits & HeapSnapshot.TAGGING) != 0;
-            case "gc-completion" -> target.getProperty("gc.evidence", "false").equals("true");
-            case "gc-events" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
-            case "compilation-events" ->
-                (bits & HeapSnapshot.COMPILATION_EVENTS) != 0
-                    && (bits & HeapSnapshot.COMPILATION_OVERFLOW) == 0;
-            case "compiled-execution" ->
-                profile.jit() != null && target.getProperty("jit.problem", "unavailable").isEmpty();
-            case "gc-during-workers" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
-            case "concurrent-overlap", "contended-histories" -> true;
-            case "reference-histories", "reference-queues" ->
-                (bits & HeapSnapshot.REFERENCE_FIELDS) != 0;
-            default -> false;
-          };
-      if (!available && !unmet.contains(requirement)) unmet.add(requirement);
-    }
-    return unmet;
   }
 }

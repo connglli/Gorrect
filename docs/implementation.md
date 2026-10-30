@@ -69,11 +69,11 @@ The engine projects raw records under the [observation contract](./observation.m
 
 ## JVM integration
 
-An integration has a host driver and target-side control bridge. HotSpot mode resolution queries the selected VM's options and collector beans in a bounded helper process, then freezes the mode for replay. The workload handshake rechecks actual selection before execution. VM-specific controls and evidence interpretation stay behind this boundary; another integration must provide equivalent evidence or report unmet requirements.
+An integration has a host driver and target-side control bridge. A bounded helper queries HotSpot options/beans or OpenJ9's reported GC policy/beans; the workload handshake rechecks selection before execution. Resolved modes are frozen for replay. VM-specific controls and evidence interpretation stay behind this boundary; another integration must provide equivalent evidence or report unmet requirements.
 
-The VM bridge separates optional JIT settings from GC request policy. WhiteBox supplies full-GC and method-installation controls. JFR frames establish compiled invocation independently of installation queries. Frame matching checks method, thread, worker, visit, phase, and request identity. Pause-counter summaries retain one request per phase; missing frames or recording loss cannot satisfy [stress requirements](./gir.md#stress-requirements).
+The VM bridge separates optional JIT settings from GC request policy. HotSpot uses WhiteBox controls and JFR frame witnesses. OpenJ9 uses launch-time compilation policy, code-load callbacks, and `com.ibm.GetStackTraceExtended` witnesses. Raw stacks retain declaring class, method, descriptor, and interpreted/compiled/inlined kind in bounded `StackEvidence` version 1 records, with VM/run/thread/context identities. Both integrations match actual worker frames independently of installation reports. Pause-counter summaries retain one request per phase; missing evidence cannot satisfy [stress requirements](./gir.md#stress-requirements).
 
-Cycle-completion coverage decodes every JFR collection-request span and VM GC event. It verifies VM/run identity and the exact executed request sequence, then requires a matching complete whole-heap/major cycle within each request. This proof is independent of JVMTI pause counts and graph contents. Cycle completion supplies no reclamation assertion.
+HotSpot cycle-completion coverage decodes every JFR collection-request span and VM GC event. It verifies VM/run identity and the exact executed request sequence, then requires a matching complete whole-heap/major cycle within each request. This proof is independent of JVMTI pause counts and graph contents. OpenJ9 reports this coverage unsupported. Cycle completion supplies no reclamation assertion.
 
 Commands select `--profile`; its fields have no CLI overrides. An integration can replace the observer while preserving GIR semantics and the common protocol.
 
@@ -103,8 +103,8 @@ runs/<run-id>/
 
 The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. `collector.properties` retains preflight facts; `target.properties` records actual options and VM identity. Generated source, classes, layouts, and support libraries preserve the executable case. Replay reuses those bytes and settings; offline verification needs no target installation.
 
-`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for reference cases, and JFR witnesses when enabled. `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
+`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for reference cases, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
 
 ## Checks
 
-Java tests cover the frontend, model, oracle, emission, and codecs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, native capture, offline verification, and replay. Independent exhaustive small-graph models check the reference frontier. Corrupted evidence and injected process failures test classification and retained diagnostics.
+Java tests cover the frontend, model, oracle, emission, and codecs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, native capture, offline verification, and replay. Set `GORRECT_OPENJ9_JAVA` to a target executable to include `:engine:openj9Integration` in `check`. Independent exhaustive models check histories; corrupted evidence, executing/interpreted stack fixtures, and injected process failures test proof boundaries and diagnostics.

@@ -39,9 +39,10 @@ final class Help {
         Execution commands save inputs, observations, logs, and results in a new
         directory under runs/. Use --out to choose that directory.
 
-        Current support: HotSpot JDK 17+, named-root checkpoints.
-        Collectors: Serial, Parallel, G1, ZGC, Shenandoah, where the build provides them.
-        Compiled stress uses a WhiteBox client and JIT settings from the profile.
+        Current support: HotSpot and OpenJ9 JDK 17+, named-root checkpoints.
+        HotSpot: Serial, Parallel, G1, ZGC, Shenandoah.
+        OpenJ9: gencon, balanced, optavgpause, optthruput, metronome, where available.
+        Compiled stress uses profile JIT settings; HotSpot also needs a WhiteBox client.
         Use 'gorrect <command> --help' for arguments, options, and examples.
         -h, --help  Show help.
         """);

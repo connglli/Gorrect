@@ -222,9 +222,9 @@ public final class RunEngine {
           (references || concurrent)
               ? HistoryPlan.plan(program, OracleLimits.DEFAULT)
               : Oracle.interpret(program);
-      var unsupported = new ArrayList<>(HotSpotDriver.unsupported(profile));
+      var unsupported = new ArrayList<String>();
       if (program.requirements().contains("compiled-execution") && profile.jit() == null)
-        unsupported.add("compiled-execution requires profile JIT control and a WhiteBox client");
+        unsupported.add("compiled-execution requires profile JIT control");
       if (oracle.checkpoints().stream()
           .anyMatch(checkpoint -> !checkpoint.graph().handles().isEmpty()))
         unsupported.add("local-bindings: a checkpoint has live GIR reference bindings");
@@ -321,10 +321,11 @@ public final class RunEngine {
       var changes = new ArrayList<String>();
       if (saved != null) {
         var previous = manifest(saved).getAsJsonObject("installationArtifacts");
-        for (var entry : installations.entrySet())
-          if (!previous.has(entry.getKey())
-              || !entry.getValue().equals(previous.get(entry.getKey()).getAsString()))
-            changes.add(entry.getKey());
+        var keys = new java.util.TreeSet<>(installations.keySet());
+        keys.addAll(previous.keySet());
+        for (String key : keys)
+          if (!previous.has(key) || !previous.get(key).getAsString().equals(installations.get(key)))
+            changes.add(key);
       }
       manifest.add("changedInstallationArtifacts", JsonFiles.GSON.toJsonTree(changes));
       manifest.add("hashes", JsonFiles.GSON.toJsonTree(Artifacts.inputs(directory)));
@@ -425,11 +426,11 @@ public final class RunEngine {
     try (var control = new LocalControl()) {
       manifest.addProperty("controlTransport", "unix");
       manifest.addProperty("controlSocket", control.address().toString());
-      var resolution = HotSpotProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
+      var resolution = VmProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
       if (resolution.failure() != null) return resolution.failure();
       profile = resolution.profile();
       manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
-      var command = new ArrayList<>(HotSpotDriver.launchArguments(profile, directory, OBSERVER));
+      var command = new ArrayList<>(VmDriver.launchArguments(profile, directory, OBSERVER));
       command.addAll(
           List.of(
               "-cp",
@@ -467,7 +468,7 @@ public final class RunEngine {
       var target = target(directory);
       List<String> unmet;
       try {
-        unmet = HotSpotDriver.requirements(profile, target);
+        unmet = VmDriver.requirements(profile, target);
       } catch (RuntimeException exception) {
         return RunReport.failure(
             RunReport.Outcome.PROTOCOL_ERROR, "Invalid target capability report: " + exception);
@@ -596,8 +597,8 @@ public final class RunEngine {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       var problems = new ArrayList<String>();
-      var unmet = new ArrayList<>(HotSpotDriver.unsupported(profile));
-      unmet.addAll(HotSpotDriver.requirements(profile, target(directory)));
+      var unmet = new ArrayList<String>();
+      unmet.addAll(VmDriver.requirements(profile, target(directory)));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       if (!trace.complete()) throw new IOException("Execution trace is incomplete");
       if (references || concurrent) {
@@ -823,10 +824,7 @@ public final class RunEngine {
       paths.put("whitebox", Path.of(profile.support().whitebox()));
     if (Files.exists(Path.of(profile.java()))) {
       Path home = Path.of(profile.java()).toRealPath().getParent().getParent();
-      for (String name :
-          new String[] {
-            "release", "lib/server/libjvm.so", "lib/server/libjvm.dylib", "bin/server/jvm.dll"
-          }) paths.put("target/" + name, home.resolve(name));
+      paths.putAll(VmDriver.installations(profile, home));
     }
     var hashes = new LinkedHashMap<String, String>();
     for (var entry : paths.entrySet())

@@ -9,22 +9,7 @@ public final class HotSpotFacts {
   private HotSpotFacts() {}
 
   public static Properties read() {
-    var properties = new Properties();
-    for (String name :
-        new String[] {
-          "java.version", "java.vm.name", "java.vm.version", "java.vendor", "os.name", "os.arch"
-        }) properties.setProperty(name, System.getProperty(name));
-    properties.setProperty("process.pid", Long.toString(ProcessHandle.current().pid()));
-    properties.setProperty(
-        "vm.start", Long.toString(ManagementFactory.getRuntimeMXBean().getStartTime()));
-    properties.setProperty("java.feature", Integer.toString(Runtime.version().feature()));
-    properties.setProperty(
-        "collectors",
-        String.join(
-            ",",
-            ManagementFactory.getGarbageCollectorMXBeans().stream()
-                .map(bean -> bean.getName())
-                .toList()));
+    var properties = VmFacts.common();
     try {
       var bean = ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class);
       for (String name :

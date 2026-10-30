@@ -1,0 +1,24 @@
+# Stage 9 OpenJ9 integration
+
+Status: complete with the documented selected-target failure; approved by the user. Formats remain version 1.
+
+## Implemented choices
+
+* Shared VM dispatch reuses the bounded collector probe, deadlines, environment cleanup, CLI, GIR, oracle, and verification path. OpenJ9 confirms MemoryMXBean GCMode and collector beans, including policies with identical bean names. Invalid base settings remain startup failures; unavailable selectors remain unsupported. The workload handshake rechecks selection.
+* OpenJ9 JIT profiles need no WhiteBox client. Launch policy compiles modeled worker calls on first invocation and disables shared-cache/AOT reuse. Installation callbacks are checked after modeled warm-up; level 1 means installed code, not a HotSpot tier or an OpenJ9 optimization level. Explicit interpreted launches remain interpreted. GC control is System.gc; completion and reclamation evidence remain unsupported rather than being inferred from pauses.
+* The observer discovers com.ibm.GetStackTraceExtended and checks its parameter ABI. It captures bounded raw method owner/name/descriptor/kind tuples without graph references, using the VM's compiled/inlined kinds. StackEvidence records run, process/start identity, thread, worker/group/visit/phase/collection context, and a completion footer. Offline checking matches exact generated methods and synchronization evidence independently of installation metadata. Missing, damaged, wrong-VM, wrong-method, interpreted, or duplicate witnesses cannot satisfy compiled-execution.
+* Bundles/replay retain the same executable and evidence contracts. Installation provenance includes OpenJ9's separate VM/GC/JIT/JVMTI libraries and default options; removed artifacts are reported too. OPENJ9_JAVA_OPTIONS and IBM_JAVA_OPTIONS are scrubbed and reserved. JIT/cache options cannot silently override the driver policy. No native heap-capture or portable semantic change was needed.
+
+[Usage](../../../docs/usage.md) owns profile semantics; [implementation](../../../docs/implementation.md#jvm-integration) owns the VM boundary and evidence mechanics. Code comments explain the launch policy, extension ABI, raw frame kinds, and bounds.
+
+## Verification and target failure
+
+The normal build passes 266 Java tests, JDK 17/21 native capture/loading checks, wire compatibility, and strict Javadoc. The selected OpenJ9 JDK 21 matrix passes 15 of 16 tests: all five policies pass strong graph/array, conditional-reference cases, and compiled worker evidence. Scheduling-dependent joint coverage is assessed separately; an earlier Balanced run correctly reported unmet joint stress despite a satisfied graph. Gencon, balanced, optavgpause, and optthruput also pass contended histories. Offline verification, replay, interpreted negatives, independent actual-frame fixtures, and unsupported capabilities pass. A seeded gencon concurrent-JIT campaign completed two cases with joint compiled/overlap/GC coverage and retained its final campaign-limited case. A contended JIT case passed execution, offline verification, and replay with the larger configured history-search budget; its default budget correctly returned checking-limit. Metronome contended verification passes with explicit -Xnoclassgc as an isolation control, while the driver default still exposes the crash.
+
+The remaining Metronome contended case aborts during heap-walk-triggered class unloading. [The isolation note](../designs/completed-2026-10-30-openj9-metronome-assertion.md) locates the untracked local Java/JVMTI reproducer, which is independent of Gorrect. Two isolated runs reproduced exit 255 and the VM-access assertion; gencon and an explicit no-class-unloading control passed. The driver does not mask the failure or disable class unloading. The selected-target integration task intentionally remains red on this build; this is not a passing result or an oracle violation.
+
+Target profiles, full crash bundles, campaign artifacts, and compiler products remain ignored. OpenJ9 JDK 17 has not been exercised; target helpers and generated programs compile with --release 17, and HotSpot JDK 17 native/portable regressions pass. Other OpenJ9 builds and private API changes need their own checks. GC-cycle completion, physical reclamation, local-binding capture, and existing history-array/weaker-memory limitations remain explicit.
+
+## Sources
+
+Official [GC policies](https://eclipse.dev/openj9/docs/gc/), [JIT options](https://eclipse.dev/openj9/docs/xjit/), [option precedence](https://eclipse.dev/openj9/docs/cmdline_specifying/), and [dump options](https://eclipse.dev/openj9/docs/xdump/), plus inspected OpenJ9 ibmjvmti.h/extension and class-unloading code, informed the integration. The assertion is evidence of a target JVMTI/Metronome interaction; its precise cause and upstream status are unconfirmed.

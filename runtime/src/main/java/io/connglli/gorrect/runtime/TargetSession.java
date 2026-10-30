@@ -57,7 +57,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     try {
       System.load(args[3]);
       control = VmControl.open(directory, run);
-      var properties = HotSpotFacts.read();
+      var properties = VmFacts.read();
       properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
       properties.setProperty("jit.problem", control.problem());

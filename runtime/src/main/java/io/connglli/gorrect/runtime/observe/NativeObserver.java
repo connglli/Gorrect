@@ -78,6 +78,12 @@ public final class NativeObserver {
     return wasCompiled0(Objects.requireNonNull(method));
   }
 
+  /**
+   * Raw owner/name/descriptor/kind tuples from the current OpenJ9 stack, or null if unavailable.
+   * Inspects frames without passing workload objects or walking the heap.
+   */
+  public static native String[] openJ9Stack();
+
   private static native void configure0(Class<?>[] classes, int[] kinds);
 
   private static native void bindArrayIdentity0(

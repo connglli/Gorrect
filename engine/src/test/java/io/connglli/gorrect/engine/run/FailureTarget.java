@@ -16,7 +16,7 @@ public final class FailureTarget {
   private FailureTarget() {}
 
   public static void main(String[] args) throws Exception {
-    if (Arrays.asList(args).contains("io.connglli.gorrect.runtime.HotSpotFacts")) {
+    if (Arrays.asList(args).contains("io.connglli.gorrect.runtime.VmFacts")) {
       var command = new java.util.ArrayList<String>();
       command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
       command.addAll(Arrays.asList(args).subList(1, args.length));

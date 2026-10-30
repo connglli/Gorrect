@@ -12,12 +12,12 @@ import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 /** Resolves a mode on the selected target without assuming the engine's JDK or flag set. */
-final class HotSpotProbe {
+final class VmProbe {
   record Result(TargetProfile profile, RunReport failure) {}
 
   private record Attempt(Properties facts, int exit) {}
 
-  private HotSpotProbe() {}
+  private VmProbe() {}
 
   static Result resolve(
       TargetProfile profile,
@@ -33,7 +33,7 @@ final class HotSpotProbe {
               profile,
               directory,
               savedEnvironment,
-              List.of("-XX:+" + HotSpotDriver.flag(profile.collector())),
+              familyFlags(profile),
               "collector-family",
               deadline);
       if (family.exit() != 0) {
@@ -53,16 +53,19 @@ final class HotSpotProbe {
                 "Collector probe failed; inspect logs/collector-family.stderr"));
       }
       var actual = family.facts();
-      if (!isHotSpot(actual) || Integer.parseInt(actual.getProperty("java.feature")) < 17)
+      if (!VmDriver.matches(profile, actual)
+          || Integer.parseInt(actual.getProperty("java.feature")) < 17)
         return new Result(
-            profile, RunReport.failure(RunReport.Outcome.UNSUPPORTED, "Expected HotSpot JDK 17+"));
+            profile,
+            RunReport.failure(
+                RunReport.Outcome.UNSUPPORTED, "Expected " + profile.vm() + " JDK 17+"));
       String mode =
           profile.collectorMode().equals("default")
-              ? HotSpotDriver.mode(profile.collector(), actual)
+              ? VmDriver.mode(profile, actual)
               : profile.collectorMode();
       var resolved = profile.withCollectorMode(mode);
-      var flags = HotSpotDriver.collectorArguments(resolved, actual);
-      if (!flags.equals(List.of("-XX:+" + HotSpotDriver.flag(profile.collector())))) {
+      var flags = VmDriver.collectorArguments(resolved, actual);
+      if (!flags.equals(familyFlags(profile))) {
         var selected =
             attempt(resolved, directory, savedEnvironment, flags, "collector-mode", deadline);
         if (selected.exit() != 0)
@@ -73,8 +76,7 @@ final class HotSpotProbe {
                   "Collector mode unavailable; inspect logs/collector-mode.stderr"));
         actual = selected.facts();
       }
-      if (!HotSpotDriver.selected(profile.collector(), actual)
-          || !mode.equals(HotSpotDriver.mode(profile.collector(), actual)))
+      if (!VmDriver.selected(profile, actual) || !mode.equals(VmDriver.mode(profile, actual)))
         return new Result(
             profile,
             RunReport.failure(RunReport.Outcome.UNSUPPORTED, "Collector mode was not confirmed"));
@@ -96,9 +98,11 @@ final class HotSpotProbe {
     }
   }
 
-  private static boolean isHotSpot(Properties properties) {
-    String name = properties.getProperty("java.vm.name", "");
-    return (name.contains("HotSpot") || name.contains("OpenJDK")) && !name.contains("OpenJ9");
+  private static List<String> familyFlags(TargetProfile profile) {
+    return List.of(
+        profile.vm().equals("hotspot")
+            ? "-XX:+" + HotSpotDriver.flag(profile.collector())
+            : "-Xgcpolicy:" + profile.collector());
   }
 
   private static Attempt attempt(
@@ -123,7 +127,7 @@ final class HotSpotProbe {
             directory.resolve("support/runtime.jar")
                 + java.io.File.pathSeparator
                 + directory.resolve("support/protocol.jar"),
-            "io.connglli.gorrect.runtime.HotSpotFacts"));
+            "io.connglli.gorrect.runtime.VmFacts"));
     JsonFiles.write(directory.resolve("logs/" + label + "-command.json"), command);
     Path output = directory.resolve("logs/" + label + ".properties");
     var builder =

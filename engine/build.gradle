@@ -43,6 +43,8 @@ tasks.named('test') {
     exclude '**/RunEngineTest.class'
     exclude '**/JitEvidenceTest.class'
     exclude '**/HotSpotCollectorTest.class'
+    exclude '**/OpenJ9IntegrationTest.class'
+    exclude '**/OpenJ9EvidenceTest.class'
 }
 
 def observerIntegration = tasks.register('observerIntegration', Test) {
@@ -83,6 +85,25 @@ def sequentialIntegration = tasks.register('sequentialIntegration', Test) {
     systemProperty 'gorrect.support', layout.buildDirectory.dir('install/gorrect/support').get().asFile.absolutePath
 }
 tasks.named('check') { dependsOn sequentialIntegration }
+
+def openj9Integration = tasks.register('openj9Integration', Test) {
+    group = 'verification'
+    description = 'Runs OpenJ9 cases when GORRECT_OPENJ9_JAVA names a target executable.'
+    dependsOn tasks.named('installDist')
+    testClassesDirs = sourceSets.test.output.classesDirs
+    classpath = sourceSets.test.runtimeClasspath
+    useJUnitPlatform()
+    include '**/OpenJ9IntegrationTest.class'
+    include '**/OpenJ9EvidenceTest.class'
+    def target = providers.environmentVariable('GORRECT_OPENJ9_JAVA')
+    onlyIf { target.isPresent() }
+    doFirst { systemProperty 'gorrect.openj9.java', target.get() }
+    inputs.property('openj9Java', target.orElse('unconfigured'))
+    inputs.dir(layout.buildDirectory.dir('install/gorrect/support'))
+            .withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty 'gorrect.support', layout.buildDirectory.dir('install/gorrect/support').get().asFile.absolutePath
+}
+tasks.named('check') { dependsOn openj9Integration }
 
 tasks.named('processTestResources') {
     from(rootProject.file('examples/references.gir')) {
