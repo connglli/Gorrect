@@ -50,7 +50,7 @@ Before extending the design, ask whether the mechanism is necessary, whether a s
 
 ## Agent notes
 
-Keep working notes under [`.agents/notes/`](./.agents/notes/README.md): design explorations and tradeoffs in [designs/](./.agents/notes/designs/), implementation plans in [implementations/](./.agents/notes/implementations/), change-review records in [commits/](./.agents/notes/commits/), and active coordination and progress trackers in [dashboard/](./.agents/notes/dashboard/).
+Keep working notes under [`.agents/notes/`](./.agents/notes/README.md): design explorations and tradeoffs in [designs/](./.agents/notes/designs/), implementation plans in [implementations/](./.agents/notes/implementations/), and change-review records in [commits/](./.agents/notes/commits/). Local coordination and progress trackers use `.agents/notes/dashboard/` as described below.
 
 Name each standalone note `YYYY-MM-DD-<short-title>.md`; collaborative dashboards use the dated directories described below. Prefix the filename with `completed-` when its work is finished, or `deprecated-` when it has been superseded or abandoned. Keep the original date and title after the prefix.
 
@@ -74,7 +74,15 @@ Default to **Team** unless the user selects another mode. The user can change mo
 
 Create each collaborative workstream's shared dashboard under `.agents/notes/dashboard/YYYY-MM-DD-<workstream>/`. Give agents names describing their work and assign file ownership and dependencies before changing shared interfaces. Keep code changes in isolated worktrees.
 
-Each dashboard has a `README.md` tracking its objective, named agents, ownership, dependencies, progress, findings, validation, and integration state. Each agent owns a status file. Keep substantive workstream communications in uniquely named files under `messages/`; notifications elsewhere should link to those messages. Ask agents to read peer messages and coordinate directly to avoid conflicts.
+Dashboards are ignored local coordination state and are not staged or committed. Before closing a workstream, summarize durable decisions, review findings, validation evidence, and remaining limits in the tracked design, implementation, or review notes; link accepted contracts to their owning documentation or source.
+
+Each dashboard has a `README.md` tracking its objective, named implementers and reviewers, ownership, dependencies, progress, findings, validation, and integration state. Each agent owns a status file. Keep substantive workstream communications in uniquely named files under `messages/`; notifications elsewhere should link to those messages. Ask agents to read peer messages and coordinate directly to avoid conflicts.
+
+When a workstream and its coordinator/user review are finished and its changes are committed or explicitly closed, prefix its dashboard directory with `completed-` and update the index and links. A dashboard with queued results, unfinished tasks, or pending review remains open.
+
+### Critical reviewers
+
+Assign at least one independent critical reviewer to every workstream; prefer two or three for substantial changes. Reviewers must not be the authors of the changes they assess. Give reviewers complementary focuses such as semantics, concurrency/failure handling, and evidence or tests. They may run concurrently or sequentially within available capacity. Record assignments, findings, fixes, and re-review in the shared dashboard, and use the project's critical-review skill when applicable. Required findings must be resolved or explicitly accepted by the user before a result enters the ready queue. The coordinator's final integration review remains mandatory.
 
 ### Continuous review pipeline
 

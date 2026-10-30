@@ -59,6 +59,6 @@ If no issues are found, output a message indicating that the code is ready for c
 
 ## Checklist
 
-[ ] Review the code and documentation for potential bugs and issues.
-[ ] Check for adherence to AGENTS.md, especially regarding KISS/DRY/... principles.
-[ ] Check for adherence to docs/AGENTS.md, especially regarding writing better comments and documents.
++ [ ] Review the code and documentation for potential bugs and issues.
++ [ ] Check for adherence to AGENTS.md, especially regarding KISS/DRY/... principles.
++ [ ] Check for adherence to docs/AGENTS.md, especially regarding writing better comments and documents.

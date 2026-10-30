@@ -46,6 +46,9 @@ bin/
 venv/
 **/__pycache__/
 
+### Agents ###
+.agents/notes/dashboard/
+
 ### Gorrect ###
 generated/
 runs/
