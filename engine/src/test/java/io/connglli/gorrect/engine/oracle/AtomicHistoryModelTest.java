@@ -17,6 +17,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class AtomicHistoryModelTest {
   @Test
@@ -167,8 +169,9 @@ class AtomicHistoryModelTest {
         }
   }
 
-  @Test
-  void agreesWithExhaustiveVolatileStoreBufferingSchedules() {
+  @ParameterizedTest
+  @ValueSource(strings = {"object 0 2", "data 2"})
+  void agreesWithExhaustiveVolatileStoreBufferingSchedules(String layout) {
     var allowed = new HashSet<List<Integer>>();
     for (var order : permutations(List.of(0, 1, 2, 3))) {
       if (order.indexOf(0) > order.indexOf(1) || order.indexOf(2) > order.indexOf(3)) continue;
@@ -186,12 +189,13 @@ class AtomicHistoryModelTest {
     var program =
         GirParser.parse(
             """
-            gir 1; shape N object 0 2; object 1 N [] [0, 0]; root r = 1;
+            gir 1; shape N %s; object 1 N [] [0, 0]; root r = 1;
             program { parallel {
               worker a { read-volatile-root n N r; write-volatile-data n 0 1; read-volatile-data value n 1; }
               worker b { read-volatile-root n N r; write-volatile-data n 1 1; read-volatile-data value n 0; }
             } }
-            """);
+            """
+                .formatted(layout));
     var graph =
         new Graph(
             Map.of(

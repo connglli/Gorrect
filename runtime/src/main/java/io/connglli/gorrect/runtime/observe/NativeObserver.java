@@ -57,6 +57,18 @@ public final class NativeObserver {
   }
 
   /**
+   * Reads worker (0), site (1), or occurrence (2) from the array's published weak-tag binding. The
+   * binding must already exist. No result allocation, workload registry, or recorder lock is
+   * involved; passing the array through JNI is an explicit diagnostic observation effect.
+   */
+  public static long arrayIdentity(Object array, int component) {
+    Objects.requireNonNull(array);
+    if (!array.getClass().isArray() || component < 0 || component > 2)
+      throw new IllegalArgumentException("Invalid array identity query");
+    return arrayIdentity0(array, component);
+  }
+
+  /**
    * Returns native evidence, including partial records on exhaustion. Makes no explicit GC request;
    * the heap walk may materialize objects, and creating the result may trigger normal allocation
    * GC. Run/checkpoint tokens must be positive and records is the preallocated record bound. The
@@ -95,6 +107,8 @@ public final class NativeObserver {
 
   private static native void bindArrayIdentity0(
       Object array, String shape, int worker, int site, long occurrence);
+
+  private static native long arrayIdentity0(Object array, int component);
 
   private static native byte[] capture0(long run, long checkpoint, int records);
 

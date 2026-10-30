@@ -110,7 +110,7 @@ Bindings live until release or scope exit. Reference bindings are strong handles
 
 ## Reference histories
 
-Reference histories use ordinary-object shapes and can include parallel workers under the [contended-history rules](#contended-histories). Acquisition results stay strong until scope exit; checkpoints must follow that scope. [references.gir](../examples/references.gir) shows a complete example.
+Reference histories support object fields and array elements, and can include parallel workers under the [contended-history rules](#contended-histories). Acquisition results stay strong until scope exit; checkpoints must follow that scope. [references.gir](../examples/references.gir) shows a complete example.
 
 The checker validates recorded choices before using them. GC follows Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html) and [weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) reference rules, including atomic clearing of related references. Clearing is permanent for each wrapper; stores create fresh [incarnations](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact fields and data.
 
@@ -146,7 +146,7 @@ Volatile/atomic operations or parallel reference processing select bounded histo
 
 The checker matches worker order, returned identities/values, branches, barriers, and snapshots to a legal schedule. File order and timestamps impose no extra cross-worker order. All live worker and caller handles protect referents. [contended.gir](../examples/contended.gir) transfers ownership using exchange-to-null.
 
-History execution currently requires ordinary-object shapes and checkpoints outside conditional scopes. [Java's memory model](https://docs.oracle.com/javase/specs/jls/se17/html/jls-17.html#jls-17.4.5) and [VarHandle](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/invoke/VarHandle.html) define the ordering guarantees; acquire/release-only modes and arbitrary data races are outside this profile.
+History checkpoints remain outside conditional scopes. Live caller bindings require controlled binding observation; natural histories are unsupported. [Java's memory model](https://docs.oracle.com/javase/specs/jls/se17/html/jls-17.html#jls-17.4.5) and [VarHandle](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/invoke/VarHandle.html) define the ordering guarantees; acquire/release-only modes and arbitrary data races are outside this profile.
 
 ## Stress requirements
 

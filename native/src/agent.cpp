@@ -23,7 +23,10 @@ jvmtiExtensionFunction extended_stacks = nullptr;
 std::mutex control_mutex;
 // Copied metadata and weak JVMTI tags retain no Java objects or classes.
 std::vector<ClassInfo> classes;
-std::vector<ArrayIdentity> arrays;
+// Published entries never move or change. Mutators can read primitive identity cells without
+// taking the capture/registration lock or retaining a Java reference.
+std::array<ArrayIdentity, max_arrays> arrays;
+std::atomic<std::size_t> array_count{0};
 jlong next_object_tag = 1;
 std::atomic<jlong> gc_starts{0}, gc_finishes{0};
 jlong capabilities = 0;
@@ -414,7 +417,6 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
       check(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_COMPILED_METHOD_UNLOAD,
                                             nullptr));
     }
-    arrays.reserve(max_arrays);
     return JNI_OK;
   } catch (...) {
     return JNI_ERR;
@@ -564,25 +566,47 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_bindArrayIdentity0(
     jlong tag = 0;
     check(jvmti->GetTag(array, &tag));
     if (is_array_tag(tag)) {
-      const auto &old = arrays.at(static_cast<std::size_t>(tag - array_base - 1));
+      auto index = static_cast<std::size_t>(tag - array_base - 1);
+      if (index >= array_count.load(std::memory_order_acquire))
+        throw std::runtime_error("Unknown array identity tag");
+      const auto &old = arrays[index];
       if (old.worker != worker || old.site != site || old.occurrence != occurrence ||
           old.shape != name)
         throw std::runtime_error("Array identity cannot change");
       return;
     }
-    if (arrays.size() == max_arrays)
+    auto count = array_count.load(std::memory_order_relaxed);
+    if (count == max_arrays)
       throw std::runtime_error("Array identity capacity exhausted");
-    for (const auto &old : arrays)
+    for (std::size_t index = 0; index < count; ++index) {
+      const auto &old = arrays[index];
       if (old.worker == worker && old.site == site && old.occurrence == occurrence)
         throw std::runtime_error("Duplicate array identity");
-    tag = array_base + static_cast<jlong>(arrays.size() + 1);
-    // Store identity metadata only; keeping a JNI reference here would change array liveness.
-    arrays.push_back({tag, std::move(name), worker, site, occurrence});
-    auto error = jvmti->SetTag(array, tag);
-    if (error != JVMTI_ERROR_NONE) {
-      arrays.pop_back();
-      check(error);
     }
+    tag = array_base + static_cast<jlong>(count + 1);
+    // Store identity metadata only; keeping a JNI reference here would change array liveness.
+    arrays[count] = {tag, std::move(name), worker, site, occurrence};
+    check(jvmti->SetTag(array, tag));
+    array_count.store(count + 1, std::memory_order_release);
+  });
+}
+extern "C" JNIEXPORT jlong JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_arrayIdentity0(JNIEnv *env, jclass,
+                                                                       jobject array,
+                                                                       jint component) {
+  return entry(env, [&]() -> jlong {
+    require_agent();
+    if (!array || component < 0 || component > 2)
+      throw std::runtime_error("Invalid array identity query");
+    jlong tag = 0;
+    check(jvmti->GetTag(array, &tag));
+    if (tag <= array_base)
+      throw std::runtime_error("Array has no diagnostic identity");
+    auto index = static_cast<std::size_t>(tag - array_base - 1);
+    if (index >= array_count.load(std::memory_order_acquire))
+      throw std::runtime_error("Unknown array identity tag");
+    const auto &identity = arrays[index];
+    return component == 0 ? identity.worker : component == 1 ? identity.site : identity.occurrence;
   });
 }
 extern "C" JNIEXPORT jbyteArray JNICALL
@@ -613,7 +637,8 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_capture0(JNIEnv *env, jc
         capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
     // Allocate metadata, encoded bytes, and the Java result only after callbacks have finished.
     capture.snapshot.classes = classes;
-    capture.snapshot.arrays = arrays;
+    capture.snapshot.arrays.assign(arrays.begin(),
+                                   arrays.begin() + array_count.load(std::memory_order_acquire));
     capture.snapshot.methods = methods(env, capture.snapshot);
     auto bytes = encode(capture.snapshot);
     if (bytes.size() > 128U * 1024 * 1024)

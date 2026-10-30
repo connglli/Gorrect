@@ -35,7 +35,8 @@ public final class JavaEmitter {
 
   private record Binding(String name, Shape shape, int id) {}
 
-  private record Variable(String owner, String field, boolean reference, boolean root) {}
+  private record Variable(
+      String owner, String field, boolean reference, boolean root, boolean array) {}
 
   private final Map<String, Variable> variables = new LinkedHashMap<>();
 
@@ -44,6 +45,7 @@ public final class JavaEmitter {
   private final Map<String, Shape> shapes = new HashMap<>();
   private final Map<String, String> types = new HashMap<>();
   private final Map<String, String> roots = new LinkedHashMap<>();
+  private final Map<String, Shape> referenceShapes = new HashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private final List<Instruction.Worker> workers = new ArrayList<>();
   private final List<ObservationLayout.LocalBinding> bindings = new ArrayList<>();
@@ -246,6 +248,15 @@ public final class JavaEmitter {
             + " failure) { throw new ExceptionInInitializerError(failure); } }");
     for (var entry : variables.entrySet()) {
       var variable = entry.getValue();
+      if (variable.array()) {
+        line(
+            "private static final java.lang.invoke.VarHandle "
+                + entry.getKey()
+                + " = java.lang.invoke.MethodHandles.arrayElementVarHandle("
+                + variable.owner()
+                + ".class);");
+        continue;
+      }
       line(
           "private static final java.lang.invoke.VarHandle "
               + entry.getKey()
@@ -264,29 +275,38 @@ public final class JavaEmitter {
   private String handle(Location location) {
     String owner, field;
     boolean root = location.kind() == Location.Kind.ROOT;
+    boolean array = !root && binding(location.owner()).shape().kind() != Shape.Kind.OBJECT;
     if (root) {
       owner = "Roots";
       field = roots.get(location.owner());
     } else {
       var binding = binding(location.owner());
       owner = types.get(binding.shape().name());
-      field = (location.reference() ? "f" : "d") + location.index();
+      field = array ? "element" : (location.reference() ? "f" : "d") + location.index();
     }
-    String name = "v_" + owner + "_" + field;
-    variables.putIfAbsent(name, new Variable(owner, field, location.reference(), root));
+    String name =
+        array
+            ? "v_" + (location.reference() ? "references" : "data") + "_element"
+            : "v_" + owner + "_" + field;
+    variables.putIfAbsent(name, new Variable(owner, field, location.reference(), root, array));
     return name;
   }
 
   private String coordinates(Location location) {
-    return location.kind() == Location.Kind.ROOT ? "" : binding(location.owner()).name() + ", ";
+    String values = coordinateValues(location);
+    return values.isEmpty() ? "" : values + ", ";
+  }
+
+  private String coordinateValues(Location location) {
+    if (location.kind() == Location.Kind.ROOT) return "";
+    var owner = binding(location.owner());
+    return owner.name()
+        + (owner.shape().kind() == Shape.Kind.OBJECT ? "" : ", " + location.index());
   }
 
   private String read(Location location, MemoryMode mode) {
     if (mode == MemoryMode.VOLATILE)
-      return handle(location)
-          + ".getVolatile("
-          + (location.kind() == Location.Kind.ROOT ? "" : binding(location.owner()).name())
-          + ")";
+      return handle(location) + ".getVolatile(" + coordinateValues(location) + ")";
     if (location.kind() == Location.Kind.ROOT) return "Roots." + roots.get(location.owner());
     var owner = binding(location.owner());
     return slot(owner.name(), owner.shape(), location.index(), location.reference());
@@ -421,6 +441,7 @@ public final class JavaEmitter {
       case Instruction.Acquire op -> {
         var owner = binding(op.owner());
         String ref = "reference" + op.id(), result = "b" + op.id();
+        referenceShapes.put(result, shapes.get(op.shape()));
         line("{");
         line(
             "java.lang.ref.Reference<?> "
@@ -815,6 +836,21 @@ public final class JavaEmitter {
                 + " == null ? 0L : "
                 + target
                 + ".idOccurrence)";
+    if (target != null && referenceShapes.get(target).kind() != Shape.Kind.OBJECT)
+      identity =
+          "("
+              + target
+              + " == null ? 0 : (int) NativeObserver.arrayIdentity("
+              + target
+              + ", 0)), ("
+              + target
+              + " == null ? 0 : (int) NativeObserver.arrayIdentity("
+              + target
+              + ", 1)), ("
+              + target
+              + " == null ? 0L : NativeObserver.arrayIdentity("
+              + target
+              + ", 2))";
     if (kind.equals("STRONG_READ")) {
       line(
           recorder()
@@ -860,6 +896,7 @@ public final class JavaEmitter {
   private String declare(String name, Shape shape, int id) {
     var binding = new Binding("b" + id, shape, id);
     scopes.peek().put(name, binding);
+    if (shape != null) referenceShapes.put(binding.name(), shape);
     if (shape != null && observation.bindings()) {
       String type =
           switch (shape.kind()) {

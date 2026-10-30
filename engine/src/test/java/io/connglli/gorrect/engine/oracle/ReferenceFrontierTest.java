@@ -18,6 +18,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Set;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.ValueSource;
 
 class ReferenceFrontierTest {
   private static final ObjectId OWNER = ObjectId.initial(1),
@@ -26,8 +28,9 @@ class ReferenceFrontierTest {
   private static final Shape HOLDER = new Shape("Holder", Shape.Kind.OBJECT, 3, 0);
   private static final Shape NODE = new Shape("Node", Shape.Kind.OBJECT, 1, 0);
 
-  @Test
-  void matchesAnExhaustiveModelWithExplicitReferenceObjects() {
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void matchesAnExhaustiveModelWithExplicitReferenceObjects(boolean arrays) {
     // The independent model enumerates retained wrapper roots, classifies reachability with
     // explicit wrapper vertices, and enumerates every legal atomic clearing choice.
     for (int kinds = 0; kinds < 8; kinds++)
@@ -51,11 +54,14 @@ class ReferenceFrontierTest {
                 new Graph(
                     Map.of(
                         OWNER,
-                        new HeapObject(HOLDER, slots, List.of()),
+                        new HeapObject(
+                            arrays ? new Shape("Holder", Shape.Kind.REFERENCE_ARRAY, 3, 0) : HOLDER,
+                            slots,
+                            List.of()),
                         A,
-                        node(edges % 3),
+                        node(edges % 3, arrays),
                         B,
-                        node(edges / 3)),
+                        node(edges / 3, arrays)),
                     named,
                     Map.of());
             var frontier = new ReferenceFrontier(new HistoryLimits(1000, 100000));
@@ -105,8 +111,12 @@ class ReferenceFrontierTest {
   }
 
   private static HeapObject node(int target) {
+    return node(target, false);
+  }
+
+  private static HeapObject node(int target, boolean array) {
     return new HeapObject(
-        NODE,
+        array ? new Shape("Node", Shape.Kind.REFERENCE_ARRAY, 1, 0) : NODE,
         List.of(target == 0 ? Value.Reference.NULL : Value.Reference.strong(target == 1 ? A : B)),
         List.of());
   }

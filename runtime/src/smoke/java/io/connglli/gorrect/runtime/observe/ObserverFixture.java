@@ -52,6 +52,7 @@ public final class ObserverFixture {
             new NativeObserver.Registration(long[].class, HeapSnapshot.ClassKind.DATA_ARRAY),
             new NativeObserver.Registration(Roots.class, HeapSnapshot.ClassKind.ROOTS)));
     setup();
+    arrayIdentityReads();
     save(output, "initial", 1, 10_000);
     for (int i = 1; i <= ITERATIONS; i++) hotMutate(Roots.main, (Node) Roots.main.f0, i);
     Roots.refs[0] = Roots.main;
@@ -103,6 +104,48 @@ public final class ObserverFixture {
   private static void hotMutate(Node owner, Node target, long value) {
     owner.f0 = target;
     owner.d0 = value;
+  }
+
+  private static void arrayIdentityReads() throws InterruptedException {
+    for (int component = 0; component < 3; component++) {
+      long expected = component == 2 ? 3 : 0;
+      if (NativeObserver.arrayIdentity(Roots.refs, component) != expected)
+        throw new AssertionError("Reference-array identity differs");
+    }
+    var failure = new AtomicReference<Throwable>();
+    var publisher =
+        new Thread(
+            () -> {
+              try {
+                for (int occurrence = 1; occurrence <= 256; occurrence++) {
+                  var array = new long[3];
+                  NativeObserver.bindArrayIdentity(array, "Payload", 1, 99, occurrence);
+                  if (NativeObserver.arrayIdentity(array, 0) != 1
+                      || NativeObserver.arrayIdentity(array, 1) != 99
+                      || NativeObserver.arrayIdentity(array, 2) != occurrence)
+                    throw new AssertionError("Published array identity differs");
+                }
+              } catch (Throwable error) {
+                failure.set(error);
+              }
+            },
+            "array-identity-publisher");
+    publisher.start();
+    for (int i = 0; i < 4096; i++)
+      if (NativeObserver.arrayIdentity(Roots.data, 0) != 0
+          || NativeObserver.arrayIdentity(Roots.data, 1) != 0
+          || NativeObserver.arrayIdentity(Roots.data, 2) != 4)
+        throw new AssertionError("Existing identity changed during publication");
+    publisher.join();
+    if (failure.get() != null)
+      throw new AssertionError("Identity publication failed", failure.get());
+    try {
+      NativeObserver.arrayIdentity(new long[0], 0);
+      throw new AssertionError("Unbound array identity was guessed");
+    } catch (IllegalStateException expected) {
+      // Unbound arrays cannot inherit an identity from a shape or expected graph.
+    }
+    evidence.setProperty("identity.concurrent-publication", "true");
   }
 
   private static void holdLocal(Path output) throws IOException {

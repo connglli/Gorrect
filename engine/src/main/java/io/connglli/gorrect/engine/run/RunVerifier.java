@@ -40,7 +40,9 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Checks saved execution evidence without launching or consulting the target JVM. */
 final class RunVerifier {
@@ -112,7 +114,12 @@ final class RunVerifier {
         for (int index = 1; index <= oracle.checkpoints().size() + 1; index++) {
           var snapshot = snapshot(directory, run, index);
           compilationCoverage(snapshot, profile, unmet);
-          var projection = SnapshotProjector.project(snapshot, layout);
+          var expectedBindings =
+              index <= oracle.checkpoints().size()
+                  ? oracle.checkpoints().get(index - 1).graph().handles().keySet()
+                  : Set.<Integer>of();
+          var projection =
+              projection(directory, snapshot, layout, observation, expectedBindings, exercised);
           observations.add(
               new HistoryOracle.Observation(projection.graph(), projection.problems()));
         }
@@ -155,7 +162,10 @@ final class RunVerifier {
         var verified = new HashSet<String>();
         if (result.execution() != null) {
           verified.addAll(exercised);
-          if (result.verdict() != ExactVerifier.Verdict.SATISFIED) verified.remove("named-roots");
+          if (result.verdict() != ExactVerifier.Verdict.SATISFIED) {
+            verified.remove("named-roots");
+            verified.remove("local-bindings");
+          }
         }
         requiredObservations(profile, exercised, unmet, problems);
         report = new RunReport(report.execution(), report.verdict(), unmet, problems);
@@ -195,18 +205,9 @@ final class RunVerifier {
             natural == null
                 ? visit.graph()
                 : natural.obligations(visit.graph(), visit.operation(), visit.occurrence());
-        BindingEvidence bindings = null;
-        if (observation.bindings()) {
-          bindings =
-              BindingEvidence.read(
-                  directory.resolve("snapshots/" + (i + 1) + ".gbind"), run, i + 1L);
-          if (bindings.thread() != Long.parseLong(target(directory).getProperty("main.thread"))
-              || bindings.worker() != 0
-              || bindings.activation() != 1)
-            throw new IOException("Binding thread/activation mismatch");
-          if (!bindings.bindings().isEmpty()) exercised.add("local-bindings");
-        }
-        var projection = SnapshotProjector.project(snapshot, layout, bindings);
+        var projection =
+            projection(
+                directory, snapshot, layout, observation, expected.handles().keySet(), exercised);
         if (projection.graph().isPresent()) exercised.add("named-roots");
         var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
@@ -235,6 +236,40 @@ final class RunVerifier {
     }
     JsonFiles.write(directory.resolve("result.json"), report);
     return report;
+  }
+
+  /** Coverage uses declaration keys only; values come exclusively from target evidence. */
+  private static SnapshotProjector.Projection projection(
+      Path directory,
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      ObservationProfile profile,
+      Set<Integer> expectedBindings,
+      Set<String> exercised)
+      throws IOException {
+    BindingEvidence bindings = null;
+    if (profile.bindings()) {
+      bindings =
+          BindingEvidence.read(
+              directory.resolve("snapshots/" + snapshot.checkpoint() + ".gbind"),
+              snapshot.run(),
+              snapshot.checkpoint());
+      if (bindings.thread() != Long.parseLong(target(directory).getProperty("main.thread"))
+          || bindings.worker() != 0
+          || bindings.activation() != 1)
+        throw new IOException("Binding thread/activation mismatch");
+      if (!bindings.bindings().isEmpty()) exercised.add("local-bindings");
+      var declarations =
+          bindings.bindings().stream()
+              .map(BindingEvidence.Binding::declaration)
+              .collect(Collectors.toSet());
+      if (!declarations.equals(expectedBindings))
+        return new SnapshotProjector.Projection(
+            Optional.empty(), List.of("Incomplete binding declaration coverage"));
+    } else if (!expectedBindings.isEmpty())
+      return new SnapshotProjector.Projection(
+          Optional.empty(), List.of("Named-root profile does not cover live bindings"));
+    return SnapshotProjector.project(snapshot, layout, bindings);
   }
 
   private static void observationReport(
@@ -274,11 +309,23 @@ final class RunVerifier {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
 
+      var plan = HistoryPlan.plan(program, OracleLimits.DEFAULT);
       var observations = new ArrayList<HistoryOracle.Observation>();
       for (int index = 1;
           Files.exists(directory.resolve("snapshots/" + index + ".gsnap"));
           index++) {
-        var projection = SnapshotProjector.project(snapshot(directory, run, index), layout);
+        var expectedBindings =
+            index <= plan.checkpoints().size()
+                ? plan.checkpoints().get(index - 1).graph().handles().keySet()
+                : Set.<Integer>of();
+        var projection =
+            projection(
+                directory,
+                snapshot(directory, run, index),
+                layout,
+                ObservationProfile.parse(profile.observation()),
+                expectedBindings,
+                new HashSet<>());
         observations.add(new HistoryOracle.Observation(projection.graph(), projection.problems()));
       }
 

@@ -112,7 +112,7 @@ class HistoryRunTest {
   }
 
   @Test
-  void reportsReferenceSearchLimitsAndUnsupportedCombinations() throws IOException {
+  void reportsReferenceSearchLimitsAndUnsupportedRequirements() throws IOException {
     Path selected = profile(directory, 21);
     String references =
         "gir 1; shape N object 1 0; object 1 N [weak(2)] []; object 2 N [null] []; root r = 1;"
@@ -124,11 +124,6 @@ class HistoryRunTest {
         RunEngine.run(input(directory, references), selected, directory.resolve("reference-bound"));
     assertEquals(RunReport.Outcome.COMPLETED, limited.execution());
     assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, limited.verdict());
-    String arrays = references.replace("program", "shape A refs 0; program");
-    assertEquals(
-        RunReport.Outcome.UNSUPPORTED,
-        RunEngine.run(input(directory, arrays), selected, directory.resolve("array-references"))
-            .execution());
     raw.add("requirements", JsonFiles.GSON.toJsonTree(List.of("reference-reclamation")));
     JsonFiles.write(selected, raw);
     assertEquals(

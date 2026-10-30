@@ -41,11 +41,8 @@ public final class ObservationCapabilities {
     var reasons = new ArrayList<String>();
     boolean history =
         ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program);
-    if (history && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
-      reasons.add("History programs currently require ordinary-object shapes");
-    if (profile.bindings() && history)
-      reasons.add(
-          "Binding observation with reference/contended histories requires history composition");
+    if (!profile.controlled() && history)
+      reasons.add("Natural reference/contended histories require path-sensitive liveness rules");
     if (!profile.controlled()) {
       var arrays =
           program.shapes().stream()
@@ -135,7 +132,7 @@ public final class ObservationCapabilities {
                       ? "local-variable metadata capability"
                       : "no local-variable access capability",
                   profile.controlled()
-                      ? "diagnostic array binding when used"
+                      ? "diagnostic array binding and identity reads when used"
                       : "no diagnostic array binding")));
     }
     return List.copyOf(result);

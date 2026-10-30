@@ -124,9 +124,9 @@ final class VmDriver {
             case "gc-during-workers" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
             case "concurrent-overlap", "semantic-reads", "alias-checks" -> true;
             case "contended-histories" ->
-                !ObservationProfile.parse(profile.observation()).bindings();
+                ObservationProfile.parse(profile.observation()).controlled();
             case "reference-histories", "reference-queues" ->
-                !ObservationProfile.parse(profile.observation()).bindings()
+                ObservationProfile.parse(profile.observation()).controlled()
                     && (bits & HeapSnapshot.REFERENCE_FIELDS) != 0;
             default -> false;
           };
