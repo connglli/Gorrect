@@ -1,6 +1,6 @@
 package io.connglli.gorrect.engine.gir;
 
-/** Portable ordering guarantees; stronger effects from generated storage are not assumed. */
+/** Per-access ordering, preserved by emission independently of a location's other accesses. */
 public enum MemoryMode {
   /** Ordinary access; unordered conflicting accesses are outside the supported profile. */
   PLAIN,

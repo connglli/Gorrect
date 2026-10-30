@@ -6,17 +6,23 @@ The observer captures physical heap evidence for projection into [GIR](./gir.md)
 
 Register classes before constructing the workload. Supported layouts are direct `Object` subclasses without interfaces, `Object[]`, `long[]`, static root holders, and generated direct `SoftReference`/`WeakReference` subclasses. Names must be ASCII. JVMTI metadata supplies field indices, including inheritance, modifiers, and signatures; unsupported layouts fail explicitly.
 
-Ordinary identities come from immutable `int` worker/site and `long` occurrence fields read during capture. Arrays use diagnostic identity bindings through weak JVMTI tags. JNI binding can force escape or materialization; array tests must permit that effect.
-
-Wrappers carry primitive [incarnation fields](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). JVMTI reads inherited `Reference.referent` without `get()` or a strong root. Projection maps wrapper edges to strength, incarnation, and current referent. Queue links stay raw evidence; there is no separate wrapper registry.
-
 Capture walks VM roots without requesting GC. Callbacks record relevant objects, incoming/outgoing edges, primitives, and root origins in preallocated storage, without JNI, locks, or allocation. Native metadata holds no workload references. Tags remain stable across captures; raw records preserve duplicates and unknown origins.
 
 Projection combines only identical repeated primitive/element records. Conflicts, missing primitives, unknown fields or non-null targets, duplicate identities, and unvisited root classes make it unavailable. Absent edges establish null only after a complete walk with valid metadata. Record limits and JVMTI errors produce partial captures that cannot pass.
 
+## Identity
+
+Logical [object identity](./gir.md#identities-and-access) identifies one modeled allocation throughout its lifetime. Ordinary objects carry immutable `int` worker/site and `long` occurrence fields read during capture. Arrays use diagnostic bindings through weak JVMTI tags. A physical tag identifies an observed allocation within one target VM; it is neither an address nor a portable identity. Movement or materialization does not create a new logical allocation, and distinct observed allocations cannot share a logical identity. Copied diagnostic fields cannot establish the identity of a clone; clone is unsupported.
+
+Captured class IDs describe registered classes; signatures select their layout mappings. The current registry permits one definition per signature, so same-named classes from distinct loaders are unsupported. Class identity, object identity, and identity hashes are separate; hash collisions would not establish aliases.
+
+Wrappers carry primitive [incarnation fields](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). JVMTI reads inherited `Reference.referent` without `get()` or a strong root. Projection maps wrapper edges to strength, incarnation, and current referent. Queue links stay raw evidence; there is no separate wrapper registry.
+
 ## Coverage and observer effects
 
-Logical projection covers named static roots. Stack/JNI records retain available thread, method, depth, location, and slot evidence, but lack GIR binding mappings; checks requiring those handles are inconclusive. Missing compiled-local origins cannot establish liveness violations.
+The supported `named-roots-diagnostic` profile uses reachability fences to preserve [GIR binding lifetimes](./gir.md#instructions). Diagnostic array binding passes arrays through JNI and can force escape or materialization. These effects are permitted by this profile, not evidence of natural allocation or liveness. The observer keeps no hidden strong registry of workload objects.
+
+Logical projection covers named static roots at quiescent checkpoints. Stack/JNI records retain available thread, method, depth, location, and slot evidence, but lack GIR binding mappings; checks requiring those handles are inconclusive. Missing compiled-local origins cannot establish liveness violations. Natural-liveness checking is unsupported: it would need obligations derived from semantic uses and independently validated binding evidence, without relying on diagnostic fences or bindings to keep objects alive.
 
 Heap walking freezes the mutator heap view and can affect optimization. HotSpot may materialize eliminated objects through an escape barrier. A snapshot cannot establish unchanged compiled frames or physical allocation before the walk. Fixtures compare allocation with no agent, with tagging, and after capture, and retain escaped locals across GC/capture.
 
