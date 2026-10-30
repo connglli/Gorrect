@@ -7,6 +7,7 @@ import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
+import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -23,13 +24,14 @@ public final class SnapshotProjector {
       FIELD = 2,
       ARRAY_ELEMENT = 3,
       STATIC_FIELD = 8,
-      JNI_GLOBAL = 21;
+      JNI_GLOBAL = 21,
+      STACK_LOCAL = 24;
   private static final long INT = 73, LONG = 74;
 
   /**
    * Capture projection and its coverage diagnostics. Empty graph means unusable coverage rather
-   * than an observed empty heap. The prototype maps named static roots; raw stack origins are
-   * retained but not mapped to GIR binding IDs.
+   * than an observed empty heap. Binding profiles additionally require validated physical origins
+   * for every non-null binding; named-root capture alone supplies no stack coverage.
    */
   public record Projection(Optional<Graph> graph, List<String> problems) {
     public Projection {
@@ -37,15 +39,14 @@ public final class SnapshotProjector {
     }
 
     /**
-     * Compares deterministic strong-reference named-root obligations when a usable graph is
-     * present. Missing projection or live expected GIR handles yields INCONCLUSIVE; neither case is
-     * treated as a missing-object mismatch. Invalid expected strong graphs raise
-     * IllegalArgumentException.
+     * Compares deterministic strong-reference obligations when a usable graph is present. Missing
+     * projection or incomplete binding coverage yields INCONCLUSIVE; neither case is treated as a
+     * missing-object mismatch. Invalid expected strong graphs raise IllegalArgumentException.
      */
     public ExactVerifier.Result verify(Graph expected) {
       if (graph.isEmpty())
         return new ExactVerifier.Result(ExactVerifier.Verdict.INCONCLUSIVE, problems);
-      if (!expected.handles().isEmpty())
+      if (!graph.orElseThrow().handles().keySet().equals(expected.handles().keySet()))
         return new ExactVerifier.Result(
             ExactVerifier.Verdict.INCONCLUSIVE,
             List.of("Stack roots are not mapped to GIR bindings by this profile"));
@@ -54,6 +55,12 @@ public final class SnapshotProjector {
   }
 
   private record Slot(long owner, long index) {}
+
+  private record LocalSlot(long method, int slot) {}
+
+  private record LocalName(String method, String descriptor, String name, String type) {}
+
+  private record Frame(long method, long depth) {}
 
   private record Resolved(
       Shape shape,
@@ -70,8 +77,19 @@ public final class SnapshotProjector {
    * conflicting, or unmapped evidence produces diagnostics and no graph, not a validation mismatch.
    */
   public static Projection project(HeapSnapshot snapshot, ObservationLayout layout) {
+    return project(snapshot, layout, null);
+  }
+
+  /** Maps explicit presence and raw stack origins without consulting expected identities. */
+  public static Projection project(
+      HeapSnapshot snapshot, ObservationLayout layout, BindingEvidence bindings) {
     try {
-      return new Projection(Optional.of(new Decoder(snapshot, layout).decode()), List.of());
+      var decoder = new Decoder(snapshot, layout);
+      var graph = decoder.decode();
+      var handles =
+          bindings == null ? Map.<Integer, Value.Reference>of() : decoder.bindings(bindings);
+      return new Projection(
+          Optional.of(new Graph(graph.objects(), graph.roots(), handles)), List.of());
     } catch (IllegalArgumentException exception) {
       return new Projection(Optional.empty(), List.of(exception.getMessage()));
     }
@@ -105,6 +123,117 @@ public final class SnapshotProjector {
       resolveWrappers();
       validateFieldRecords();
       return buildGraph();
+    }
+
+    private Map<Integer, Value.Reference> bindings(BindingEvidence evidence) {
+      require(
+          evidence.run() == snapshot.run() && evidence.checkpoint() == snapshot.checkpoint(),
+          "Binding capture identity mismatch");
+      require(
+          evidence.worker() == 0 && evidence.activation() == 1, "Unsupported binding activation");
+      if (evidence.bindings().isEmpty()) return Map.of();
+      var declarations = new HashMap<Integer, ObservationLayout.LocalBinding>();
+      for (var binding : layout.bindings())
+        require(
+            declarations.putIfAbsent(binding.declaration(), binding) == null,
+            "Duplicate binding layout");
+      var methods = new HashMap<Long, HeapSnapshot.MethodInfo>();
+      for (var method : snapshot.methods()) {
+        require(methods.putIfAbsent(method.token(), method) == null, "Duplicate method token");
+        var locals = new HashSet<HeapSnapshot.LocalVariable>();
+        for (var local : method.locals())
+          require(
+              local.start() >= 0
+                  && local.length() >= 0
+                  && local.slot() >= 0
+                  && local.slot() <= 65_535
+                  && locals.add(local),
+              "Invalid or duplicate local metadata");
+      }
+
+      var origins = bindingOrigins(evidence, methods);
+      var result = new HashMap<Integer, Value.Reference>();
+      for (var binding : evidence.bindings()) {
+        var declaration = declarations.get(binding.declaration());
+        require(
+            declaration != null && declaration.worker() == evidence.worker(),
+            "Unknown binding declaration");
+        var key =
+            new LocalName(
+                declaration.method(),
+                declaration.descriptor(),
+                declaration.variable(),
+                declaration.type());
+        var matches = origins.getOrDefault(key, Set.of());
+        if (!binding.present()) {
+          require(matches.isEmpty(), "Nullness conflicts with a physical binding root");
+          result.put(binding.declaration(), Value.Reference.NULL);
+          continue;
+        }
+        require(
+            (snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0,
+            "Local-variable metadata is unavailable");
+        require(
+            matches.size() == 1,
+            "Missing or ambiguous physical root for binding " + binding.declaration());
+        ObjectId id = identities.get(matches.iterator().next().a());
+        require(id != null, "Unmapped binding target");
+        result.put(binding.declaration(), Value.Reference.strong(id));
+      }
+      return result;
+    }
+
+    private Map<LocalName, Set<HeapSnapshot.Record>> bindingOrigins(
+        BindingEvidence evidence, Map<Long, HeapSnapshot.MethodInfo> methods) {
+      var variables = new HashMap<LocalSlot, List<HeapSnapshot.LocalVariable>>();
+      for (var method : methods.values())
+        for (var local : method.locals())
+          variables
+              .computeIfAbsent(
+                  new LocalSlot(method.token(), local.slot()), key -> new ArrayList<>())
+              .add(local);
+
+      var result = new HashMap<LocalName, Set<HeapSnapshot.Record>>();
+      var slots = new HashMap<LocalSlot, HeapSnapshot.Record>();
+      Frame frame = null;
+      long location = -1;
+      for (var root : snapshot.records()) {
+        if (root.kind() != HeapSnapshot.Kind.ROOT
+            || root.b() != STACK_LOCAL
+            || root.c() != evidence.thread()
+            || root.d() < 0
+            || root.e() < 0
+            || root.e() > 65_535
+            || root.g() < 0) continue;
+        var method = methods.get(root.f());
+        if (method == null || !method.owner().equals("LCase;") || !method.name().equals("execute"))
+          continue;
+        var current = new Frame(root.f(), root.d());
+        if (frame == null) {
+          frame = current;
+          location = root.g();
+        }
+        require(
+            frame.equals(current) && location == root.g(), "Ambiguous generated-method activation");
+        var slot = new LocalSlot(root.f(), (int) root.e());
+        var previous = slots.putIfAbsent(slot, root);
+        require(
+            previous == null || previous.equals(root), "Conflicting physical stack-slot evidence");
+        if (previous != null) continue;
+
+        // The generated caller invokes execute once; multiple frames cannot share activation 1.
+        // Index once per physical slot, rather than scanning every root for every binding.
+        boolean found = false;
+        for (var local : variables.getOrDefault(slot, List.of())) {
+          if (root.g() < local.start() || root.g() - local.start() >= local.length()) continue;
+          require(!found, "Overlapping local-variable scopes for stack slot");
+          found = true;
+          var key =
+              new LocalName(method.name(), method.descriptor(), local.name(), local.descriptor());
+          result.computeIfAbsent(key, ignored -> new HashSet<>()).add(root);
+        }
+      }
+      return result;
     }
 
     private void resolveLayouts() {

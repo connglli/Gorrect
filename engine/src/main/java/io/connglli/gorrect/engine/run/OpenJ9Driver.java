@@ -41,7 +41,7 @@ final class OpenJ9Driver {
     }
     args.add("-Xgcpolicy:" + profile.collector());
     args.add("-Xdump:directory=" + directory.resolve("logs"));
-    args.add("-agentpath:" + directory.resolve("support/" + observer));
+    args.add(VmDriver.observerArgument(profile, directory, observer));
     return args;
   }
 

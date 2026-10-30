@@ -30,6 +30,7 @@ final class RunCompiler {
             compiler.toString(),
             "--release",
             "17",
+            "-g",
             "-Xlint:all",
             "-Werror",
             "-cp",

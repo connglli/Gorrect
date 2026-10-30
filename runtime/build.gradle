@@ -47,21 +47,27 @@ dependencies {
         dependsOn smokeTest
     }
 
-    def observerTest = tasks.register("observerSmoke${javaVersion}", JavaExec) {
-        group = 'verification'
-        description = "Captures heap relationships and checks retention on Java ${javaVersion}."
-        dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
-        classpath = sourceSets.smoke.runtimeClasspath
-        mainClass = 'io.connglli.gorrect.runtime.observe.ObserverFixture'
-        javaLauncher = javaToolchains.launcherFor {
-            languageVersion = JavaLanguageVersion.of(javaVersion)
+    [false, true].each { withLocals ->
+        def prefix = withLocals ? 'observerLocalsSmoke' : 'observerSmoke'
+        def artifacts = withLocals ? 'observer-locals' : 'observer'
+        def observerTest = tasks.register("${prefix}${javaVersion}", JavaExec) {
+            group = 'verification'
+            description = "Checks capture and retention on Java ${javaVersion}, local metadata=${withLocals}."
+            dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
+            classpath = sourceSets.smoke.runtimeClasspath
+            mainClass = 'io.connglli.gorrect.runtime.observe.ObserverFixture'
+            javaLauncher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(javaVersion)
+            }
+            timeout = Duration.ofSeconds(90)
+            doFirst {
+                def library = configurations.nativeObserver.singleFile.absolutePath
+                def options = withLocals ? '=locals' : ''
+                setJvmArgs(["-agentpath:${library}${options}", '-Xmx128m', '-Xbatch'])
+                setArgs([library, layout.buildDirectory.dir("${artifacts}/java${javaVersion}").get().asFile.absolutePath])
+            }
         }
-        timeout = Duration.ofSeconds(90)
-        doFirst {
-            def library = configurations.nativeObserver.singleFile.absolutePath
-            setJvmArgs(["-agentpath:${library}", '-Xmx128m', '-Xbatch'])
-            setArgs([library, layout.buildDirectory.dir("observer/java${javaVersion}").get().asFile.absolutePath])
-        }
+        tasks.named('check') { dependsOn observerTest }
     }
-    tasks.named('check') { dependsOn observerTest }
+
 }

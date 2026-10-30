@@ -44,16 +44,19 @@ tasks.named('test') {
 def observerIntegration = tasks.register('observerIntegration', Test) {
     group = 'verification'
     description = 'Verifies raw native captures independently on the engine JVM.'
-    dependsOn ':runtime:observerSmoke17', ':runtime:observerSmoke21'
+    dependsOn ':runtime:observerSmoke17', ':runtime:observerSmoke21',
+            ':runtime:observerLocalsSmoke17', ':runtime:observerLocalsSmoke21'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform { includeTags 'observer' }
-    [17, 21].each {
-        inputs.dir(project(':runtime').layout.buildDirectory.dir("observer/java${it}"))
-                .withPathSensitivity(PathSensitivity.RELATIVE)
+    def captures = [17, 21].collectMany { feature ->
+        ['observer', 'observer-locals'].collect { kind ->
+            project(':runtime').layout.buildDirectory.dir("${kind}/java${feature}")
+        }
     }
-    systemProperty 'gorrect.observer.artifacts', [17, 21].collect {
-        project(':runtime').layout.buildDirectory.dir("observer/java${it}").get().asFile.absolutePath
+    captures.each { inputs.dir(it).withPathSensitivity(PathSensitivity.RELATIVE) }
+    systemProperty 'gorrect.observer.artifacts', captures.collect {
+        it.get().asFile.absolutePath
     }.join(File.pathSeparator)
 }
 

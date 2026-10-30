@@ -1,5 +1,6 @@
 package io.connglli.gorrect.runtime;
 
+import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
@@ -49,6 +50,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private long checkpoint;
   private long collections;
   private boolean complete;
+  private final int[] bindingIds;
+  private final boolean[] bindingPresence;
+  private int bindingCount;
 
   private TargetSession(String[] args) throws IOException {
     if (args.length != 6) throw new IllegalArgumentException("Invalid target launch arguments");
@@ -60,6 +64,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       throw new IllegalArgumentException("Invalid trace capacity or run token");
 
     referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
+    boolean localBindings =
+        !System.getProperty("gorrect.observation", "named-roots-diagnostic")
+            .equals("named-roots-diagnostic");
+    bindingIds = new int[localBindings ? BindingEvidence.MAX_BINDINGS : 0];
+    bindingPresence = new boolean[bindingIds.length];
     recorders(capacity);
 
     socket = SocketChannel.open(UnixDomainSocketAddress.of(args[0]));
@@ -281,12 +290,21 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
   /**
    * Captures named-root evidence, persists its bytes, and waits for engine acknowledgement before
-   * resuming mutations. Workers must be joined and GIR reference bindings released. Operation zero
-   * denotes the final capture; other operations retain a per-site visit number.
+   * resuming mutations. Workers must be joined; live bindings need the selected profile's evidence.
+   * Operation zero denotes the final capture; other operations retain a per-site visit number.
    */
   public void checkpoint(int operation) throws IOException {
     long occurrence = visits.merge(operation, 1L, Long::sum);
     checkpoint++;
+
+    if (bindingIds.length != 0) {
+      var bindings = new ArrayList<BindingEvidence.Binding>();
+      for (int index = 0; index < bindingCount; index++)
+        bindings.add(new BindingEvidence.Binding(bindingIds[index], bindingPresence[index]));
+      new BindingEvidence(run, checkpoint, Thread.currentThread().getId(), 0, 1, bindings)
+          .write(directory.resolve("snapshots/" + checkpoint + ".gbind"));
+      bindingCount = 0;
+    }
 
     byte[] bytes = NativeObserver.capture(run, checkpoint, records);
     Files.write(directory.resolve("snapshots").resolve(checkpoint + ".gsnap"), bytes);
@@ -294,6 +312,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
 
     acknowledge(checkpoint);
+  }
+
+  /** Records only nullness before capture, without acquiring or retaining a workload reference. */
+  public void binding(int declaration, boolean present) {
+    if (declaration <= 0 || bindingCount == bindingIds.length)
+      throw new IllegalStateException("Binding evidence capacity exhausted or invalid declaration");
+    bindingIds[bindingCount] = declaration;
+    bindingPresence[bindingCount++] = present;
   }
 
   /** Persists complete traces and VM witnesses, then reports success after the final checkpoint. */

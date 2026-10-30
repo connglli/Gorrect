@@ -34,7 +34,7 @@ enum class RecordKind : std::int64_t {
 enum class CaptureStatus : std::int32_t { complete = 0, record_limit = 1, jvmti_error = 2 };
 namespace capability {
 constexpr std::int64_t tagging = 1, gc_events = 2, compilation_events = 4, compilation_overflow = 8,
-                       reference_fields = 16;
+                       reference_fields = 16, local_variables = 32;
 }
 
 struct FieldInfo {
@@ -56,9 +56,16 @@ struct ArrayIdentity {
   std::int64_t occurrence;
 };
 
+struct LocalVariable {
+  std::int64_t start;
+  std::int32_t length, slot;
+  std::string name, descriptor;
+};
+
 struct MethodInfo {
   std::int64_t token;
   std::string owner, name, descriptor;
+  std::vector<LocalVariable> locals{};
 };
 
 // Numeric kind and cell meanings are defined in docs/observation.md.
@@ -139,6 +146,16 @@ inline std::vector<std::uint8_t> encode(const Snapshot &snapshot) {
     out.string(method.owner);
     out.string(method.name);
     out.string(method.descriptor);
+    if (snapshot.capabilities & capability::local_variables) {
+      out.integer(static_cast<std::uint32_t>(method.locals.size()));
+      for (const auto &local : method.locals) {
+        out.number(local.start);
+        out.integer(local.length);
+        out.integer(local.slot);
+        out.string(local.name);
+        out.string(local.descriptor);
+      }
+    }
   }
   out.integer(static_cast<std::uint32_t>(snapshot.records.size()));
   for (const auto &record : snapshot.records) {

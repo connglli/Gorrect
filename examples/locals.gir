@@ -1,0 +1,18 @@
+// Select roots-diagnostic or roots-natural in the target profile.
+gir 1;
+shape Node object 1 1;
+root main = null;
+
+program {
+  scope {
+    allocate held Node;
+    write-ref held 0 held;
+    write-data held 0 42;
+    collect;
+    local: checkpoint;
+    same-object self held held;
+    read-data preserved held 0;
+    write-root main held;
+  }
+  published: checkpoint;
+}

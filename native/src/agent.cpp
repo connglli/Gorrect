@@ -50,6 +50,24 @@ template <typename T> struct JvmtiMemory {
       jvmti->Deallocate(reinterpret_cast<unsigned char *>(data));
   }
 };
+struct LocalTable {
+  jint count = 0;
+  jvmtiLocalVariableEntry *data = nullptr;
+  LocalTable() = default;
+  LocalTable(const LocalTable &) = delete;
+  LocalTable &operator=(const LocalTable &) = delete;
+  ~LocalTable() {
+    if (!data)
+      return;
+    for (jint i = 0; i < count; ++i) {
+      jvmti->Deallocate(reinterpret_cast<unsigned char *>(data[i].name));
+      jvmti->Deallocate(reinterpret_cast<unsigned char *>(data[i].signature));
+      if (data[i].generic_signature)
+        jvmti->Deallocate(reinterpret_cast<unsigned char *>(data[i].generic_signature));
+    }
+    jvmti->Deallocate(reinterpret_cast<unsigned char *>(data));
+  }
+};
 std::string ascii(const char *value) {
   // ASCII avoids a modified-UTF-8 conversion between JVMTI metadata and standard UTF-8 wire
   // strings.
@@ -314,7 +332,22 @@ std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
     if (jvmti->GetMethodDeclaringClass(method, &owner) != JVMTI_ERROR_NONE)
       continue;
     try {
-      result.push_back({token, signature(owner), ascii(name.data), ascii(descriptor.data)});
+      MethodInfo metadata{token, signature(owner), ascii(name.data), ascii(descriptor.data)};
+      if ((capabilities & capability::local_variables) && metadata.owner == "LCase;") {
+        LocalTable table;
+        auto error = jvmti->GetLocalVariableTable(method, &table.count, &table.data);
+        if (error == JVMTI_ERROR_NONE) {
+          if (table.count < 0 || table.count > 65536)
+            throw std::runtime_error("Local-variable metadata capacity exhausted");
+          // Copy metadata only, outside callbacks; never acquire the locals themselves.
+          for (jint i = 0; i < table.count; ++i) {
+            auto &local = table.data[i];
+            metadata.locals.push_back({local.start_location, local.length, local.slot,
+                                       ascii(local.name), ascii(local.signature)});
+          }
+        }
+      }
+      result.push_back(std::move(metadata));
     } catch (...) {
       env->DeleteLocalRef(owner);
       throw;
@@ -334,7 +367,7 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_gcFinishes(JNIEnv *env, 
     return (capabilities & capability::gc_events) ? gc_finishes.load() : -1;
   });
 }
-extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
+extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *) {
   try {
     void *environment = nullptr;
     if (vm->GetEnv(&environment, JVMTI_VERSION_1_2) != JNI_OK)
@@ -347,6 +380,12 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
     if (!available.can_tag_objects)
       return JNI_ERR;
     desired.can_tag_objects = 1;
+    bool locals = options && std::string(options) == "locals";
+    jvmtiJlocationFormat location_format = JVMTI_JLOCATION_OTHER;
+    bool bytecode_locations = jvmti->GetJLocationFormat(&location_format) == JVMTI_ERROR_NONE &&
+                              location_format == JVMTI_JLOCATION_JVMBCI;
+    desired.can_access_local_variables =
+        locals && bytecode_locations && available.can_access_local_variables;
     desired.can_generate_garbage_collection_events =
         available.can_generate_garbage_collection_events;
     desired.can_generate_compiled_method_load_events =
@@ -354,6 +393,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
     check(jvmti->AddCapabilities(&desired));
     capabilities =
         capability::tagging | capability::reference_fields |
+        (desired.can_access_local_variables ? capability::local_variables : 0) |
         (desired.can_generate_garbage_collection_events ? capability::gc_events : 0) |
         (desired.can_generate_compiled_method_load_events ? capability::compilation_events : 0);
     jvmtiEventCallbacks callbacks{};

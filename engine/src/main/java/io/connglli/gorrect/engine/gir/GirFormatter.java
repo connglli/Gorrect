@@ -143,6 +143,8 @@ public final class GirFormatter {
       case Instruction.ReferenceState op ->
           "is-cleared " + op.name() + " " + op.owner() + " " + op.index();
       case Instruction.PollQueue ignored -> "poll-queue";
+      case Instruction.SameObject op ->
+          "same-object " + op.name() + " " + operand(op.left()) + " " + operand(op.right());
       case Instruction.ReadData op ->
           (op.mode() == MemoryMode.VOLATILE ? "read-volatile-data " : "read-data ")
               + op.name()

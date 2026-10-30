@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.run;
 
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.io.IOException;
@@ -19,6 +20,12 @@ import java.util.Set;
  */
 final class VmDriver {
   private VmDriver() {}
+
+  static String observerArgument(TargetProfile profile, Path directory, String observer) {
+    return "-agentpath:"
+        + directory.resolve("support/" + observer)
+        + (ObservationProfile.parse(profile.observation()).bindings() ? "=locals" : "");
+  }
 
   /**
    * Returns the command prefix through VM options and agent setup, including the executable. The
@@ -97,11 +104,16 @@ final class VmDriver {
 
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
     if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
+    if (ObservationProfile.parse(profile.observation()).bindings()
+        && (bits & HeapSnapshot.LOCAL_VARIABLES) == 0) unmet.add("local-bindings");
 
     for (String requirement : profile.requirements()) {
       boolean available =
           switch (requirement) {
             case "tagging", "named-roots" -> (bits & HeapSnapshot.TAGGING) != 0;
+            case "local-bindings" ->
+                ObservationProfile.parse(profile.observation()).bindings()
+                    && (bits & HeapSnapshot.LOCAL_VARIABLES) != 0;
             case "gc-completion" -> target.getProperty("gc.evidence", "false").equals("true");
             case "gc-events" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
             case "compilation-events" ->
@@ -110,9 +122,12 @@ final class VmDriver {
             case "compiled-execution" ->
                 profile.jit() != null && target.getProperty("jit.problem", "unavailable").isEmpty();
             case "gc-during-workers" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
-            case "concurrent-overlap", "contended-histories" -> true;
+            case "concurrent-overlap", "semantic-reads", "alias-checks" -> true;
+            case "contended-histories" ->
+                !ObservationProfile.parse(profile.observation()).bindings();
             case "reference-histories", "reference-queues" ->
-                (bits & HeapSnapshot.REFERENCE_FIELDS) != 0;
+                !ObservationProfile.parse(profile.observation()).bindings()
+                    && (bits & HeapSnapshot.REFERENCE_FIELDS) != 0;
             default -> false;
           };
       if (!available && !unmet.contains(requirement)) unmet.add(requirement);

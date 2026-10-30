@@ -109,21 +109,19 @@ The normal build passes 275 Java tests and native/Javadoc checks, preserving all
 
 Status: complete. Named roots use plain storage and direct plain accesses; volatile/atomic operations retain explicit VarHandle effects. The contracts distinguish controlled lifetimes, diagnostic binding effects, logical/physical/class identity, and unsupported natural-liveness observation. [Stage 11 notes](./completed-2026-10-30-stage11.md) record the review and checks.
 
-The full build, JDK 17/21 storage/bytecode checks, mixed-mode verification/replay, selected HotSpot C1/C2 and OpenJ9 contended cases, and old-bundle verification pass. Selected fastdebug runs need longer local startup deadlines; committed defaults are unchanged. Live-local capture remains unsupported, and formats remain version 1.
+The full build, JDK 17/21 storage/bytecode checks, mixed-mode verification/replay, selected HotSpot C1/C2 and OpenJ9 contended cases, and old-bundle verification pass. Selected fastdebug runs need longer local startup deadlines; committed defaults are unchanged. Live-local capture follows in stage 12; formats remain version 1.
 
 ## 12. Add root and observation profiles
 
-Goal: verify live caller/worker roots and semantic uses under explicit observer-effect contracts.
+Status: complete for quiescent caller snapshots and worker semantic uses. [Stage 12 notes](./completed-2026-10-30-stage12.md) record controlled/natural profiles, actual local-variable/root mappings, primitive binding evidence, same-object comparisons, bounded future-use analysis, and structured observation capabilities. Missing optimized origins remain inconclusive. Reports distinguish availability, exercise, and verified obligations; no hidden strong registry supplies roots.
 
-Add validated binding mappings and coordinated root evidence, including activation identity, with controlled/diagnostic and natural-liveness profiles. Complement heap capture with read/alias witnesses. Add structured capabilities describing supported combinations, preconditions, effects, memory footprints, observation coverage, and required target evidence; availability, exercised behavior, and verified obligations remain separate.
-
-Complete when caller/worker locals survive legitimate collection points, missing optimized-root origins stay inconclusive, and no hidden strong registry changes reachability. Calibrate no-agent, tagging, witness, and capture effects. Preserve Java 17 compatibility and test unsupported VM/profile combinations.
+The full build passes 316 Java tests and native/Javadoc checks. JDK 17/21 captures and retention pass with and without local-variable access; 128 independent use patterns check natural liveness. Selected HotSpot C1/C2 and OpenJ9 cases, offline verification, replay, old-bundle compatibility, and 32 observer-effect calibration runs pass. General call frames, conditional/reference/contended binding composition, and active-worker heap snapshots retain their later-stage boundaries.
 
 ## 13. Complete history and checkpoint composition
 
 Goal: remove blanket array/history restrictions and compose observation with conditional and parallel execution.
 
-Support reference and atomic histories over arrays, including unrelated array shapes, conditional checkpoints, and coordinated mid-worker capture. Specify checkpoint phase, live-root coverage, and synchronization before extending projection or search.
+Compose arrays, binding profiles, reference/atomic histories, conditional checkpoints, and coordinated mid-worker capture. Natural histories need path-sensitive future-use and clearing rules; unrelated array declarations must not cause blanket rejection. Specify checkpoint phase, live-root coverage, and synchronization before extending projection or search.
 
 Complete when independent small histories cover array aliasing, publication, acquisitions, and conditional visits. Missing workers, partial captures, invalid phase evidence, races, and exhausted budgets cannot pass. Existing ordinary-object cases retain their verdicts.
 

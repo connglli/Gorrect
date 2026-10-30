@@ -24,7 +24,7 @@ final class HotSpotDriver {
     arguments.addAll(profile.vmArgs());
     arguments.addAll(collectorArguments(profile, targetFacts(directory)));
     arguments.add("-XX:ErrorFile=" + directory.resolve("logs/hs_err_pid%p.log"));
-    arguments.add("-agentpath:" + directory.resolve("support/" + observer));
+    arguments.add(VmDriver.observerArgument(profile, directory, observer));
     if (profile.usesWhiteBox()) {
       arguments.add("-XX:+UnlockDiagnosticVMOptions");
       arguments.add("-XX:+WhiteBoxAPI");

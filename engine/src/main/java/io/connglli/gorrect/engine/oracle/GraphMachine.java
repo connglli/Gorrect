@@ -355,6 +355,11 @@ final class GraphMachine {
           throw new GirException("Reference state requires a recorded history");
       case Instruction.PollQueue ignored ->
           throw new GirException("Queue polling requires a recorded history");
+      case Instruction.SameObject op -> {
+        requireDeclaration(op.name());
+        read = operand(op.left(), true).equals(operand(op.right(), true)) ? 1L : 0L;
+        bind(op.name(), op.id(), new Value.Scalar(read));
+      }
       case Instruction.ReadData op -> {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), false);
@@ -432,6 +437,7 @@ final class GraphMachine {
       case Instruction.Barrier ignored -> ExecutionTrace.Kind.BARRIER;
       case Instruction.CompareSet ignored -> ExecutionTrace.Kind.COMPARE_SET;
       case Instruction.ReadData ignored -> ExecutionTrace.Kind.SCALAR_READ;
+      case Instruction.SameObject ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.Exchange exchange ->
           exchange.location().reference()
               ? ExecutionTrace.Kind.REFERENCE_READ

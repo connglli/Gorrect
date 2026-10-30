@@ -85,6 +85,7 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `clear-ref owner index;` | Explicitly clear the current wrapper without enqueueing it. |
 | `poll-queue;` | Record one wrapper incarnation from the case's reference queue, or an empty result. |
 | `read-data value owner index;` | Bind a scalar to a data slot's contents. |
+| `same-object equal left right;` | Bind scalar 1 for identical reference operands, including two nulls; otherwise 0. |
 | `write-data owner index value;` | Write a scalar or integer literal. |
 | `compare-set-root won root expected update;` | Compare root identity and conditionally update; bind scalar 1 on success, otherwise 0. |
 | `compare-set-ref won owner index expected update;` | Compare and conditionally update a strong slot by identity. |
@@ -161,6 +162,6 @@ Required conditions must hold in one parallel-block visit. Overlap plus GC requi
 
 ## Oracle obligations
 
-Checkpoint visits are distinguished by internal instruction ID and visit number; the program maps IDs to labels. Expectations include every named root, live reference binding, and logical object reachable through them, with exact shape, reference kind, targets, and data. Unreachable garbage may remain in an observation. Missing or extra required slots, changed roots or handles, and corrupted contents violate the expectations. Incomplete observations are inconclusive.
+Checkpoint visits are distinguished by internal instruction ID and visit number; the program maps IDs to labels. The model retains every named root and live reference binding. The [observation profile](./observation.md#coverage-and-observer-effects) selects physical binding obligations; their reachable graph has exact shapes, reference kinds, targets, and data. Retained garbage is allowed. Changed required roots, handles, slots, or contents violate the expectations; incomplete coverage is inconclusive.
 
 Model budgets bound steps, allocated objects (including wrappers), slots, and cumulative snapshot cells. [OracleLimits](../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleLimits.java) defines cell accounting; [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) define step costs and rejection behavior. These bounds are independent of target heap capacity. Exhaustion produces a checking limit or inconclusive history check.

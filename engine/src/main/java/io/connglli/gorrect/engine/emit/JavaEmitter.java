@@ -12,7 +12,10 @@ import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.observe.NaturalLiveness;
+import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
+import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
@@ -30,7 +33,7 @@ public final class JavaEmitter {
   /** Generated Java and its observed-field mapping; neither contains oracle payload predictions. */
   public record Emission(String source, ObservationLayout layout) {}
 
-  private record Binding(String name, Shape shape) {}
+  private record Binding(String name, Shape shape, int id) {}
 
   private record Variable(String owner, String field, boolean reference, boolean root) {}
 
@@ -43,12 +46,17 @@ public final class JavaEmitter {
   private final Map<String, String> roots = new LinkedHashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private final List<Instruction.Worker> workers = new ArrayList<>();
+  private final List<ObservationLayout.LocalBinding> bindings = new ArrayList<>();
+  private final ObservationProfile observation;
+  private final NaturalLiveness natural;
   private int worker;
   private final boolean references;
   private final boolean concurrent;
 
-  private JavaEmitter(GirProgram program) {
+  private JavaEmitter(GirProgram program, ObservationProfile observation) {
     this.program = program;
+    this.observation = observation;
+    natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
     references = ReferenceProgram.usesReferences(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
   }
@@ -59,11 +67,15 @@ public final class JavaEmitter {
    * history/array combinations are rejected before any executable result is returned.
    */
   public static Emission emit(GirProgram program) {
+    return emit(program, ObservationProfile.NAMED_ROOTS);
+  }
+
+  /** Selects lifetime and binding evidence without changing ordinary graph accesses. */
+  public static Emission emit(GirProgram program, ObservationProfile observation) {
     GirValidator.validate(program);
-    if ((ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program))
-        && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
-      throw new GirException("History emission requires an ordinary-object program");
-    return new JavaEmitter(program).emit();
+    var unsupported = ObservationCapabilities.unsupported(program, observation);
+    if (!unsupported.isEmpty()) throw new GirException(String.join("; ", unsupported));
+    return new JavaEmitter(program, observation).emit();
   }
 
   private Emission emit() {
@@ -184,7 +196,8 @@ public final class JavaEmitter {
             layouts,
             program.shapes().stream().filter(shape -> shape.kind() != Shape.Kind.OBJECT).toList(),
             new ObservationLayout.Roots("LCase$Roots;", rootFields),
-            referenceLayouts));
+            referenceLayouts,
+            bindings));
   }
 
   private void referenceClasses() {
@@ -312,6 +325,9 @@ public final class JavaEmitter {
             instruction -> {
               switch (instruction) {
                 case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
+                case Instruction.Checkpoint op -> {
+                  if (natural != null) line("private static long c" + op.id() + ";");
+                }
                 case Instruction.WriteReference op -> {
                   if (op.kind() != Value.ReferenceKind.STRONG)
                     line("private static long w" + op.id() + ";");
@@ -423,7 +439,7 @@ public final class JavaEmitter {
                 + ".get();");
         reference(op.id(), "ACQUIRE", result + " == null ? 0L : 1L", ref, result);
         line("if (" + result + " != null) {");
-        block(op.body(), op.name(), new Binding(result, shapes.get(op.shape())));
+        block(op.body(), op.name(), new Binding(result, shapes.get(op.shape()), op.id()));
         line(
             recorder()
                 + ".record("
@@ -683,10 +699,12 @@ public final class JavaEmitter {
       case Instruction.Release op -> {
         var binding = binding(op.name());
         if (binding.shape() != null) release(binding.name());
+        scopes.peek().remove(op.name());
       }
 
       case Instruction.Checkpoint op -> {
         record(op.id(), false);
+        checkpointBindings(op.id());
         line("session.checkpoint(" + op.id() + ");");
         return;
       }
@@ -711,13 +729,73 @@ public final class JavaEmitter {
                 + ");");
         return;
       }
+
+      case Instruction.SameObject op -> {
+        String name = declare(op.name(), null, op.id());
+        line(
+            "long "
+                + name
+                + " = (Object) "
+                + operand(op.left())
+                + " == (Object) "
+                + operand(op.right())
+                + " ? 1L : 0L;");
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", "
+                + ExecutionTrace.Kind.SCALAR_READ.ordinal()
+                + ", "
+                + name
+                + ");");
+        return;
+      }
     }
     record(instruction.id(), false);
   }
 
   // A Java local's last use can precede GIR release; the fence preserves the modeled lifetime.
   private void release(String name) {
-    line("java.lang.ref.Reference.reachabilityFence(" + name + "); " + name + " = null;");
+    line(
+        (observation.controlled()
+                ? "java.lang.ref.Reference.reachabilityFence(" + name + "); "
+                : "")
+            + name
+            + " = null;");
+  }
+
+  private void checkpointBindings(int operation) {
+    if (!observation.bindings()) return;
+    if (natural != null) line("long visit" + operation + " = ++c" + operation + ";");
+    for (var scope : scopes)
+      for (var binding : scope.values()) {
+        if (binding.shape() == null) continue;
+        String condition = "";
+        if (natural != null) {
+          var visits = natural.visits(operation, binding.id());
+          if (visits.isEmpty()) continue;
+          var ranges = new ArrayList<String>();
+          for (int i = 0; i < visits.size(); i++) {
+            long first = visits.get(i), last = first;
+            while (i + 1 < visits.size() && visits.get(i + 1) == last + 1) last = visits.get(++i);
+            ranges.add(
+                first == last
+                    ? "visit" + operation + " == " + first + "L"
+                    : "(visit"
+                        + operation
+                        + " >= "
+                        + first
+                        + "L && visit"
+                        + operation
+                        + " <= "
+                        + last
+                        + "L)");
+          }
+          condition = "if (" + String.join(" || ", ranges) + ") ";
+        }
+        line(condition + "session.binding(" + binding.id() + ", " + binding.name() + " != null);");
+      }
   }
 
   private void reference(int operation, String kind, String value, String wrapper, String target) {
@@ -780,8 +858,26 @@ public final class JavaEmitter {
   }
 
   private String declare(String name, Shape shape, int id) {
-    var binding = new Binding("b" + id, shape);
+    var binding = new Binding("b" + id, shape, id);
     scopes.peek().put(name, binding);
+    if (shape != null && observation.bindings()) {
+      String type =
+          switch (shape.kind()) {
+            case OBJECT -> "LCase$" + types.get(shape.name()) + ";";
+            case REFERENCE_ARRAY -> "[Ljava/lang/Object;";
+            case DATA_ARRAY -> "[J";
+          };
+      bindings.add(
+          new ObservationLayout.LocalBinding(
+              id,
+              worker,
+              worker == 0 ? "execute" : ExecutionEvidence.workerMethod(worker),
+              "(Lio/connglli/gorrect/runtime/TargetSession;"
+                  + (worker == 0 ? "" : "Lio/connglli/gorrect/runtime/WorkerContext;")
+                  + ")V",
+              binding.name(),
+              type));
+    }
     return binding.name();
   }
 

@@ -64,8 +64,16 @@ public final class SnapshotCodec {
                 in.readLong(), string(in), in.readInt(), in.readInt(), in.readLong()));
       var methods = new ArrayList<HeapSnapshot.MethodInfo>();
       int methodCount = count(in, MAX_METADATA);
-      for (int i = 0; i < methodCount; i++)
-        methods.add(new HeapSnapshot.MethodInfo(in.readLong(), string(in), string(in), string(in)));
+      for (int i = 0; i < methodCount; i++) {
+        long token = in.readLong();
+        String owner = string(in), name = string(in), descriptor = string(in);
+        var locals = new ArrayList<HeapSnapshot.LocalVariable>();
+        if ((capabilities & HeapSnapshot.LOCAL_VARIABLES) != 0) {
+          int localCount = count(in, MAX_METADATA);
+          for (int j = 0; j < localCount; j++) locals.add(local(in));
+        }
+        methods.add(new HeapSnapshot.MethodInfo(token, owner, name, descriptor, locals));
+      }
       var records = new ArrayList<HeapSnapshot.Record>();
       int recordCount = count(in, MAX_RECORDS);
       for (int i = 0; i < recordCount; i++)
@@ -148,6 +156,17 @@ public final class SnapshotCodec {
         string(out, method.owner());
         string(out, method.name());
         string(out, method.descriptor());
+        if ((snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0) {
+          out.writeInt(method.locals().size());
+          for (var local : method.locals()) {
+            out.writeLong(local.start());
+            out.writeInt(local.length());
+            out.writeInt(local.slot());
+            string(out, local.name());
+            string(out, local.descriptor());
+          }
+        } else if (!method.locals().isEmpty())
+          throw new IOException("Local metadata lacks capability");
       }
       out.writeInt(snapshot.records().size());
       for (var record : snapshot.records()) {
@@ -172,6 +191,14 @@ public final class SnapshotCodec {
     int value = in.readInt();
     if (value < 0 || value > maximum) throw new IOException("Invalid snapshot count");
     return value;
+  }
+
+  private static HeapSnapshot.LocalVariable local(DataInputStream in) throws IOException {
+    long start = in.readLong();
+    int length = in.readInt(), slot = in.readInt();
+    if (start < 0 || length < 0 || slot < 0 || slot > 65_535)
+      throw new IOException("Invalid local-variable scope or slot");
+    return new HeapSnapshot.LocalVariable(start, length, slot, string(in), string(in));
   }
 
   private static String string(DataInputStream in) throws IOException {

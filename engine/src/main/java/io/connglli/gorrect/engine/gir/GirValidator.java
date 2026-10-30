@@ -229,6 +229,11 @@ public final class GirValidator {
       }
 
       case Instruction.PollQueue ignored -> {}
+      case Instruction.SameObject op -> {
+        operand(op.left(), true);
+        operand(op.right(), true);
+        declare(op.name(), null);
+      }
       case Instruction.ReadData op -> {
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), false);

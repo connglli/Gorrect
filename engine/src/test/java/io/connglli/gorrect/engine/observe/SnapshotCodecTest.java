@@ -68,4 +68,75 @@ class SnapshotCodecTest {
       assertThrows(IOException.class, () -> SnapshotCodec.read(bytes));
     }
   }
+
+  @Test
+  void roundTripsOptionalLocalMetadataAndRejectsInvalidScopes() throws IOException {
+    var method =
+        new HeapSnapshot.MethodInfo(
+            8,
+            "LCase;",
+            "execute",
+            "()V",
+            List.of(new HeapSnapshot.LocalVariable(4, 7, 2, "b3", "LCase$S0;")));
+    var snapshot =
+        new HeapSnapshot(
+            17,
+            23,
+            HeapSnapshot.Status.COMPLETE,
+            0,
+            HeapSnapshot.TAGGING | HeapSnapshot.LOCAL_VARIABLES,
+            0,
+            0,
+            0,
+            0,
+            List.of(),
+            List.of(),
+            List.of(method),
+            List.of());
+    byte[] bytes = SnapshotCodec.write(snapshot);
+    assertEquals(snapshot, SnapshotCodec.read(bytes));
+    var invalid =
+        new HeapSnapshot.MethodInfo(
+            8,
+            "LCase;",
+            "execute",
+            "()V",
+            List.of(new HeapSnapshot.LocalVariable(-1, 7, 2, "b3", "LCase$S0;")));
+    assertThrows(
+        IOException.class,
+        () ->
+            SnapshotCodec.write(
+                new HeapSnapshot(
+                    17,
+                    23,
+                    HeapSnapshot.Status.COMPLETE,
+                    0,
+                    snapshot.capabilities(),
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    List.of(),
+                    List.of(invalid),
+                    List.of())));
+    assertThrows(
+        IOException.class,
+        () ->
+            SnapshotCodec.write(
+                new HeapSnapshot(
+                    17,
+                    23,
+                    HeapSnapshot.Status.COMPLETE,
+                    0,
+                    HeapSnapshot.TAGGING,
+                    0,
+                    0,
+                    0,
+                    0,
+                    List.of(),
+                    List.of(),
+                    List.of(method),
+                    List.of())));
+  }
 }
