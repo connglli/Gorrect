@@ -1,7 +1,11 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import java.nio.file.Path;
 import java.util.List;
@@ -10,14 +14,14 @@ import org.junit.jupiter.api.Test;
 
 class HotSpotDriverTest {
   private static TargetProfile profile(String collector, String mode) {
-    var raw = new com.google.gson.JsonObject();
+    var raw = new JsonObject();
     raw.addProperty("version", 1);
     raw.addProperty("vm", "hotspot");
     raw.addProperty("java", "java");
     raw.addProperty("collector", collector);
     raw.addProperty("collectorMode", mode);
     raw.addProperty("observation", "named-roots-diagnostic");
-    var support = new com.google.gson.JsonObject();
+    var support = new JsonObject();
     support.addProperty("runtime", "runtime.jar");
     support.addProperty("protocol", "protocol.jar");
     support.addProperty("observer", "observer.so");

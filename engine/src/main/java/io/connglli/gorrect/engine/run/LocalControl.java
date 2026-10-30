@@ -21,7 +21,14 @@ import java.nio.file.Path;
 import java.nio.file.attribute.PosixFilePermissions;
 import java.util.concurrent.TimeUnit;
 
-/** One local connection, with absolute deadlines across partial frame reads and writes. */
+/**
+ * Single-owner Unix control connection. Accept once before obtaining streams; all waits use a
+ * shared absolute nanoTime deadline, including partial frame reads/writes. Methods and stream
+ * access belong to the runner thread because they share selector state.
+ *
+ * <p>The endpoint owns the channels and socket path. Close this object after the conversation;
+ * closing a stream wrapper alone does not release or unlink the endpoint.
+ */
 final class LocalControl implements Closeable {
   private final Path directory;
   private final Path address;
@@ -31,6 +38,9 @@ final class LocalControl implements Closeable {
   private SelectionKey key;
   private long deadline;
 
+  /**
+   * Creates a short temporary socket path outside the run bundle and binds the listening channel.
+   */
   LocalControl() throws IOException {
     // A short temporary path keeps long run-directory names out of the OS socket-path limit.
     directory =
@@ -56,14 +66,17 @@ final class LocalControl implements Closeable {
     }
   }
 
+  /** Returns the path to pass to the target; the endpoint removes it during close. */
   Path address() {
     return address;
   }
 
+  /** Replaces the absolute deadline for subsequent I/O; reads do not renew it. */
   void deadline(long value) {
     deadline = value;
   }
 
+  /** Accepts the sole target connection, retaining limit as the deadline for its startup frames. */
   void accept(long limit) throws IOException {
     deadline(limit);
     while ((connection = server.accept()) == null) await(SelectionKey.OP_ACCEPT);
@@ -74,6 +87,7 @@ final class LocalControl implements Closeable {
     key = connection.register(selector, 0);
   }
 
+  /** Returns an unbuffered frame reader sharing this endpoint's connection and deadline. */
   DataInputStream input() {
     return new DataInputStream(
         new InputStream() {
@@ -98,6 +112,7 @@ final class LocalControl implements Closeable {
         });
   }
 
+  /** Returns a frame writer that completes partial writes under the same absolute deadline. */
   DataOutputStream output() {
     return new DataOutputStream(
         new OutputStream() {
@@ -136,6 +151,9 @@ final class LocalControl implements Closeable {
     return Math.max(1, TimeUnit.NANOSECONDS.toMillis(nanos));
   }
 
+  /**
+   * Closes all resources and removes the socket directory, retaining suppressed cleanup failures.
+   */
   @Override
   public void close() throws IOException {
     IOException failure = null;

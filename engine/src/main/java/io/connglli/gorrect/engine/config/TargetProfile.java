@@ -11,7 +11,10 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 
-/** Resolved launch settings. Paths are relative to the profile file, never the shell directory. */
+/**
+ * Launch settings; JSON loading resolves paths against the profile directory without accessing
+ * them.
+ */
 public record TargetProfile(
     int version,
     String vm,
@@ -47,14 +50,17 @@ public record TargetProfile(
   /** Collection request policy; completion still requires independently decoded VM events. */
   public record Gc(String control) {}
 
+  /** Whether launching this parsed profile requires the bundled HotSpot WhiteBox API. */
   public boolean usesWhiteBox() {
     return vm.equals("hotspot") && (jit != null || gc.control().equals("whitebox-full"));
   }
 
+  /** Whether the host requests HotSpot cycle capture, including capture used by JIT stress. */
   public boolean collectionEvidence() {
     return vm.equals("hotspot") && (jit != null || requirements.contains("gc-completion"));
   }
 
+  /** Copies settings with a target-confirmed mode for replay; it performs no validation or I/O. */
   public TargetProfile withCollectorMode(String mode) {
     return new TargetProfile(
         version,
@@ -87,6 +93,10 @@ public record TargetProfile(
     requirements = List.copyOf(requirements);
   }
 
+  /**
+   * Reads and validates a profile, resolving executable/support paths against its parent directory.
+   * Installation availability is deferred to execution. Invalid JSON/settings become IOException.
+   */
   public static TargetProfile read(Path path) throws IOException {
     try {
       return parse(JsonFiles.read(path), path.toAbsolutePath().getParent());
@@ -95,7 +105,12 @@ public record TargetProfile(
     }
   }
 
-  /** Also used for embedded profiles during offline verification; no installation is accessed. */
+  /**
+   * Validates a JSON profile and resolves paths against base without reading the installation. Also
+   * used for embedded profiles during offline verification.
+   *
+   * @throws IllegalArgumentException if a field has an invalid type, value, or combination
+   */
   public static TargetProfile parse(JsonObject object, Path base) {
     JsonFiles.fields(
         object,
@@ -153,9 +168,48 @@ public record TargetProfile(
               "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-Xoptionsfile.*|-Xdump.*|-XX:[+-]Use.*GC|-XX:[+-]ZGenerational|-XX:ShenandoahGCMode=.*|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
         throw new IllegalArgumentException("Conflicting or reserved VM argument " + argument);
     }
+    var environment = parseEnvironment(object);
+    var artifacts = parseSupport(object, base);
+    var jit = parseJit(object, vm, artifacts, args);
+    for (String argument : args)
+      if (vm.equals("openj9") && jit != null && argument.startsWith("-Xjit"))
+        throw new IllegalArgumentException("OpenJ9 JIT options belong to profile.jit");
+      else if (vm.equals("openj9")
+          && jit != null
+          && (argument.startsWith("-Xaot")
+              || (argument.startsWith("-Xshareclasses")
+                  && !argument.equals("-Xshareclasses:none"))))
+        throw new IllegalArgumentException("OpenJ9 JIT profiles disable shared-cache/AOT reuse");
+      else if (argument.matches("-XX:[+-]WhiteBoxAPI"))
+        throw new IllegalArgumentException("WhiteBox options belong to the driver");
+    var requirements = parseRequirements(object);
+    var gc = parseGc(object, vm, artifacts, jit, args);
+    if (Set.of("iu", "passive").contains(mode) && args.contains("-XX:-UnlockExperimentalVMOptions"))
+      throw new IllegalArgumentException(
+          "Selected Shenandoah mode requires experimental VM options");
+    if (mode.equals("passive") && args.contains("-XX:-UnlockDiagnosticVMOptions"))
+      throw new IllegalArgumentException("Passive mode requires diagnostic VM options");
+    var bounds = parseLimits(object);
+    return new TargetProfile(
+        1,
+        vm,
+        resolve(base, text(object, "java")),
+        collector,
+        mode,
+        observation,
+        args,
+        environment,
+        artifacts,
+        requirements,
+        bounds,
+        jit,
+        gc);
+  }
+
+  private static Map<String, String> parseEnvironment(JsonObject object) {
     var environment = new HashMap<String, String>();
     if (object.has("environment")) {
-      for (var entry : object.getAsJsonObject("environment").entrySet()) {
+      for (var entry : JsonFiles.object(object.get("environment")).entrySet()) {
         if (!entry.getKey().matches("[A-Za-z_][A-Za-z0-9_]*")
             || ENVIRONMENT_OPTIONS.contains(entry.getKey().toUpperCase(Locale.ROOT)))
           throw new IllegalArgumentException(
@@ -166,7 +220,11 @@ public record TargetProfile(
         environment.put(entry.getKey(), value);
       }
     }
-    var support = JsonFiles.required(object, "support").getAsJsonObject();
+    return environment;
+  }
+
+  private static Support parseSupport(JsonObject object, Path base) {
+    var support = JsonFiles.object(JsonFiles.required(object, "support"));
     JsonFiles.fields(support, "runtime", "protocol", "observer", "whitebox");
     var artifacts =
         new Support(
@@ -176,9 +234,13 @@ public record TargetProfile(
             support.has("whitebox") && !support.get("whitebox").isJsonNull()
                 ? resolve(base, text(support, "whitebox"))
                 : null);
+    return artifacts;
+  }
+
+  private static Jit parseJit(JsonObject object, String vm, Support artifacts, List<String> args) {
     Jit jit = null;
     if (object.has("jit") && !object.get("jit").isJsonNull()) {
-      var settings = object.getAsJsonObject("jit");
+      var settings = JsonFiles.object(object.get("jit"));
       JsonFiles.fields(settings, "level", "warmupRounds", "deadlineMillis");
       if (vm.equals("hotspot") && artifacts.whitebox() == null)
         throw new IllegalArgumentException("HotSpot JIT control requires support.whitebox");
@@ -194,17 +256,10 @@ public record TargetProfile(
       if (vm.equals("hotspot") && args.contains("-XX:-UnlockDiagnosticVMOptions"))
         throw new IllegalArgumentException("JIT control requires diagnostic VM options");
     }
-    for (String argument : args)
-      if (vm.equals("openj9") && jit != null && argument.startsWith("-Xjit"))
-        throw new IllegalArgumentException("OpenJ9 JIT options belong to profile.jit");
-      else if (vm.equals("openj9")
-          && jit != null
-          && (argument.startsWith("-Xaot")
-              || (argument.startsWith("-Xshareclasses")
-                  && !argument.equals("-Xshareclasses:none"))))
-        throw new IllegalArgumentException("OpenJ9 JIT profiles disable shared-cache/AOT reuse");
-      else if (argument.matches("-XX:[+-]WhiteBoxAPI"))
-        throw new IllegalArgumentException("WhiteBox options belong to the driver");
+    return jit;
+  }
+
+  private static List<String> parseRequirements(JsonObject object) {
     var requirements =
         object.has("requirements")
             ? strings(object.get("requirements"))
@@ -227,9 +282,14 @@ public record TargetProfile(
               .contains(requirement)
           && !Set.of("concurrent-overlap", "gc-during-workers").contains(requirement))
         throw new IllegalArgumentException("Unknown requirement " + requirement);
+    return requirements;
+  }
+
+  private static Gc parseGc(
+      JsonObject object, String vm, Support artifacts, Jit jit, List<String> args) {
     var gcSettings =
         object.has("gc") && !object.get("gc").isJsonNull()
-            ? object.getAsJsonObject("gc")
+            ? JsonFiles.object(object.get("gc"))
             : new JsonObject();
     JsonFiles.fields(gcSettings, "control");
     String gcControl =
@@ -246,12 +306,12 @@ public record TargetProfile(
         && (jit != null || gcControl.equals("whitebox-full"))
         && args.contains("-XX:-UnlockDiagnosticVMOptions"))
       throw new IllegalArgumentException("WhiteBox control requires diagnostic VM options");
-    if (Set.of("iu", "passive").contains(mode) && args.contains("-XX:-UnlockExperimentalVMOptions"))
-      throw new IllegalArgumentException(
-          "Selected Shenandoah mode requires experimental VM options");
-    if (mode.equals("passive") && args.contains("-XX:-UnlockDiagnosticVMOptions"))
-      throw new IllegalArgumentException("Passive mode requires diagnostic VM options");
-    JsonObject limits = object.has("limits") ? object.getAsJsonObject("limits") : new JsonObject();
+    return new Gc(gcControl);
+  }
+
+  private static Limits parseLimits(JsonObject object) {
+    JsonObject limits =
+        object.has("limits") ? JsonFiles.object(object.get("limits")) : new JsonObject();
     JsonFiles.fields(
         limits,
         "startupSeconds",
@@ -272,20 +332,7 @@ public record TargetProfile(
             limit(limits, "historyTransitions", 1_000_000, 10_000_000));
     if (bounds.startupSeconds() > bounds.runSeconds())
       throw new IllegalArgumentException("Startup deadline exceeds run deadline");
-    return new TargetProfile(
-        1,
-        vm,
-        resolve(base, text(object, "java")),
-        collector,
-        mode,
-        observation,
-        args,
-        environment,
-        artifacts,
-        requirements,
-        bounds,
-        jit,
-        new Gc(gcControl));
+    return bounds;
   }
 
   private static int limit(JsonObject object, String name, int fallback, int maximum) {
@@ -306,7 +353,7 @@ public record TargetProfile(
 
   private static List<String> strings(JsonElement value) {
     var result = new ArrayList<String>();
-    if (value != null) for (var item : value.getAsJsonArray()) result.add(JsonFiles.string(item));
+    if (value != null) for (var item : JsonFiles.array(value)) result.add(JsonFiles.string(item));
     return result;
   }
 }

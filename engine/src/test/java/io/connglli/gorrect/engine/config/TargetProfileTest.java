@@ -1,10 +1,16 @@
 package io.connglli.gorrect.engine.config;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonObject;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
@@ -26,7 +32,7 @@ class TargetProfileTest {
     var raw = JsonFiles.read(path);
     raw.addProperty("vm", "openj9");
     raw.addProperty("collector", "gencon");
-    var jit = new com.google.gson.JsonObject();
+    var jit = new JsonObject();
     raw.add("jit", jit);
     JsonFiles.write(path, raw);
     var profile = TargetProfile.read(path);
@@ -40,8 +46,8 @@ class TargetProfileTest {
     JsonFiles.write(path, raw);
     assertThrows(IOException.class, () -> TargetProfile.read(path));
     jit.remove("level");
-    for (String option : java.util.List.of("-Xjit:count=0", "-Xaot", "-Xshareclasses:name=test")) {
-      raw.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of(option)));
+    for (String option : List.of("-Xjit:count=0", "-Xaot", "-Xshareclasses:name=test")) {
+      raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of(option)));
       JsonFiles.write(path, raw);
       assertThrows(IOException.class, () -> TargetProfile.read(path));
     }
@@ -53,7 +59,7 @@ class TargetProfileTest {
     Path path = directory.resolve("environment.json");
     Files.writeString(path, PROFILE);
     var raw = JsonFiles.read(path);
-    var environment = new com.google.gson.JsonObject();
+    var environment = new JsonObject();
     environment.addProperty(name, "-Xgcpolicy:gencon");
     raw.add("environment", environment);
     JsonFiles.write(path, raw);
@@ -66,7 +72,7 @@ class TargetProfileTest {
     Path path = directory.resolve("profile.json");
     Files.writeString(path, PROFILE);
     var object = JsonFiles.read(path);
-    object.add("jit", new com.google.gson.JsonObject());
+    object.add("jit", new JsonObject());
     JsonFiles.write(path, object);
     assertThrows(IOException.class, () -> TargetProfile.read(path));
     object.getAsJsonObject("support").addProperty("whitebox", "whitebox.jar");
@@ -75,7 +81,7 @@ class TargetProfileTest {
     assertEquals(4, profile.jit().level());
     assertEquals(1, profile.jit().warmupRounds());
     assertEquals(directory.resolve("whitebox.jar").toString(), profile.support().whitebox());
-    object.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of("-XX:+WhiteBoxAPI")));
+    object.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-XX:+WhiteBoxAPI")));
     JsonFiles.write(path, object);
     assertThrows(IOException.class, () -> TargetProfile.read(path));
   }
@@ -112,7 +118,7 @@ class TargetProfileTest {
     raw.addProperty("collectorMode", "generational");
     JsonFiles.write(path, raw);
     assertEquals("generational", TargetProfile.read(path).collectorMode());
-    var gc = new com.google.gson.JsonObject();
+    var gc = new JsonObject();
     gc.addProperty("control", "whitebox-full");
     raw.add("gc", gc);
     JsonFiles.write(path, raw);
@@ -121,7 +127,7 @@ class TargetProfileTest {
     JsonFiles.write(path, raw);
     assertTrue(TargetProfile.read(path).usesWhiteBox());
     assertNull(TargetProfile.read(path).jit());
-    raw.add("vmArgs", JsonFiles.GSON.toJsonTree(java.util.List.of("-XX:+ZGenerational")));
+    raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-XX:+ZGenerational")));
     JsonFiles.write(path, raw);
     assertThrows(IOException.class, () -> TargetProfile.read(path));
     raw.remove("vmArgs");
@@ -137,7 +143,7 @@ class TargetProfileTest {
     var profile = TargetProfile.read(path);
     assertEquals(directory.resolve("jdk/bin/java").toString(), profile.java());
     assertEquals(100_000, profile.limits().records());
-    assertEquals(java.util.List.of("tagging", "named-roots"), profile.requirements());
+    assertEquals(List.of("tagging", "named-roots"), profile.requirements());
   }
 
   @ParameterizedTest

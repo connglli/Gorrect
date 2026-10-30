@@ -1,11 +1,20 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.gir.GirParser;
-import io.connglli.gorrect.engine.model.*;
+import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.ObjectId;
+import io.connglli.gorrect.engine.model.Shape;
+import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.ReferenceHistory;
+import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
@@ -104,7 +113,7 @@ class HistoryOracleTest {
                 List.of(0L)),
             TARGET,
             new HeapObject(N, List.of(Value.Reference.NULL), List.of(payload)));
-    var roots = new java.util.HashMap<String, Value.Reference>();
+    var roots = new HashMap<String, Value.Reference>();
     roots.put("main", Value.Reference.strong(OWNER));
     roots.put("saved", success ? Value.Reference.strong(TARGET) : Value.Reference.NULL);
     if (protectedTarget) roots.put("protected", Value.Reference.strong(TARGET));
@@ -125,7 +134,7 @@ class HistoryOracleTest {
   }
 
   private static ExecutionTrace trace(boolean success) {
-    var events = new java.util.ArrayList<ExecutionTrace.Event>();
+    var events = new ArrayList<ExecutionTrace.Event>();
     events.add(new ExecutionTrace.Event(1, ExecutionTrace.Kind.OPERATION, 0));
     events.add(new ExecutionTrace.Event(2, ExecutionTrace.Kind.ACQUIRE, success ? 1 : 0));
     if (success) {

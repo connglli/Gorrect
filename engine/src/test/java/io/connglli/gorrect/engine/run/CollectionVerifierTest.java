@@ -1,9 +1,13 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.protocol.CollectionEvidence;
 import java.time.Instant;
+import java.util.List;
 import org.junit.jupiter.api.Test;
 
 class CollectionVerifierTest {
@@ -12,14 +16,11 @@ class CollectionVerifierTest {
     var first = request("system", 10, 20);
     var second =
         new CollectionEvidence.Request(0, 2, 0, 0, 0, 2, 1, "system", true, time(20), time(30));
-    assertEquals(
-        java.util.List.of(first, second),
-        CollectionVerifier.ordered(java.util.List.of(second, first)));
+    assertEquals(List.of(first, second), CollectionVerifier.ordered(List.of(second, first)));
     var overlap =
         new CollectionEvidence.Request(0, 2, 0, 0, 0, 2, 1, "system", true, time(19), time(30));
     assertThrows(
-        IllegalArgumentException.class,
-        () -> CollectionVerifier.ordered(java.util.List.of(first, overlap)));
+        IllegalArgumentException.class, () -> CollectionVerifier.ordered(List.of(first, overlap)));
   }
 
   private static Instant time(long tick) {

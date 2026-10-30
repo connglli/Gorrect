@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.observe;
 
 import io.connglli.gorrect.engine.model.Shape;
+import io.connglli.gorrect.engine.model.Value;
 import java.util.List;
 import java.util.Map;
 
@@ -20,7 +21,7 @@ public record ObservationLayout(
   /** Actual wrapper metadata roles; inherited fields use captured JVMTI indices. */
   public record ReferenceType(
       String signature,
-      io.connglli.gorrect.engine.model.Value.ReferenceKind kind,
+      Value.ReferenceKind kind,
       String worker,
       String site,
       String occurrence,

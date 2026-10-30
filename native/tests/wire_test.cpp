@@ -10,10 +10,10 @@ int main(int argc, char **argv) {
   gorrect::Snapshot snapshot;
   snapshot.run = 17;
   snapshot.checkpoint = 23;
-  snapshot.capabilities = 1;
+  snapshot.capabilities = gorrect::capability::tagging;
   snapshot.starts_before = snapshot.finishes_before = 10;
   snapshot.starts_after = snapshot.finishes_after = 10;
-  snapshot.records.push_back({2, 7, 3, 74, -9, -1, 0, 0});
+  snapshot.records.push_back({gorrect::RecordKind::primitive_field, 7, 3, 74, -9, -1, 0, 0});
   auto actual = gorrect::encode(snapshot);
   std::ifstream input(argv[1]);
   std::string text, line;

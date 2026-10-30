@@ -40,7 +40,7 @@ Make state changes and their failure behavior explicit. A rejected operation mus
 
 Use Conventional Commits for small, reviewable changes. Keep [README.md](./README.md), the relevant documents, and this file consistent. Keep machine-specific paths in untracked local configuration; committed files use portable paths or explicit placeholders.
 
-Resolve compiler warnings in code you introduce or change. Keep functions focused, control flow shallow, and module boundaries easy to explain. Reuse shared logic where it clarifies the model; avoid speculative generalization.
+Resolve compiler warnings in code you introduce or change. Use explicit imports and the project's formatters. Keep functions focused, control flow shallow, and module boundaries easy to explain. Separate logical steps within methods with blank lines. Reuse shared logic where it clarifies the model; avoid speculative generalization.
 
 Follow [docs/AGENTS.md](./docs/AGENTS.md). Keep change history in commits and keep any changelog concise.
 

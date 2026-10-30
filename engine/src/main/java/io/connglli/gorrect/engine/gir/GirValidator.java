@@ -18,6 +18,9 @@ public final class GirValidator {
   /** Bounds recursive parser, validator, and formatter stack use. */
   public static final int MAX_NESTING = 128;
 
+  public static final Set<String> STRESS_REQUIREMENTS =
+      Set.of("concurrent-overlap", "compiled-execution", "gc-during-workers");
+
   private static final Pattern NAME = Pattern.compile("[A-Za-z_][A-Za-z0-9_]*");
 
   private final Map<String, Shape> shapes = new HashMap<>();
@@ -27,8 +30,6 @@ public final class GirValidator {
   private int nextWorker = 1;
   private int workerDepth = -1;
   private int conditionalDepth;
-  public static final Set<String> STRESS_REQUIREMENTS =
-      Set.of("concurrent-overlap", "compiled-execution", "gc-during-workers");
 
   private record Binding(Shape shape, boolean live, boolean pinned) {
     Binding(Shape shape, boolean live) {
@@ -199,16 +200,19 @@ public final class GirValidator {
         root(op.root());
         declare(op.name(), shape(op.shape()));
       }
+
       case Instruction.WriteRoot op -> {
         if (op.mode() == null) fail("Missing memory mode");
         root(op.root());
         operand(op.value(), true);
       }
+
       case Instruction.ReadReference op -> {
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
         declare(op.name(), shape(op.shape()));
       }
+
       case Instruction.WriteReference op -> {
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
@@ -217,28 +221,33 @@ public final class GirValidator {
         if (op.kind() != Value.ReferenceKind.STRONG && op.mode() != MemoryMode.PLAIN)
           fail("Wrapped stores use ordinary accesses");
       }
+
       case Instruction.ClearReference op -> slot(op.owner(), op.index(), true);
       case Instruction.ReferenceState op -> {
         slot(op.owner(), op.index(), true);
         declare(op.name(), null);
       }
+
       case Instruction.PollQueue ignored -> {}
       case Instruction.ReadData op -> {
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), false);
         declare(op.name(), null);
       }
+
       case Instruction.WriteData op -> {
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), false);
         operand(op.value(), false);
       }
+
       case Instruction.CompareSet op -> {
         location(op.location());
         operand(op.expected(), op.location().reference());
         operand(op.update(), op.location().reference());
         declare(op.name(), null);
       }
+
       case Instruction.Exchange op -> {
         location(op.location());
         operand(op.update(), op.location().reference());
@@ -246,6 +255,7 @@ public final class GirValidator {
           fail("Data exchange has no reference shape");
         declare(op.name(), op.location().reference() ? shape(op.shape()) : null);
       }
+
       case Instruction.Release op -> {
         var binding = scopes.peek().get(op.name());
         if (binding == null || !binding.live())
@@ -253,6 +263,7 @@ public final class GirValidator {
         if (binding.pinned()) fail("Acquired references remain strong until scope exit");
         scopes.peek().put(op.name(), new Binding(binding.shape(), false));
       }
+
       case Instruction.Checkpoint ignored -> {}
       case Instruction.Collect ignored -> {}
       case Instruction.Barrier ignored -> {}

@@ -7,7 +7,9 @@ import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.SecureRandom;
 import java.util.HashMap;
+import java.util.Properties;
 import java.util.Set;
 import java.util.UUID;
 
@@ -90,7 +92,7 @@ public final class Main {
         long seed =
             options.containsKey("--seed")
                 ? Long.parseLong(options.get("--seed"))
-                : new java.security.SecureRandom().nextLong();
+                : new SecureRandom().nextLong();
         return FuzzCampaign.run(
             profile,
             output,
@@ -106,7 +108,7 @@ public final class Main {
               : RunEngine.run(Path.of(input), profile, output);
       int status = print(result, output, out);
       if (command.equals("probe") && Files.isRegularFile(output.resolve("target.properties"))) {
-        var target = new java.util.Properties();
+        var target = new Properties();
         try (var stream = Files.newInputStream(output.resolve("target.properties"))) {
           target.load(stream);
         }

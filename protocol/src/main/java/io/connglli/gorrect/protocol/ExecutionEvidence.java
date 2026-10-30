@@ -1,5 +1,7 @@
 package io.connglli.gorrect.protocol;
 
+import java.io.BufferedInputStream;
+import java.io.BufferedOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
@@ -9,7 +11,9 @@ import java.util.ArrayList;
 import java.util.List;
 
 /**
- * Coarse worker windows, completed joins, and VM control results; none establishes graph values.
+ * Immutable synchronization and VM-control evidence for one run. Complete means the target reported
+ * normal case completion; each group still carries its own join result. Times and pause counters
+ * describe this target process and are not graph values or a cross-worker operation order.
  */
 public record ExecutionEvidence(
     long run, boolean complete, List<Group> groups, List<Window> windows) {
@@ -18,10 +22,22 @@ public record ExecutionEvidence(
   private static final int MAGIC = 0x47524531;
   private static final long END = 0x454e444556494431L;
 
+  /**
+   * One generated method's installation query for a worker. Requested/installed levels follow the
+   * VM driver's convention; zero installed means no usable code was established. Problem is empty
+   * when preparation reported no error. Installation alone does not establish an executing frame.
+   */
   public record Compilation(
       int worker, String method, int requested, int installed, String problem) {}
 
-  /** Decoded VM stack evidence, distinct from target-provided installation or witness labels. */
+  /**
+   * Decoded stack witness for a parallel instruction, one-based visit, and zero-based phase. Point
+   * is an entry/exit or collection-boundary constant above; collection is zero at entry/exit and
+   * the worker's request ordinal otherwise. Thread is the Java thread ID.
+   *
+   * <p>Compiled means the decoder found the exact generated method as compiled or inlined. A
+   * missing/interpreted frame has false; synchronization and request identity need separate checks.
+   */
   public record Frame(
       int worker,
       int group,
@@ -32,6 +48,11 @@ public record ExecutionEvidence(
       long thread,
       boolean compiled) {}
 
+  /**
+   * One visit to a parallel instruction. Workers retain declaration order; joined means all tasks
+   * completed normally and were joined. GC counters surround the whole visit, with -1 for
+   * unavailable counters. Compilations may be empty during modeled warm-up or without JIT controls.
+   */
   public record Group(
       int operation,
       long round,
@@ -47,8 +68,13 @@ public record ExecutionEvidence(
   }
 
   /**
-   * Times share nanoTime's target clock; thread is Thread.getId, not a JVMTI tag. GC fields retain
-   * the phase's last request with pause progress; -1 counters and ordinal zero mean none retained.
+   * One worker's active phase interval, excluding the barrier wait before that phase. Begin/end
+   * share nanoTime's target clock; thread is its Java thread ID. Group/round/phase identify the
+   * parallel instruction, one-based visit, and zero-based phase.
+   *
+   * <p>GC fields retain the phase's last request with observed pause progress. Both counters -1 and
+   * collection zero mean none retained. A positive ordinal and increased counters establish pause
+   * progress around that request, not a completed collector cycle.
    */
   public record Window(
       int worker,
@@ -71,13 +97,15 @@ public record ExecutionEvidence(
     windows = List.copyOf(windows);
   }
 
+  /** Writes the version 1 envelope in record order, replacing any existing file. */
   public void write(Path file) throws IOException {
-    try (var out = new DataOutputStream(Files.newOutputStream(file))) {
+    try (var out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(file)))) {
       out.writeInt(MAGIC);
       out.writeInt(1);
       out.writeLong(run);
       out.writeBoolean(complete);
       out.writeInt(groups.size());
+
       for (var group : groups) {
         out.writeInt(group.operation());
         out.writeLong(group.round());
@@ -108,18 +136,24 @@ public record ExecutionEvidence(
         out.writeLong(window.gcAfter());
         out.writeLong(window.collection());
       }
+
       out.writeLong(END);
     }
   }
 
+  /**
+   * Decodes a bounded complete envelope for the expected run; invalid evidence raises IOException.
+   */
   public static ExecutionEvidence read(Path file, long run) throws IOException {
     if (Files.size(file) > 64L * ExecutionTrace.MAX_EVENTS)
       throw new IOException("Worker evidence exceeds byte limit");
-    try (var in = new DataInputStream(Files.newInputStream(file))) {
+    try (var in = new DataInputStream(new BufferedInputStream(Files.newInputStream(file)))) {
       if (in.readInt() != MAGIC || in.readInt() != 1 || run <= 0 || in.readLong() != run)
         throw new IOException("Worker evidence identity mismatch");
       boolean complete = flag(in);
+
       var groups = new ArrayList<Group>();
+
       for (int count = count(in, ExecutionTrace.MAX_EVENTS); count > 0; count--) {
         int operation = in.readInt();
         long round = in.readLong();
@@ -141,6 +175,7 @@ public record ExecutionEvidence(
         groups.add(new Group(operation, round, workers, joined, before, after, compilations));
       }
       var windows = new ArrayList<Window>();
+
       for (int count = count(in, ExecutionTrace.MAX_EVENTS); count > 0; count--) {
         var window =
             new Window(
@@ -163,8 +198,10 @@ public record ExecutionEvidence(
             || window.end() < window.begin()) throw new IOException("Invalid worker window");
         windows.add(window);
       }
+
       if (in.readLong() != END || in.read() != -1)
         throw new IOException("Incomplete worker evidence envelope");
+
       return new ExecutionEvidence(run, complete, groups, windows);
     }
   }

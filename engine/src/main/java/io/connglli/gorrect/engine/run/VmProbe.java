@@ -2,9 +2,12 @@ package io.connglli.gorrect.engine.run;
 
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
+import java.io.File;
 import java.io.IOException;
+import java.net.SocketTimeoutException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -13,12 +16,22 @@ import java.util.concurrent.TimeUnit;
 
 /** Resolves a mode on the selected target without assuming the engine's JDK or flag set. */
 final class VmProbe {
+  /**
+   * A resolved profile with null failure, or the requested profile and a preflight failure report.
+   */
   record Result(TargetProfile profile, RunReport failure) {}
 
   private record Attempt(Properties facts, int exit) {}
 
   private VmProbe() {}
 
+  /**
+   * Queries the selected VM in bounded helper processes and confirms collector identity/mode. Null
+   * savedEnvironment applies normal launch cleanup; replay restores the supplied environment. A
+   * successful probe writes collector.properties and freezes the resolved mode in its profile.
+   * Unsupported/startup/deadline outcomes become reports; setup I/O and interruption propagate.
+   * Every helper process is terminated before return.
+   */
   static Result resolve(
       TargetProfile profile,
       Path directory,
@@ -36,6 +49,7 @@ final class VmProbe {
               familyFlags(profile),
               "collector-family",
               deadline);
+
       if (family.exit() != 0) {
         // The same base settings must work before attributing failure to our collector selector.
         var base =
@@ -43,7 +57,7 @@ final class VmProbe {
         Files.copy(
             directory.resolve("logs/collector-family.stderr"),
             directory.resolve("logs/stderr.log"),
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            StandardCopyOption.REPLACE_EXISTING);
         return new Result(
             profile,
             RunReport.failure(
@@ -52,6 +66,7 @@ final class VmProbe {
                     : RunReport.Outcome.STARTUP_FAILURE,
                 "Collector probe failed; inspect logs/collector-family.stderr"));
       }
+
       var actual = family.facts();
       if (!VmDriver.matches(profile, actual)
           || Integer.parseInt(actual.getProperty("java.feature")) < 17)
@@ -59,6 +74,7 @@ final class VmProbe {
             profile,
             RunReport.failure(
                 RunReport.Outcome.UNSUPPORTED, "Expected " + profile.vm() + " JDK 17+"));
+
       String mode =
           profile.collectorMode().equals("default")
               ? VmDriver.mode(profile, actual)
@@ -76,15 +92,17 @@ final class VmProbe {
                   "Collector mode unavailable; inspect logs/collector-mode.stderr"));
         actual = selected.facts();
       }
+
       if (!VmDriver.selected(profile, actual) || !mode.equals(VmDriver.mode(profile, actual)))
         return new Result(
             profile,
             RunReport.failure(RunReport.Outcome.UNSUPPORTED, "Collector mode was not confirmed"));
+
       try (var out = Files.newOutputStream(directory.resolve("collector.properties"))) {
         actual.store(out, "Resolved target collector");
       }
       return new Result(resolved, null);
-    } catch (java.net.SocketTimeoutException timeout) {
+    } catch (SocketTimeoutException timeout) {
       return new Result(
           profile,
           RunReport.failure(
@@ -125,7 +143,7 @@ final class VmProbe {
         List.of(
             "-cp",
             directory.resolve("support/runtime.jar")
-                + java.io.File.pathSeparator
+                + File.pathSeparator
                 + directory.resolve("support/protocol.jar"),
             "io.connglli.gorrect.runtime.VmFacts"));
     JsonFiles.write(directory.resolve("logs/" + label + "-command.json"), command);
@@ -135,16 +153,16 @@ final class VmProbe {
             .directory(directory.toFile())
             .redirectOutput(output.toFile())
             .redirectError(directory.resolve("logs/" + label + ".stderr").toFile());
-    if (savedEnvironment == null) RunEngine.cleanEnvironment(builder, profile.environment());
+    if (savedEnvironment == null) ProcessSupport.cleanEnvironment(builder, profile.environment());
     else {
       builder.environment().clear();
       builder.environment().putAll(savedEnvironment);
     }
-    RunEngine.milliseconds(deadline);
+    ProcessSupport.milliseconds(deadline);
     var process = builder.start();
     try {
-      if (!process.waitFor(RunEngine.milliseconds(deadline), TimeUnit.MILLISECONDS))
-        throw new java.net.SocketTimeoutException();
+      if (!process.waitFor(ProcessSupport.milliseconds(deadline), TimeUnit.MILLISECONDS))
+        throw new SocketTimeoutException();
       var properties = new Properties();
       if (process.exitValue() == 0)
         try (var in = Files.newInputStream(output)) {
@@ -152,7 +170,7 @@ final class VmProbe {
         }
       return new Attempt(properties, process.exitValue());
     } finally {
-      RunEngine.terminate(process);
+      ProcessSupport.terminate(process);
     }
   }
 }

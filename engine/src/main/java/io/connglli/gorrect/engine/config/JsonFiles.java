@@ -12,8 +12,10 @@ import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import java.io.IOException;
 import java.math.BigDecimal;
+import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.nio.file.StandardCopyOption;
 import java.util.Set;
 
 /** Strict JSON input with duplicate detection before schema validation can lose a field. */
@@ -27,6 +29,9 @@ public final class JsonFiles {
 
   private JsonFiles() {}
 
+  /**
+   * Reads one bounded JSON object, rejecting duplicate keys, excessive nesting, and trailing data.
+   */
   public static JsonObject read(Path path) throws IOException {
     if (Files.size(path) > 8 * 1024 * 1024) throw new IOException("JSON exceeds byte limit");
     try (var reader = new JsonReader(Files.newBufferedReader(path))) {
@@ -72,6 +77,10 @@ public final class JsonFiles {
     };
   }
 
+  /**
+   * Replaces a JSON file through a sibling temporary file, using atomic replacement when supported.
+   * Parent directories must exist. I/O failures propagate and the temporary file is cleaned up.
+   */
   public static void write(Path path, Object value) throws IOException {
     // Atomic replacement keeps interrupted verification from destroying an earlier report.
     Path temporary = Files.createTempFile(path.toAbsolutePath().getParent(), ".json-", ".tmp");
@@ -79,24 +88,23 @@ public final class JsonFiles {
       Files.writeString(temporary, GSON.toJson(value) + "\n");
       try {
         Files.move(
-            temporary,
-            path,
-            java.nio.file.StandardCopyOption.ATOMIC_MOVE,
-            java.nio.file.StandardCopyOption.REPLACE_EXISTING);
-      } catch (java.nio.file.AtomicMoveNotSupportedException exception) {
-        Files.move(temporary, path, java.nio.file.StandardCopyOption.REPLACE_EXISTING);
+            temporary, path, StandardCopyOption.ATOMIC_MOVE, StandardCopyOption.REPLACE_EXISTING);
+      } catch (AtomicMoveNotSupportedException exception) {
+        Files.move(temporary, path, StandardCopyOption.REPLACE_EXISTING);
       }
     } finally {
       Files.deleteIfExists(temporary);
     }
   }
 
+  /** Rejects unknown keys without requiring every allowed field to be present. */
   public static void fields(JsonObject object, String... allowed) {
     var names = Set.of(allowed);
     for (String name : object.keySet())
       if (!names.contains(name)) throw new IllegalArgumentException("Unknown JSON field " + name);
   }
 
+  /** Returns a present, non-null field; absence and explicit JSON null are input errors. */
   public static JsonElement required(JsonObject object, String name) {
     var value = object.get(name);
     if (value == null || value.isJsonNull())
@@ -104,12 +112,30 @@ public final class JsonFiles {
     return value;
   }
 
+  /** Requires a JSON string without coercing numeric or boolean values. */
   public static String string(JsonElement value) {
     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isString())
       throw new IllegalArgumentException("Expected JSON string");
     return value.getAsString();
   }
 
+  /** Requires an object value; a missing, null, or differently typed value is an input error. */
+  public static JsonObject object(JsonElement value) {
+    if (value == null || !value.isJsonObject())
+      throw new IllegalArgumentException("Expected JSON object");
+    return value.getAsJsonObject();
+  }
+
+  /** Requires an array value; a missing, null, or differently typed value is an input error. */
+  public static JsonArray array(JsonElement value) {
+    if (value == null || !value.isJsonArray())
+      throw new IllegalArgumentException("Expected JSON array");
+    return value.getAsJsonArray();
+  }
+
+  /**
+   * Requires a JSON number exactly representable as a signed 64-bit integer, without truncation.
+   */
   public static long number(JsonElement value) {
     if (!value.isJsonPrimitive() || !value.getAsJsonPrimitive().isNumber())
       throw new IllegalArgumentException("Expected JSON integer");

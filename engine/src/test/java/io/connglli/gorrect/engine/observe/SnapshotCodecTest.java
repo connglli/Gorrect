@@ -11,6 +11,7 @@ import java.nio.charset.StandardCharsets;
 import java.util.Arrays;
 import java.util.HexFormat;
 import java.util.List;
+import java.util.Objects;
 import org.junit.jupiter.api.Test;
 
 class SnapshotCodecTest {
@@ -18,9 +19,7 @@ class SnapshotCodecTest {
     try (var input = getClass().getResourceAsStream("/wire/snapshot-v1.hex")) {
       return HexFormat.of()
           .parseHex(
-              new String(
-                      java.util.Objects.requireNonNull(input).readAllBytes(),
-                      StandardCharsets.UTF_8)
+              new String(Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8)
                   .replaceAll("\\s", ""));
     }
   }

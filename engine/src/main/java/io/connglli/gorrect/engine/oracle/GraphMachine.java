@@ -51,6 +51,7 @@ final class GraphMachine {
 
   private record Target(ObjectId id, HeapObject object) {}
 
+  /** Live worker bindings; independent search forks must use {@link #copyContext(Context)}. */
   record Context(
       int worker, int group, long round, int phase, Deque<Map<String, Binding>> scopes) {}
 
@@ -86,6 +87,7 @@ final class GraphMachine {
     if (!source.events.isEmpty()) events.add(source.lastEvent());
   }
 
+  /** Copies binding maps for an independent search fork; immutable bound values may be shared. */
   static Context copyContext(Context source) {
     var scopes = new ArrayDeque<Map<String, Binding>>();
     for (var scope : source.scopes()) scopes.addLast(new HashMap<>(scope));
@@ -131,16 +133,23 @@ final class GraphMachine {
     final Set<Slot> reads = new HashSet<>(), writes = new HashSet<>();
   }
 
+  /**
+   * Returns the active live context, retaining its mutable scopes rather than taking a snapshot.
+   */
   Context context() {
     return new Context(worker, group, round, phase, scopes);
   }
 
+  /** Creates isolated worker bindings for a group visit, without inheriting caller locals. */
   Context workerContext(int id, int operation, long visit) {
     var locals = new ArrayDeque<Map<String, Binding>>();
     locals.push(new HashMap<>());
     return new Context(id, operation, visit, 0, locals);
   }
 
+  /**
+   * Attaches the supplied live bindings and phase; later binding changes belong to that context.
+   */
   void activate(Context state, int nextPhase) {
     worker = state.worker();
     group = state.group();
@@ -149,6 +158,7 @@ final class GraphMachine {
     scopes = state.scopes();
   }
 
+  /** Advances this site's occurrence counter and returns its one-based visit number. */
   long visit(int operation) {
     long value = occurrences.getOrDefault(operation, 0L) + 1;
     occurrences.put(operation, value);
@@ -269,22 +279,28 @@ final class GraphMachine {
   void apply(Instruction.Operation operation) {
     if (operation.id() <= 0) throw new GirException("Invalid operation ID");
     requireStep();
+
     long read = 0;
+
     switch (operation) {
       case Instruction.Allocate op -> allocate(op);
       case Instruction.ReadRoot op -> {
         requireDeclaration(op.name());
         var value = root(op.root());
         requireShape(value, shape(op.shape()));
+
         bind(op.name(), op.id(), value);
         access(new Slot(null, op.root(), true, 0), false);
       }
+
       case Instruction.WriteRoot op -> {
         root(op.root());
         var value = reference(op.value());
+
         roots.put(op.root(), value);
         access(new Slot(null, op.root(), true, 0), true);
       }
+
       case Instruction.ReadReference op -> {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), true);
@@ -292,12 +308,15 @@ final class GraphMachine {
         if (value.kind() != Value.ReferenceKind.STRONG)
           throw new GirException("Soft/weak slots require acquire");
         requireShape(value, shape(op.shape()));
+
         bind(op.name(), op.id(), value);
         access(new Slot(target.id(), null, true, op.index()), false);
       }
+
       case Instruction.WriteReference op -> {
         var target = target(op.owner(), op.index(), true);
         var value = reference(op.value());
+
         long occurrence = 0;
         if (op.kind() != Value.ReferenceKind.STRONG) {
           if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
@@ -306,6 +325,7 @@ final class GraphMachine {
               new Value.Reference(
                   op.kind(), value.target(), new WrapperId(worker, op.id(), occurrence, -1));
         }
+
         var references = new ArrayList<>(target.object().references());
         references.set(op.index(), value);
         objects.put(
@@ -317,17 +337,20 @@ final class GraphMachine {
           occurrences.put(op.id(), occurrence);
         }
       }
+
       case Instruction.ClearReference op -> {
         var target = target(op.owner(), op.index(), true);
         var value = target.object().references().get(op.index());
         if (value.kind() == Value.ReferenceKind.STRONG)
           throw new GirException("clear-ref requires a soft/weak slot");
+
         var references = new ArrayList<>(target.object().references());
         references.set(op.index(), new Value.Reference(value.kind(), null, value.wrapper()));
         objects.put(
             target.id(),
             new HeapObject(target.object().shape(), references, target.object().data()));
       }
+
       case Instruction.ReferenceState ignored ->
           throw new GirException("Reference state requires a recorded history");
       case Instruction.PollQueue ignored ->
@@ -339,9 +362,11 @@ final class GraphMachine {
         bind(op.name(), op.id(), new Value.Scalar(read));
         access(new Slot(target.id(), null, false, op.index()), false);
       }
+
       case Instruction.WriteData op -> {
         var target = target(op.owner(), op.index(), false);
         var value = scalar(op.value());
+
         var data = new ArrayList<>(target.object().data());
         data.set(op.index(), value.value());
         objects.put(
@@ -349,15 +374,19 @@ final class GraphMachine {
             new HeapObject(target.object().shape(), target.object().references(), data));
         access(new Slot(target.id(), null, false, op.index()), true);
       }
+
       case Instruction.CompareSet op -> {
         requireDeclaration(op.name());
         var current = atomicValue(op.location());
         var expected = operand(op.expected(), op.location().reference());
         var update = operand(op.update(), op.location().reference());
+
         read = current.equals(expected) ? 1 : 0;
+
         if (read == 1) writeLocation(op.location(), update);
         bind(op.name(), op.id(), new Value.Scalar(read));
       }
+
       case Instruction.Exchange op -> {
         requireDeclaration(op.name());
         var current = atomicValue(op.location());
@@ -367,9 +396,11 @@ final class GraphMachine {
           read = reference.target() == null ? 0 : 1;
         }
         if (current instanceof Value.Scalar scalar) read = scalar.value();
+
         writeLocation(op.location(), update);
         bind(op.name(), op.id(), current);
       }
+
       case Instruction.Release op -> {
         var binding = scopes.peek().get(op.name());
         if (binding == null || binding.value() == null) {
@@ -377,32 +408,36 @@ final class GraphMachine {
         }
         scopes.peek().put(op.name(), new Binding(binding.operation(), null));
       }
+
       case Instruction.Checkpoint op -> {
         var graph = snapshot();
+
         long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
         var checkpoint = new OracleResult.Checkpoint(op.id(), occurrence, graph);
+
         occurrences.put(op.id(), occurrence);
         checkpoints.add(checkpoint);
       }
+
       case Instruction.Collect ignored -> {}
       case Instruction.Barrier ignored -> {}
     }
+
     steps++;
-    events.add(
-        event(
-            operation.id(),
-            operation instanceof Instruction.Barrier
-                ? ExecutionTrace.Kind.BARRIER
-                : operation instanceof Instruction.CompareSet
-                    ? ExecutionTrace.Kind.COMPARE_SET
-                    : operation instanceof Instruction.ReadData
-                            || operation instanceof Instruction.Exchange exchange
-                                && !exchange.location().reference()
-                        ? ExecutionTrace.Kind.SCALAR_READ
-                        : operation instanceof Instruction.Exchange
-                            ? ExecutionTrace.Kind.REFERENCE_READ
-                            : ExecutionTrace.Kind.OPERATION,
-            read));
+    events.add(event(operation.id(), eventKind(operation), read));
+  }
+
+  private static ExecutionTrace.Kind eventKind(Instruction.Operation operation) {
+    return switch (operation) {
+      case Instruction.Barrier ignored -> ExecutionTrace.Kind.BARRIER;
+      case Instruction.CompareSet ignored -> ExecutionTrace.Kind.COMPARE_SET;
+      case Instruction.ReadData ignored -> ExecutionTrace.Kind.SCALAR_READ;
+      case Instruction.Exchange exchange ->
+          exchange.location().reference()
+              ? ExecutionTrace.Kind.REFERENCE_READ
+              : ExecutionTrace.Kind.SCALAR_READ;
+      default -> ExecutionTrace.Kind.OPERATION;
+    };
   }
 
   boolean present(String name) {
@@ -418,7 +453,11 @@ final class GraphMachine {
     return new Memory(new Slot(target.id(), null, true, index), false, false);
   }
 
-  /** Resolves access effects before mutation, including whether CAS performs a write. */
+  /**
+   * Resolves the concrete memory slot and read/write/atomic effects without mutating it, including
+   * whether CAS succeeds. Returns null for non-memory operations. Required owner/operand checks may
+   * reject the operation before the scheduler applies it.
+   */
   Memory memory(Instruction.Operation operation) {
     return switch (operation) {
       case Instruction.ReadRoot op ->
@@ -508,6 +547,7 @@ final class GraphMachine {
     var shape = shape(op.shape());
     if (objects.size() + wrappers >= limits.objects()) limit("objects");
     if (shape.slots() > limits.slots() - slots) limit("slots");
+
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
     var id = new ObjectId(worker, op.id(), occurrence);
     var object =
@@ -516,6 +556,7 @@ final class GraphMachine {
             Collections.nCopies(shape.references(), Value.Reference.NULL),
             Collections.nCopies(shape.data(), 0L));
     var binding = new Binding(op.id(), Value.Reference.strong(id));
+
     objects.put(id, object);
     scopes.peek().put(op.name(), binding);
     occurrences.put(op.id(), occurrence);
@@ -570,6 +611,9 @@ final class GraphMachine {
     return target.object().references().get(index);
   }
 
+  /**
+   * Opens a scope with a strong acquired handle after the frontier has validated a non-null target.
+   */
   void bindAcquired(Instruction.Acquire operation, ObjectId target) {
     requireDeclaration(operation.name());
     requireShape(Value.Reference.strong(target), shape(operation.shape()));
@@ -577,6 +621,7 @@ final class GraphMachine {
     bind(operation.name(), operation.id(), Value.Reference.strong(target));
   }
 
+  /** Binds and records a clearing-state choice already validated by the reference frontier. */
   void referenceState(Instruction.ReferenceState operation, boolean cleared) {
     requireDeclaration(operation.name());
     referenceSlot(operation.owner(), operation.index());

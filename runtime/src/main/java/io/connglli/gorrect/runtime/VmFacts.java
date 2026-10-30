@@ -1,7 +1,10 @@
 package io.connglli.gorrect.runtime;
 
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.Properties;
+import javax.management.JMException;
+import javax.management.ObjectName;
 
 /** Target identity and VM-specific facts, queried before any graph is constructed. */
 public final class VmFacts {
@@ -39,16 +42,14 @@ public final class VmFacts {
       var server = ManagementFactory.getPlatformMBeanServer();
       properties.setProperty(
           "collector.policy",
-          (String)
-              server.getAttribute(
-                  new javax.management.ObjectName("java.lang:type=Memory"), "GCMode"));
-    } catch (javax.management.JMException | RuntimeException unavailable) {
+          (String) server.getAttribute(new ObjectName("java.lang:type=Memory"), "GCMode"));
+    } catch (JMException | RuntimeException unavailable) {
       properties.setProperty("collector.problem", unavailable.toString());
     }
     return properties;
   }
 
-  public static void main(String[] args) throws java.io.IOException {
+  public static void main(String[] args) throws IOException {
     read().store(System.out, "Target VM facts");
   }
 }

@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.emit;
 
 import io.connglli.gorrect.engine.config.JsonFiles;
+import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
@@ -13,6 +14,7 @@ import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
+import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -25,6 +27,7 @@ import java.util.stream.IntStream;
 
 /** Emits direct operations from GIR. Layout metadata describes fields, never expected values. */
 public final class JavaEmitter {
+  /** Generated Java and its observed-field mapping; neither contains oracle payload predictions. */
   public record Emission(String source, ObservationLayout layout) {}
 
   private record Binding(String name, Shape shape) {}
@@ -50,12 +53,16 @@ public final class JavaEmitter {
     concurrent = HistoryProgram.usesConcurrentHistory(program);
   }
 
+  /**
+   * Validates GIR and emits direct target operations, worker methods, and capture layout metadata.
+   * Inputs are unchanged; each call owns its bindings, counters, and output buffer. Unsupported
+   * history/array combinations are rejected before any executable result is returned.
+   */
   public static Emission emit(GirProgram program) {
     GirValidator.validate(program);
     if ((ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program))
         && program.shapes().stream().anyMatch(shape -> shape.kind() != Shape.Kind.OBJECT))
-      throw new io.connglli.gorrect.engine.gir.GirException(
-          "History emission requires an ordinary-object program");
+      throw new GirException("History emission requires an ordinary-object program");
     return new JavaEmitter(program).emit();
   }
 
@@ -138,7 +145,7 @@ public final class JavaEmitter {
       line("public static volatile Object " + field + ";");
     }
     line("}");
-    allocationCounters(program.body());
+    allocationCounters();
     line("public static void main(String[] args) throws Exception {");
     line("try (TargetSession session = TargetSession.open(args)) {");
     line("try {");
@@ -297,24 +304,21 @@ public final class JavaEmitter {
     }
   }
 
-  private void allocationCounters(List<Instruction> instructions) {
-    for (var instruction : instructions)
-      switch (instruction) {
-        case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
-        case Instruction.WriteReference op -> {
-          if (op.kind() != Value.ReferenceKind.STRONG)
-            line("private static long w" + op.id() + ";");
-        }
-        case Instruction.IfPresent present -> allocationCounters(present.body());
-        case Instruction.Acquire acquire -> allocationCounters(acquire.body());
-        case Instruction.Scope scope -> allocationCounters(scope.body());
-        case Instruction.Repeat repeat -> allocationCounters(repeat.body());
-        case Instruction.Parallel parallel -> {
-          workers.addAll(parallel.workers());
-          parallel.workers().forEach(declaration -> allocationCounters(declaration.body()));
-        }
-        default -> {}
-      }
+  private void allocationCounters() {
+    program
+        .instructions()
+        .forEach(
+            instruction -> {
+              switch (instruction) {
+                case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
+                case Instruction.WriteReference op -> {
+                  if (op.kind() != Value.ReferenceKind.STRONG)
+                    line("private static long w" + op.id() + ";");
+                }
+                case Instruction.Parallel parallel -> workers.addAll(parallel.workers());
+                default -> {}
+              }
+            });
   }
 
   private void initialize() {
@@ -376,9 +380,317 @@ public final class JavaEmitter {
   private void block(List<Instruction> instructions, String acquired, Binding acquiredBinding) {
     scopes.push(new LinkedHashMap<>());
     if (acquired != null) scopes.peek().put(acquired, acquiredBinding);
-    for (var instruction : instructions) {
-      if (instruction instanceof Instruction.ReadData op) {
+    for (var instruction : instructions) emitInstruction(instruction);
+    for (var binding : scopes.pop().values()) if (binding.shape() != null) release(binding.name());
+  }
+
+  private void emitInstruction(Instruction instruction) {
+    switch (instruction) {
+      case Instruction.IfPresent op -> {
+        var value = binding(op.name());
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.BRANCH.ordinal(), "
+                + value.name()
+                + " == null ? 0L : 1L);");
+        line("if (" + value.name() + " != null) {");
+        block(op.body());
+        line("}");
+        return;
+      }
+
+      case Instruction.Acquire op -> {
         var owner = binding(op.owner());
+        String ref = "reference" + op.id(), result = "b" + op.id();
+        line("{");
+        line(
+            "java.lang.ref.Reference<?> "
+                + ref
+                + " = (java.lang.ref.Reference<?>) "
+                + slot(owner.name(), owner.shape(), op.index(), true)
+                + ";");
+        line(
+            types.get(op.shape())
+                + " "
+                + result
+                + " = ("
+                + types.get(op.shape())
+                + ") "
+                + ref
+                + ".get();");
+        reference(op.id(), "ACQUIRE", result + " == null ? 0L : 1L", ref, result);
+        line("if (" + result + " != null) {");
+        block(op.body(), op.name(), new Binding(result, shapes.get(op.shape())));
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.ACQUIRE_END.ordinal(),"
+                + " 0L);");
+        line("}");
+        line(result + " = null; " + ref + " = null;");
+        line("}");
+        return;
+      }
+
+      case Instruction.Parallel parallel -> {
+        record(parallel.id(), false);
+        String ids =
+            parallel.workers().stream()
+                .map(declaration -> Integer.toString(declaration.id()))
+                .collect(Collectors.joining(","));
+        String tasks =
+            parallel.workers().stream()
+                .map(
+                    declaration ->
+                        "context -> "
+                            + ExecutionEvidence.workerMethod(declaration.id())
+                            + "(session, context)")
+                .collect(Collectors.joining(","));
+        line(
+            "session.parallel("
+                + parallel.id()
+                + ", new int[]{"
+                + ids
+                + "}, new TargetSession.WorkerTask[]{"
+                + tasks
+                + "}, Case.class);");
+        return;
+      }
+
+      case Instruction.Scope scope -> {
+        record(scope.id(), false);
+        line("{");
+        block(scope.body());
+        line("}");
+        return;
+      }
+
+      case Instruction.Repeat repeat -> {
+        record(repeat.id(), false);
+        line(
+            "for (long i"
+                + repeat.id()
+                + " = 0; i"
+                + repeat.id()
+                + " < "
+                + repeat.count()
+                + "L; i"
+                + repeat.id()
+                + "++) {");
+        record(repeat.id(), true);
+        block(repeat.body());
+        line("}");
+        return;
+      }
+
+      case Instruction.Operation operation -> emitOperation(operation);
+    }
+  }
+
+  private void emitOperation(Instruction.Operation instruction) {
+    switch (instruction) {
+      case Instruction.ClearReference op -> {
+        var owner = binding(op.owner());
+        String ref = "reference" + op.id();
+        line(
+            "java.lang.ref.Reference<?> "
+                + ref
+                + " = (java.lang.ref.Reference<?>) "
+                + slot(owner.name(), owner.shape(), op.index(), true)
+                + ";");
+        line(ref + ".clear();");
+        reference(op.id(), "CLEAR", "0L", ref, null);
+        line(ref + " = null;");
+        return;
+      }
+
+      case Instruction.ReferenceState op -> {
+        var owner = binding(op.owner());
+        String ref = "reference" + op.id();
+        line(
+            "java.lang.ref.Reference<?> "
+                + ref
+                + " = (java.lang.ref.Reference<?>) "
+                + slot(owner.name(), owner.shape(), op.index(), true)
+                + ";");
+        String name = declare(op.name(), null, op.id());
+        line("long " + name + " = " + ref + ".refersTo(null) ? 1L : 0L;");
+        reference(op.id(), "STATE", name, ref, null);
+        line(ref + " = null;");
+        return;
+      }
+
+      case Instruction.PollQueue op -> {
+        String ref = "reference" + op.id();
+        line("java.lang.ref.Reference<?> " + ref + " = referenceQueue.poll();");
+        reference(op.id(), "QUEUE", ref + " == null ? 0L : 1L", ref, null);
+        line(ref + " = null;");
+        return;
+      }
+
+      case Instruction.Barrier op -> {
+        line("worker.barrier(" + op.id() + ");");
+        return;
+      }
+
+      case Instruction.Collect ignored ->
+          line((worker == 0 ? "session" : "worker") + ".collect(" + ignored.id() + ");");
+      case Instruction.Allocate op -> {
+        var shape = shapes.get(op.shape());
+        String name = declare(op.name(), shape, op.id());
+        // Arrays have no identity constructor; advance the counter independently of layout.
+        line("++a" + op.id() + ";");
+        line(
+            types.get(op.shape())
+                + " "
+                + name
+                + " = "
+                + allocation(shape, op.id(), "a" + op.id())
+                + ";");
+        bindArray(name, shape, op.id(), "a" + op.id());
+      }
+
+      case Instruction.ReadRoot op -> {
+        String name = declare(op.name(), shapes.get(op.shape()), op.id());
+        line(
+            types.get(op.shape())
+                + " "
+                + name
+                + " = ("
+                + types.get(op.shape())
+                + ") "
+                + read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode())
+                + ";");
+        if (concurrent) {
+          reference(op.id(), "STRONG_READ", "0L", null, name);
+          return;
+        }
+      }
+
+      case Instruction.WriteRoot op ->
+          write(new Location(Location.Kind.ROOT, op.root(), 0), op.mode(), operand(op.value()));
+      case Instruction.ReadReference op -> {
+        String name = declare(op.name(), shapes.get(op.shape()), op.id());
+        line(
+            types.get(op.shape())
+                + " "
+                + name
+                + " = ("
+                + types.get(op.shape())
+                + ") "
+                + read(new Location(Location.Kind.REFERENCE, op.owner(), op.index()), op.mode())
+                + ";");
+        if (concurrent) {
+          reference(op.id(), "STRONG_READ", "0L", null, name);
+          return;
+        }
+      }
+
+      case Instruction.WriteReference op -> {
+        var owner = binding(op.owner());
+        if (op.kind() != Value.ReferenceKind.STRONG) {
+          String ref = "reference" + op.id();
+          String type = op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot";
+          line(
+              type
+                  + " "
+                  + ref
+                  + " = new "
+                  + type
+                  + "("
+                  + worker
+                  + ", "
+                  + op.id()
+                  + ", ++w"
+                  + op.id()
+                  + ", -1, "
+                  + operand(op.value())
+                  + ");");
+          line(slot(owner.name(), owner.shape(), op.index(), true) + " = " + ref + ";");
+          String value =
+              op.value() instanceof Operand.Name name ? binding(name.name()).name() : null;
+          reference(op.id(), "INSTALL", "0L", ref, value);
+          line(ref + " = null;");
+          return;
+        }
+        write(
+            new Location(Location.Kind.REFERENCE, op.owner(), op.index()),
+            op.mode(),
+            operand(op.value()));
+      }
+
+      case Instruction.WriteData op ->
+          write(
+              new Location(Location.Kind.DATA, op.owner(), op.index()),
+              op.mode(),
+              operand(op.value()));
+      case Instruction.CompareSet op -> {
+        String name = declare(op.name(), null, op.id());
+        var location = op.location();
+        line(
+            "long "
+                + name
+                + " = "
+                + handle(location)
+                + ".compareAndSet("
+                + coordinates(location)
+                + argument(location, op.expected())
+                + ", "
+                + argument(location, op.update())
+                + ") ? 1L : 0L;");
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.COMPARE_SET.ordinal(), "
+                + name
+                + ");");
+        return;
+      }
+
+      case Instruction.Exchange op -> {
+        String name =
+            declare(op.name(), op.location().reference() ? shapes.get(op.shape()) : null, op.id());
+        String type = op.location().reference() ? types.get(op.shape()) : "long";
+        line(
+            type
+                + " "
+                + name
+                + " = ("
+                + type
+                + ") "
+                + handle(op.location())
+                + ".getAndSet("
+                + coordinates(op.location())
+                + argument(op.location(), op.update())
+                + ");");
+        if (op.location().reference()) reference(op.id(), "STRONG_READ", "0L", null, name);
+        else
+          line(
+              recorder()
+                  + ".record("
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.SCALAR_READ.ordinal(), "
+                  + name
+                  + ");");
+        return;
+      }
+
+      case Instruction.Release op -> {
+        var binding = binding(op.name());
+        if (binding.shape() != null) release(binding.name());
+      }
+
+      case Instruction.Checkpoint op -> {
+        record(op.id(), false);
+        line("session.checkpoint(" + op.id() + ");");
+        return;
+      }
+
+      case Instruction.ReadData op -> {
         String name = declare(op.name(), null, op.id());
         line(
             "long "
@@ -387,297 +699,19 @@ public final class JavaEmitter {
                 + (op.mode() == MemoryMode.VOLATILE ? "(long) " : "")
                 + read(new Location(Location.Kind.DATA, op.owner(), op.index()), op.mode())
                 + ";");
-        line(recorder() + ".record(" + op.id() + ", 2, " + name + ");");
-        continue;
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", "
+                + ExecutionTrace.Kind.SCALAR_READ.ordinal()
+                + ", "
+                + name
+                + ");");
+        return;
       }
-      switch (instruction) {
-        case Instruction.IfPresent op -> {
-          var value = binding(op.name());
-          line(
-              recorder()
-                  + ".record("
-                  + op.id()
-                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.BRANCH.ordinal(), "
-                  + value.name()
-                  + " == null ? 0L : 1L);");
-          line("if (" + value.name() + " != null) {");
-          block(op.body());
-          line("}");
-          continue;
-        }
-        case Instruction.Acquire op -> {
-          var owner = binding(op.owner());
-          String ref = "reference" + op.id(), result = "b" + op.id();
-          line("{");
-          line(
-              "java.lang.ref.Reference<?> "
-                  + ref
-                  + " = (java.lang.ref.Reference<?>) "
-                  + slot(owner.name(), owner.shape(), op.index(), true)
-                  + ";");
-          line(
-              types.get(op.shape())
-                  + " "
-                  + result
-                  + " = ("
-                  + types.get(op.shape())
-                  + ") "
-                  + ref
-                  + ".get();");
-          reference(op.id(), "ACQUIRE", result + " == null ? 0L : 1L", ref, result);
-          line("if (" + result + " != null) {");
-          block(op.body(), op.name(), new Binding(result, shapes.get(op.shape())));
-          line(
-              recorder()
-                  + ".record("
-                  + op.id()
-                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.ACQUIRE_END.ordinal(),"
-                  + " 0L);");
-          line("}");
-          line(result + " = null; " + ref + " = null;");
-          line("}");
-          continue;
-        }
-        case Instruction.ClearReference op -> {
-          var owner = binding(op.owner());
-          String ref = "reference" + op.id();
-          line(
-              "java.lang.ref.Reference<?> "
-                  + ref
-                  + " = (java.lang.ref.Reference<?>) "
-                  + slot(owner.name(), owner.shape(), op.index(), true)
-                  + ";");
-          line(ref + ".clear();");
-          reference(op.id(), "CLEAR", "0L", ref, null);
-          line(ref + " = null;");
-          continue;
-        }
-        case Instruction.ReferenceState op -> {
-          var owner = binding(op.owner());
-          String ref = "reference" + op.id();
-          line(
-              "java.lang.ref.Reference<?> "
-                  + ref
-                  + " = (java.lang.ref.Reference<?>) "
-                  + slot(owner.name(), owner.shape(), op.index(), true)
-                  + ";");
-          String name = declare(op.name(), null, op.id());
-          line("long " + name + " = " + ref + ".refersTo(null) ? 1L : 0L;");
-          reference(op.id(), "STATE", name, ref, null);
-          line(ref + " = null;");
-          continue;
-        }
-        case Instruction.PollQueue op -> {
-          String ref = "reference" + op.id();
-          line("java.lang.ref.Reference<?> " + ref + " = referenceQueue.poll();");
-          reference(op.id(), "QUEUE", ref + " == null ? 0L : 1L", ref, null);
-          line(ref + " = null;");
-          continue;
-        }
-        case Instruction.Parallel parallel -> {
-          record(parallel.id(), false);
-          String ids =
-              parallel.workers().stream()
-                  .map(declaration -> Integer.toString(declaration.id()))
-                  .collect(Collectors.joining(","));
-          String tasks =
-              parallel.workers().stream()
-                  .map(
-                      declaration ->
-                          "context -> "
-                              + ExecutionEvidence.workerMethod(declaration.id())
-                              + "(session, context)")
-                  .collect(Collectors.joining(","));
-          line(
-              "session.parallel("
-                  + parallel.id()
-                  + ", new int[]{"
-                  + ids
-                  + "}, new TargetSession.WorkerTask[]{"
-                  + tasks
-                  + "}, Case.class);");
-          continue;
-        }
-        case Instruction.Barrier op -> {
-          line("worker.barrier(" + op.id() + ");");
-          continue;
-        }
-        case Instruction.Collect ignored ->
-            line((worker == 0 ? "session" : "worker") + ".collect(" + ignored.id() + ");");
-        case Instruction.Allocate op -> {
-          var shape = shapes.get(op.shape());
-          String name = declare(op.name(), shape, op.id());
-          // Arrays have no identity constructor; advance the counter independently of layout.
-          line("++a" + op.id() + ";");
-          line(
-              types.get(op.shape())
-                  + " "
-                  + name
-                  + " = "
-                  + allocation(shape, op.id(), "a" + op.id())
-                  + ";");
-          bindArray(name, shape, op.id(), "a" + op.id());
-        }
-        case Instruction.ReadRoot op -> {
-          String name = declare(op.name(), shapes.get(op.shape()), op.id());
-          line(
-              types.get(op.shape())
-                  + " "
-                  + name
-                  + " = ("
-                  + types.get(op.shape())
-                  + ") "
-                  + read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode())
-                  + ";");
-          if (concurrent) {
-            reference(op.id(), "STRONG_READ", "0L", null, name);
-            continue;
-          }
-        }
-        case Instruction.WriteRoot op ->
-            write(new Location(Location.Kind.ROOT, op.root(), 0), op.mode(), operand(op.value()));
-        case Instruction.ReadReference op -> {
-          String name = declare(op.name(), shapes.get(op.shape()), op.id());
-          line(
-              types.get(op.shape())
-                  + " "
-                  + name
-                  + " = ("
-                  + types.get(op.shape())
-                  + ") "
-                  + read(new Location(Location.Kind.REFERENCE, op.owner(), op.index()), op.mode())
-                  + ";");
-          if (concurrent) {
-            reference(op.id(), "STRONG_READ", "0L", null, name);
-            continue;
-          }
-        }
-        case Instruction.WriteReference op -> {
-          var owner = binding(op.owner());
-          if (op.kind() != Value.ReferenceKind.STRONG) {
-            String ref = "reference" + op.id();
-            String type = op.kind() == Value.ReferenceKind.SOFT ? "SoftSlot" : "WeakSlot";
-            line(
-                type
-                    + " "
-                    + ref
-                    + " = new "
-                    + type
-                    + "("
-                    + worker
-                    + ", "
-                    + op.id()
-                    + ", ++w"
-                    + op.id()
-                    + ", -1, "
-                    + operand(op.value())
-                    + ");");
-            line(slot(owner.name(), owner.shape(), op.index(), true) + " = " + ref + ";");
-            String value =
-                op.value() instanceof Operand.Name name ? binding(name.name()).name() : null;
-            reference(op.id(), "INSTALL", "0L", ref, value);
-            line(ref + " = null;");
-            continue;
-          }
-          write(
-              new Location(Location.Kind.REFERENCE, op.owner(), op.index()),
-              op.mode(),
-              operand(op.value()));
-        }
-        case Instruction.WriteData op ->
-            write(
-                new Location(Location.Kind.DATA, op.owner(), op.index()),
-                op.mode(),
-                operand(op.value()));
-        case Instruction.CompareSet op -> {
-          String name = declare(op.name(), null, op.id());
-          var location = op.location();
-          line(
-              "long "
-                  + name
-                  + " = "
-                  + handle(location)
-                  + ".compareAndSet("
-                  + coordinates(location)
-                  + argument(location, op.expected())
-                  + ", "
-                  + argument(location, op.update())
-                  + ") ? 1L : 0L;");
-          line(
-              recorder()
-                  + ".record("
-                  + op.id()
-                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.COMPARE_SET.ordinal(), "
-                  + name
-                  + ");");
-          continue;
-        }
-        case Instruction.Exchange op -> {
-          String name =
-              declare(
-                  op.name(), op.location().reference() ? shapes.get(op.shape()) : null, op.id());
-          String type = op.location().reference() ? types.get(op.shape()) : "long";
-          line(
-              type
-                  + " "
-                  + name
-                  + " = ("
-                  + type
-                  + ") "
-                  + handle(op.location())
-                  + ".getAndSet("
-                  + coordinates(op.location())
-                  + argument(op.location(), op.update())
-                  + ");");
-          if (op.location().reference()) reference(op.id(), "STRONG_READ", "0L", null, name);
-          else
-            line(
-                recorder()
-                    + ".record("
-                    + op.id()
-                    + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.SCALAR_READ.ordinal(), "
-                    + name
-                    + ");");
-          continue;
-        }
-        case Instruction.Release op -> {
-          var binding = binding(op.name());
-          if (binding.shape() != null) release(binding.name());
-        }
-        case Instruction.Scope scope -> {
-          record(scope.id(), false);
-          line("{");
-          block(scope.body());
-          line("}");
-          continue;
-        }
-        case Instruction.Repeat repeat -> {
-          record(repeat.id(), false);
-          line(
-              "for (long i"
-                  + repeat.id()
-                  + " = 0; i"
-                  + repeat.id()
-                  + " < "
-                  + repeat.count()
-                  + "L; i"
-                  + repeat.id()
-                  + "++) {");
-          record(repeat.id(), true);
-          block(repeat.body());
-          line("}");
-          continue;
-        }
-        case Instruction.Checkpoint op -> {
-          record(op.id(), false);
-          line("session.checkpoint(" + op.id() + ");");
-          continue;
-        }
-        case Instruction.ReadData ignored -> throw new AssertionError();
-      }
-      record(instruction.id(), false);
     }
-    for (var binding : scopes.pop().values()) if (binding.shape() != null) release(binding.name());
+    record(instruction.id(), false);
   }
 
   // A Java local's last use can precede GIR release; the fence preserves the modeled lifetime.
@@ -731,7 +765,13 @@ public final class JavaEmitter {
   }
 
   private void record(int operation, boolean iteration) {
-    line(recorder() + ".record(" + operation + ", " + (iteration ? 1 : 0) + ", 0);");
+    line(
+        recorder()
+            + ".record("
+            + operation
+            + ", "
+            + (iteration ? ExecutionTrace.Kind.ITERATION : ExecutionTrace.Kind.OPERATION).ordinal()
+            + ", 0);");
   }
 
   private String recorder() {

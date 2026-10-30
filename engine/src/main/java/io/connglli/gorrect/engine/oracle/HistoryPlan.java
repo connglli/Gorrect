@@ -4,6 +4,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
@@ -144,7 +145,7 @@ public final class HistoryPlan {
     scopes.pop();
   }
 
-  private io.connglli.gorrect.engine.model.Shape shape(String name) {
+  private Shape shape(String name) {
     return program.shapes().stream()
         .filter(shape -> shape.name().equals(name))
         .findFirst()

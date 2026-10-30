@@ -1,18 +1,24 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.oracle.Oracle;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
+import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Locale;
 import java.util.concurrent.TimeUnit;
 import javax.tools.ToolProvider;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -20,6 +26,7 @@ import org.junit.jupiter.params.provider.ValueSource;
 /**
  * Pairs synthetic installation metadata with real JVM stack recordings to test proof boundaries.
  */
+@Tag("hotspot")
 class JitEvidenceTest {
   @TempDir Path directory;
 
@@ -32,9 +39,7 @@ class JitEvidenceTest {
     Files.writeString(source, SOURCE);
     Path support = Path.of(System.getProperty("gorrect.support"));
     String classpath =
-        support.resolve("runtime.jar")
-            + java.io.File.pathSeparator
-            + support.resolve("protocol.jar");
+        support.resolve("runtime.jar") + File.pathSeparator + support.resolve("protocol.jar");
     assertEquals(
         0,
         ToolProvider.getSystemJavaCompiler()
@@ -66,7 +71,7 @@ class JitEvidenceTest {
                   "-XX:CompileCommand=dontinline,Case::worker1",
                   "-XX:CompileCommand=dontinline,Case$Other::worker1",
                   "-cp",
-                  classes + java.io.File.pathSeparator + classpath,
+                  classes + File.pathSeparator + classpath,
                   "Case",
                   jfr.toString(),
                   mode));
@@ -78,9 +83,7 @@ class JitEvidenceTest {
           .environment()
           .keySet()
           .removeIf(
-              name ->
-                  TargetProfile.ENVIRONMENT_OPTIONS.contains(
-                      name.toUpperCase(java.util.Locale.ROOT)));
+              name -> TargetProfile.ENVIRONMENT_OPTIONS.contains(name.toUpperCase(Locale.ROOT)));
       var process = builder.start();
       try {
         assertTrue(process.waitFor(45, TimeUnit.SECONDS), "JFR fixture deadline exceeded");

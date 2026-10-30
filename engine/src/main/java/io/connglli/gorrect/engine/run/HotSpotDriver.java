@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.run;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
@@ -112,8 +113,8 @@ final class HotSpotDriver {
   private static Properties targetFacts(Path directory) {
     var facts = new Properties();
     Path file = directory.resolve("collector.properties");
-    if (java.nio.file.Files.exists(file))
-      try (var in = java.nio.file.Files.newInputStream(file)) {
+    if (Files.exists(file))
+      try (var in = Files.newInputStream(file)) {
         facts.load(in);
       } catch (IOException failure) {
         throw new IllegalArgumentException("Cannot read collector resolution", failure);

@@ -31,6 +31,13 @@ final class CollectionVerifier {
 
   private CollectionVerifier() {}
 
+  /**
+   * When gc-completion is requested, matches every executed collection to its thread/context and
+   * requires a complete qualifying VM cycle wholly inside the call. Oracle is the validated
+   * execution, including actual conditional choices; target supplies the retained VM identity.
+   * Missing/unusable evidence returns a coverage gap, never a graph violation. Without the
+   * requirement this check returns no gaps and does not read cycle evidence.
+   */
   static Result verify(
       Path directory,
       long run,
@@ -53,7 +60,10 @@ final class CollectionVerifier {
             window.worker() + ":" + window.group() + ":" + window.round() + ":" + window.phase(),
             window.thread());
       var collects = new HashSet<Integer>();
-      declarations(program.body(), collects);
+      program
+          .instructions()
+          .filter(Instruction.Collect.class::isInstance)
+          .forEach(instruction -> collects.add(instruction.id()));
       var ordinals = new HashMap<Visit, Long>();
       var expected = new HashMap<Key, Expected>();
       for (var event : oracle.events())
@@ -198,20 +208,5 @@ final class CollectionVerifier {
       else high = mid;
     }
     return low;
-  }
-
-  private static void declarations(List<Instruction> body, Set<Integer> collects) {
-    for (var instruction : body)
-      switch (instruction) {
-        case Instruction.Collect collect -> collects.add(collect.id());
-        case Instruction.Scope scope -> declarations(scope.body(), collects);
-        case Instruction.Repeat repeat -> declarations(repeat.body(), collects);
-        case Instruction.Acquire acquire -> declarations(acquire.body(), collects);
-        case Instruction.IfPresent present -> declarations(present.body(), collects);
-        case Instruction.Parallel parallel ->
-            parallel.workers().forEach(worker -> declarations(worker.body(), collects));
-        default -> {}
-      }
-    ;
   }
 }

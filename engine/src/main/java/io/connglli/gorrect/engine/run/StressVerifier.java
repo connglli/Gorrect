@@ -11,11 +11,11 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
-import java.util.Map;
 import java.util.Set;
 
 /**
@@ -33,12 +33,29 @@ final class StressVerifier {
 
   private StressVerifier() {}
 
+  /**
+   * Checks the executed worker/group/phase structure, then evaluates the union of GIR/profile
+   * stress requirements in one group visit. Oracle supplies the validated execution path for
+   * conditional cases; declaration-only history-plan placeholders are insufficient here.
+   *
+   * <p>Invalid synchronization evidence raises IOException. Missing compiled witnesses or absent
+   * joint stress instead return unmet requirements and diagnostics, leaving the graph verdict to
+   * its verifier. Inputs and retained evidence are not modified.
+   */
   static Result verify(
       Path directory, long run, GirProgram program, OracleResult oracle, TargetProfile profile)
       throws IOException {
     var declarations = new LinkedHashMap<Integer, Instruction.Parallel>();
     var collects = new HashSet<Integer>();
-    declarations(program.body(), declarations, collects);
+    program
+        .instructions()
+        .forEach(
+            instruction -> {
+              if (instruction instanceof Instruction.Parallel parallel)
+                declarations.put(parallel.id(), parallel);
+              else if (instruction instanceof Instruction.Collect collect)
+                collects.add(collect.id());
+            });
     var expected = new ArrayList<Visit>();
     var rounds = new HashMap<Integer, Long>();
     for (var event : oracle.events())
@@ -233,7 +250,7 @@ final class StressVerifier {
       var last =
           windows.stream()
               .filter(window -> window.worker() == worker)
-              .max(java.util.Comparator.comparingInt(ExecutionEvidence.Window::phase))
+              .max(Comparator.comparingInt(ExecutionEvidence.Window::phase))
               .orElseThrow();
       if (!frame(frames, first, ExecutionEvidence.ENTER, 0)
           || !frame(frames, last, ExecutionEvidence.EXIT, 0)) return false;
@@ -256,22 +273,5 @@ final class StressVerifier {
             collection,
             window.thread(),
             true));
-  }
-
-  private static void declarations(
-      List<Instruction> body, Map<Integer, Instruction.Parallel> groups, Set<Integer> collects) {
-    for (var instruction : body)
-      switch (instruction) {
-        case Instruction.Parallel parallel -> {
-          groups.put(parallel.id(), parallel);
-          parallel.workers().forEach(worker -> declarations(worker.body(), groups, collects));
-        }
-        case Instruction.Acquire acquire -> declarations(acquire.body(), groups, collects);
-        case Instruction.IfPresent present -> declarations(present.body(), groups, collects);
-        case Instruction.Scope scope -> declarations(scope.body(), groups, collects);
-        case Instruction.Repeat repeat -> declarations(repeat.body(), groups, collects);
-        case Instruction.Collect collect -> collects.add(collect.id());
-        default -> {}
-      }
   }
 }

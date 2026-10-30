@@ -7,7 +7,11 @@ import java.util.ArrayList;
 import java.util.List;
 import java.util.concurrent.Phaser;
 
-/** Worker-local recording and structured phase boundaries; it stores no graph references. */
+/**
+ * A generated worker's recording and phase context for one parallel-block visit. The worker calls
+ * {@link #begin} once, executes matching top-level barriers, then calls {@link #end} once. The
+ * session reads its windows only after joining it. This context stores no graph references.
+ */
 public final class WorkerContext implements ObservationRecorder {
   private final TraceRecorder recorder;
   private final Phaser phaser;
@@ -65,6 +69,7 @@ public final class WorkerContext implements ObservationRecorder {
         phase);
   }
 
+  /** Waits for peer startup, opens phase zero's active interval, and records the entry witness. */
   public void begin() {
     await();
     begin = System.nanoTime();
@@ -72,10 +77,16 @@ public final class WorkerContext implements ObservationRecorder {
     control.witness(worker, group, round, phase, ExecutionEvidence.ENTER, 0);
   }
 
+  /**
+   * Closes the current active interval before waiting for peers, then opens the next phase.
+   * Operation identifies the GIR barrier. Peer failure cancels the wait with an exception.
+   */
   public void barrier(int operation) {
     record(operation, ExecutionTrace.Kind.BARRIER.ordinal(), 0);
     finishWindow();
+
     await();
+
     phase++;
     begin = System.nanoTime();
     gcBefore = -1;
@@ -84,6 +95,7 @@ public final class WorkerContext implements ObservationRecorder {
     record(operation, ExecutionTrace.Kind.PHASE_START.ordinal(), 0);
   }
 
+  /** Records normal worker completion and the exit witness; it does not join other workers. */
   public void end() {
     record(group, ExecutionTrace.Kind.WORKER_END.ordinal(), 0);
     finishWindow();
@@ -91,16 +103,22 @@ public final class WorkerContext implements ObservationRecorder {
     ended = true;
   }
 
-  /** Records pause progress around a collection request without passing any live handle to JNI. */
+  /**
+   * Records before/after frame witnesses and pause counters around a GIR collection request.
+   * Ordinals advance across phases within this visit. Only the phase's last request with observed
+   * pause progress is retained in its window; supported cycle-completion capture uses a separate
+   * request ledger.
+   */
   public void collect(int operation) {
     long collection = ++collections;
     control.witness(worker, group, round, phase, ExecutionEvidence.BEFORE_COLLECTION, collection);
     long before = NativeObserver.gcFinishes();
+
     control.collect(operation, worker, group, round, phase, collection);
+
     long after = NativeObserver.gcFinishes();
     control.witness(worker, group, round, phase, ExecutionEvidence.AFTER_COLLECTION, collection);
-    // Keep the last completed request per phase. Earlier compiled requests can remain unproven;
-    // reclamation/completion assertions need a complete request history rather than this summary.
+
     if (before >= 0 && after > before) {
       gcBefore = before;
       gcAfter = after;

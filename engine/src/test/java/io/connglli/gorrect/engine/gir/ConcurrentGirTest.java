@@ -1,7 +1,9 @@
 package io.connglli.gorrect.engine.gir;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
+import java.util.List;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -22,10 +24,9 @@ class ConcurrentGirTest {
     assertEquals(program, GirParser.parse(GirFormatter.format(program)));
     var parallel =
         (Instruction.Parallel) ((Instruction.Repeat) program.body().getFirst()).body().getFirst();
+    assertEquals(List.of(1, 2), parallel.workers().stream().map(Instruction.Worker::id).toList());
     assertEquals(
-        java.util.List.of(1, 2), parallel.workers().stream().map(Instruction.Worker::id).toList());
-    assertEquals(
-        java.util.List.of("alpha", "beta"),
+        List.of("alpha", "beta"),
         parallel.workers().stream().map(Instruction.Worker::name).toList());
   }
 

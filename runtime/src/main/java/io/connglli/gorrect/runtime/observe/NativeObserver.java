@@ -8,7 +8,10 @@ import java.util.List;
 import java.util.Objects;
 
 /**
- * Target-side entry point. Native state holds metadata and weak tags, never workload JNI globals.
+ * Target-side entry point, requiring the library as a startup JVMTI agent and a loaded JNI library.
+ * Native state holds copied metadata and weak tags, never workload JNI globals. Registration and
+ * capture are serialized. GIR graph capture uses quiescent named-root boundaries; counter and frame
+ * queries may also run in workers.
  */
 public final class NativeObserver {
   public record Registration(Class<?> type, HeapSnapshot.ClassKind kind) {
@@ -21,8 +24,10 @@ public final class NativeObserver {
   private NativeObserver() {}
 
   /**
-   * Initializes and registers a case's classes once, before its mutators start. This runs static
-   * initializers; only class metadata is supplied to the native observer.
+   * Initializes and registers a case's classes once, before mutators start. This runs static
+   * initializers and passes only class metadata to native code. Kinds must match supported layouts;
+   * duplicate/incompatible registration fails. A failed setup must abort the case rather than reuse
+   * a partly initialized observer.
    */
   public static void configure(List<Registration> classes) {
     for (var entry : classes) {
@@ -54,7 +59,9 @@ public final class NativeObserver {
   /**
    * Returns native evidence, including partial records on exhaustion. Makes no explicit GC request;
    * the heap walk may materialize objects, and creating the result may trigger normal allocation
-   * GC.
+   * GC. Run/checkpoint tokens must be positive and records is the preallocated record bound. The
+   * returned bytes retain partial/error status for the host to diagnose; a returned array alone
+   * does not establish sufficient capture coverage.
    */
   public static byte[] capture(long run, long checkpoint, int records) {
     return capture0(run, checkpoint, records);
