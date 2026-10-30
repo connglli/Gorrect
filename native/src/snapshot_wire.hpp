@@ -13,13 +13,38 @@ constexpr std::uint32_t snapshot_magic = 0x47525331;
 constexpr std::uint32_t snapshot_version = 1;
 constexpr std::uint64_t snapshot_end = 0x454e44534e415031ULL;
 
+// Values match HeapSnapshot's enums and flags. Keep version 1 wire numbers unchanged.
+enum class ClassKind : std::int32_t {
+  object = 0,
+  reference_array = 1,
+  data_array = 2,
+  roots = 3,
+  soft_reference = 4,
+  weak_reference = 5
+};
+enum class RecordKind : std::int64_t {
+  object = 0,
+  reference = 1,
+  primitive_field = 2,
+  root = 3,
+  array_values = 4,
+  array_element = 5,
+  class_visit = 6
+};
+enum class CaptureStatus : std::int32_t { complete = 0, record_limit = 1, jvmti_error = 2 };
+namespace capability {
+constexpr std::int64_t tagging = 1, gc_events = 2, compilation_events = 4, compilation_overflow = 8,
+                       reference_fields = 16;
+}
+
 struct FieldInfo {
   std::int32_t index, modifiers;
   std::string name, descriptor;
 };
 
 struct ClassInfo {
-  std::int32_t id, kind;
+  std::int32_t id;
+  ClassKind kind;
   std::string signature;
   std::vector<FieldInfo> fields;
 };
@@ -38,12 +63,14 @@ struct MethodInfo {
 
 // Numeric kind and cell meanings are defined in docs/observation.md.
 struct Record {
-  std::int64_t kind, a, b, c, d, e, f, g;
+  RecordKind kind;
+  std::int64_t a, b, c, d, e, f, g;
 };
 
 struct Snapshot {
   std::int64_t run = 0, checkpoint = 0;
-  std::int32_t status = 0, error = 0;
+  CaptureStatus status = CaptureStatus::complete;
+  std::int32_t error = 0;
   std::int64_t capabilities = 0;
   std::int64_t starts_before = 0, finishes_before = 0, starts_after = 0, finishes_after = 0;
   std::vector<ClassInfo> classes;
@@ -78,7 +105,7 @@ inline std::vector<std::uint8_t> encode(const Snapshot &snapshot) {
   out.integer(snapshot_version);
   out.number(snapshot.run);
   out.number(snapshot.checkpoint);
-  out.integer(snapshot.status);
+  out.integer(static_cast<std::uint32_t>(snapshot.status));
   out.integer(snapshot.error);
   out.number(snapshot.capabilities);
   out.number(snapshot.starts_before);
@@ -88,7 +115,7 @@ inline std::vector<std::uint8_t> encode(const Snapshot &snapshot) {
   out.integer(static_cast<std::uint32_t>(snapshot.classes.size()));
   for (const auto &type : snapshot.classes) {
     out.integer(type.id);
-    out.integer(type.kind);
+    out.integer(static_cast<std::uint32_t>(type.kind));
     out.string(type.signature);
     out.integer(static_cast<std::uint32_t>(type.fields.size()));
     for (const auto &field : type.fields) {
@@ -115,7 +142,7 @@ inline std::vector<std::uint8_t> encode(const Snapshot &snapshot) {
   }
   out.integer(static_cast<std::uint32_t>(snapshot.records.size()));
   for (const auto &record : snapshot.records) {
-    out.number(record.kind);
+    out.number(static_cast<std::uint64_t>(record.kind));
     out.number(record.a);
     out.number(record.b);
     out.number(record.c);

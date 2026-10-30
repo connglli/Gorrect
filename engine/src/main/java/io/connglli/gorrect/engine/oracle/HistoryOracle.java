@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.oracle;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
+import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.ObjectId;
@@ -12,19 +13,30 @@ import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
 
 /**
  * Validates choices before they influence graph interpretation, then preserves all legal clearings.
  */
 public final class HistoryOracle {
+  /**
+   * One checkpoint's logical projection. Empty optional means capture coverage is unusable, not
+   * that the observed heap is empty; problems explain that gap. Present graphs still need checking.
+   */
   public record Observation(Optional<Graph> graph, List<String> problems) {
     public Observation {
       problems = List.copyOf(problems);
     }
   }
 
-  /** Execution retains shared payload and validated events, not a selected clearing graph. */
+  /**
+   * Verdict and diagnostics for a matched history. Execution is non-null only after a legal path's
+   * control/results match; incomplete graph observations can still leave its verdict inconclusive.
+   * It retains shared payload and validated events rather than one selected clearing graph.
+   * InvalidWorkload identifies a rejected precondition reached through validated choices;
+   * diagnosing a failed run additionally requires the entire recorded prefix to be validated.
+   */
   public record Result(
       ExactVerifier.Verdict verdict,
       List<String> problems,
@@ -71,18 +83,28 @@ public final class HistoryOracle {
     this.observations = observations;
   }
 
+  /**
+   * Validates a complete recorded case, checking choices before they affect graph interpretation.
+   * Contended/concurrent-reference programs delegate to {@link ConcurrentHistory#check}. Inputs
+   * remain unchanged. Incomplete evidence or exhausted search yields INCONCLUSIVE; impossible
+   * complete observations yield VIOLATED.
+   */
   public static Result check(
       GirProgram program,
       ExecutionTrace trace,
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits) {
-    if (io.connglli.gorrect.engine.gir.HistoryProgram.usesConcurrentHistory(program))
+    if (HistoryProgram.usesConcurrentHistory(program))
       return ConcurrentHistory.check(program, trace, history, observations, limits);
     return check(program, trace, history, observations, limits, false);
   }
 
-  /** Diagnoses a rejected precondition only after validating the recorded execution prefix. */
+  /**
+   * Diagnoses a sequential conditional runtime failure from its recorded prefix. InvalidWorkload
+   * becomes true only when the entire prefix is legal and reaches the rejected precondition;
+   * missing, impossible, or inconclusive prefixes do not establish that classification.
+   */
   public static Result checkFailure(
       GirProgram program,
       ExecutionTrace trace,
@@ -106,11 +128,14 @@ public final class HistoryOracle {
           List.of("Reference history is incomplete or belongs to another run"),
           null,
           false);
+
     HistoryOracle checker = null;
+
     try {
       checker = new HistoryOracle(program, trace, history, observations, limits);
       checker.prefix = prefix;
       checker.execute(program.body());
+
       if (prefix) throw new EndOfPrefix();
       checker.frontier.expand(checker.machine.graph());
       checker.machine.leaveScope();
@@ -121,24 +146,28 @@ public final class HistoryOracle {
           checker.referencePosition == history.events().size(),
           "Unexpected reference history suffix");
       require(checker.checkpoint == observations.size(), "Unexpected graph observation suffix");
+
       var execution =
           new OracleResult(
               checker.machine.graph(),
               checker.checkpoints,
               checker.machine.steps(),
               checker.machine.events());
+
       return new Result(
           checker.incomplete ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED,
           checker.problems,
           execution,
           false);
     } catch (EndOfPrefix end) {
+
       return new Result(
           ExactVerifier.Verdict.INCONCLUSIVE,
           List.of("Recorded prefix does not establish an invalid workload"),
           null,
           false);
     } catch (HistoryLimitException | OracleLimitException limit) {
+
       return new Result(
           ExactVerifier.Verdict.INCONCLUSIVE, List.of(limit.getMessage()), null, false);
     } catch (GirException invalid) {
@@ -151,12 +180,14 @@ public final class HistoryOracle {
             List.of("Invalid precondition has unvalidated prefix evidence"),
             null,
             false);
+
       return new Result(
           ExactVerifier.Verdict.INCONCLUSIVE,
           List.of("Invalid workload on a legal recorded path: " + invalid.getMessage()),
           null,
           true);
     } catch (Violation invalid) {
+
       return new Result(ExactVerifier.Verdict.VIOLATED, List.of(invalid.getMessage()), null, false);
     }
   }
@@ -164,6 +195,7 @@ public final class HistoryOracle {
   private void execute(List<Instruction> body) {
     for (var instruction : body) {
       frontier.expand(machine.graph());
+
       switch (instruction) {
         case Instruction.IfPresent present -> {
           boolean value = machine.present(present.name());
@@ -171,6 +203,7 @@ public final class HistoryOracle {
           expect();
           if (value) scoped(present.body());
         }
+
         case Instruction.Parallel ignored ->
             throw new GirException("Parallel reference histories are unsupported");
         case Instruction.Scope scope -> {
@@ -178,6 +211,7 @@ public final class HistoryOracle {
           expect();
           scoped(scope.body());
         }
+
         case Instruction.Repeat repeat -> {
           machine.step(repeat.id(), false);
           expect();
@@ -188,6 +222,7 @@ public final class HistoryOracle {
             scoped(repeat.body());
           }
         }
+
         case Instruction.Acquire acquire -> acquire(acquire);
         case Instruction.Checkpoint point -> {
           machine.marker(point.id(), ExecutionTrace.Kind.OPERATION, 0);
@@ -196,6 +231,7 @@ public final class HistoryOracle {
           snapshot(point.id(), visit);
           checkpoints.add(new OracleResult.Checkpoint(point.id(), visit, machine.graph()));
         }
+
         case Instruction.ReferenceState state -> {
           var value = wrapped(state.owner(), state.index());
           long result = choice(state.id(), ExecutionTrace.Kind.REFERENCE_STATE);
@@ -207,6 +243,7 @@ public final class HistoryOracle {
           machine.referenceState(state, result == 1);
           expect();
         }
+
         case Instruction.PollQueue poll -> {
           long result = choice(poll.id(), ExecutionTrace.Kind.QUEUE_POLL);
           var event = take(ReferenceHistory.Kind.QUEUE, position + 1);
@@ -226,6 +263,7 @@ public final class HistoryOracle {
           machine.marker(poll.id(), ExecutionTrace.Kind.QUEUE_POLL, result);
           expect();
         }
+
         case Instruction.ClearReference clear -> {
           var value = wrapped(clear.owner(), clear.index());
           machine.apply(clear);
@@ -233,6 +271,7 @@ public final class HistoryOracle {
           subject(take(ReferenceHistory.Kind.CLEAR, position), value);
           frontier.programClear(value.wrapper());
         }
+
         case Instruction.Operation operation -> {
           machine.apply(operation);
           expect();
@@ -242,7 +281,7 @@ public final class HistoryOracle {
             var event = take(ReferenceHistory.Kind.INSTALL, position);
             subject(event, value);
             require(
-                java.util.Objects.equals(value.target(), target(event.target())),
+                Objects.equals(value.target(), target(event.target())),
                 "Reference store changed its referent identity");
             frontier.register(value);
           }

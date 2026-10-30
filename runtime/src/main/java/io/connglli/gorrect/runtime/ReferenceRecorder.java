@@ -1,6 +1,7 @@
 package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.ReferenceHistory;
+import java.util.List;
 
 /** Bounded scalar storage for reference identities; it never retains a wrapper or referent. */
 final class ReferenceRecorder {
@@ -55,7 +56,7 @@ final class ReferenceRecorder {
     targetOccurrences[count++] = targetOccurrence;
   }
 
-  void appendTo(java.util.List<ReferenceHistory.Event> events) {
+  void appendTo(List<ReferenceHistory.Event> events) {
     var types = ReferenceHistory.Kind.values();
     for (int index = 0; index < count; index++) {
       var wrapper =

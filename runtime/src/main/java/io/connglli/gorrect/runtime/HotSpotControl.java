@@ -10,7 +10,6 @@ import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import jdk.jfr.Event;
 import jdk.jfr.FlightRecorder;
@@ -49,15 +48,20 @@ final class HotSpotControl implements VmControl {
   private boolean finished;
 
   HotSpotControl(
-      Path directory, long run, Properties settings, String gcControl, boolean gcEvidence)
+      Path directory,
+      long run,
+      VmControl.JitSettings settings,
+      String gcControl,
+      boolean gcEvidence)
       throws ReflectiveOperationException {
     this.run = run;
     this.gcControl = gcControl;
     jitConfigured = settings != null;
     output = directory.resolve("traces/workers.jfr");
-    level = settings == null ? 0 : Integer.parseInt(settings.getProperty("level"));
-    warmup = settings == null ? 0 : Integer.parseInt(settings.getProperty("warmupRounds"));
-    timeout = settings == null ? 0 : Integer.parseInt(settings.getProperty("deadlineMillis"));
+    level = settings == null ? 0 : settings.level();
+    warmup = settings == null ? 0 : settings.warmupRounds();
+    timeout = settings == null ? 0 : settings.deadlineMillis();
+
     Class<?> type = null;
     if (jitConfigured || gcControl.equals("whitebox-full")) {
       try {
@@ -66,6 +70,7 @@ final class HotSpotControl implements VmControl {
         type = Class.forName("sun.hotspot.WhiteBox", true, null);
       }
     }
+
     whitebox = type == null ? null : type.getMethod("getWhiteBox").invoke(null);
     dontInline =
         jitConfigured
@@ -78,15 +83,19 @@ final class HotSpotControl implements VmControl {
     compilationLevel =
         jitConfigured ? type.getMethod("getMethodCompilationLevel", Executable.class) : null;
     fullGC = gcControl.equals("whitebox-full") ? type.getMethod("fullGC") : null;
+
     // A declared native method need not be registered by this client/VM pair. Probe before any
     // workload exists; its cycle is outside every modeled request and cannot satisfy coverage.
     if (fullGC != null) fullGC.invoke(whitebox);
+
     // Request policy is usable independently of evidence collection and compiler control.
     if (!jitConfigured && !gcEvidence) {
       recording = null;
       return;
     }
+
     if (!FlightRecorder.isAvailable()) throw new IllegalStateException("JFR unavailable");
+
     recording = new Recording();
     try {
       if (FlightRecorder.getFlightRecorder().getEventTypes().stream()
@@ -109,10 +118,12 @@ final class HotSpotControl implements VmControl {
   public List<ExecutionEvidence.Compilation> prepare(long round, int[] workers, Method[] methods)
       throws InterruptedException {
     if (!jitConfigured) return List.of();
+
     var result = new ArrayList<ExecutionEvidence.Compilation>();
     var requested = new boolean[methods.length];
     var problems = new String[methods.length];
     long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout);
+
     for (int index = 0; index < methods.length; index++) {
       problems[index] = "";
       try {
@@ -130,10 +141,13 @@ final class HotSpotControl implements VmControl {
         problems[index] = failure.toString();
       }
     }
+
     if (round <= warmup) return List.of();
+
     int[] installed = new int[methods.length];
     while (true) {
       boolean pending = false;
+
       for (int index = 0; index < methods.length; index++) {
         try {
           installed[index] =
@@ -147,6 +161,7 @@ final class HotSpotControl implements VmControl {
       if (!pending || System.nanoTime() >= deadline) break;
       Thread.sleep(1);
     }
+
     for (int index = 0; index < methods.length; index++) {
       if (requested[index] && installed[index] < level && problems[index].isEmpty())
         problems[index] = "Compilation deadline exceeded";
@@ -154,6 +169,7 @@ final class HotSpotControl implements VmControl {
           new ExecutionEvidence.Compilation(
               workers[index], methods[index].getName(), level, installed[index], problems[index]));
     }
+
     return result;
   }
 
@@ -178,6 +194,7 @@ final class HotSpotControl implements VmControl {
       requestCollection();
       return;
     }
+
     var event = new CollectionRequest();
     event.run = run;
     event.worker = worker;
@@ -187,7 +204,9 @@ final class HotSpotControl implements VmControl {
     event.operation = operation;
     event.collection = collection;
     event.control = gcControl;
+
     event.begin();
+
     try {
       requestCollection();
       event.returned = true;

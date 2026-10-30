@@ -13,7 +13,9 @@ import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.HashMap;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -122,13 +124,29 @@ public final class ConcurrentHistory {
         identities.computeIfAbsent(event.worker(), ignored -> new ArrayList<>()).add(event);
   }
 
-  /** All bounded SC paths must satisfy preconditions and the ordinary-access race check. */
+  /**
+   * Proves that every bounded SC path satisfies dynamic preconditions and the ordinary-access race
+   * check, independently of observed results. Returns only after complete exploration succeeds.
+   *
+   * @throws GirException if static contracts or a possible executed precondition are invalid
+   * @throws UnsupportedHistoryException if the profile cannot prove ordinary-access race freedom
+   * @throws HistoryLimitException if the search budget cannot complete the proof
+   * @throws OracleLimitException if model work exceeds its bounds
+   */
   public static void audit(GirProgram program, HistoryLimits limits) {
     GirValidator.validate(program);
     new ConcurrentHistory(new HistoryBudget(limits), null, null, List.of()).explore(program);
   }
 
-  /** Verification repeats the audit; saved evidence cannot bypass the supported-profile check. */
+  /**
+   * Repeats the all-paths audit, then matches worker-local results, synchronization, reference
+   * choices, and snapshots to a legal schedule. Audit and matching share one cumulative budget.
+   * Missing coverage or exhausted bounds yield INCONCLUSIVE; an unmatched complete history yields
+   * VIOLATED. File order between workers imposes no scheduling edge.
+   *
+   * <p>Inputs are not mutated. Invalid workloads and unsupported race profiles still throw their
+   * preflight exceptions; a saved trace cannot bypass those checks.
+   */
   public static HistoryOracle.Result check(
       GirProgram program,
       ExecutionTrace trace,
@@ -142,6 +160,7 @@ public final class ConcurrentHistory {
           List.of("Incomplete or mixed-run history"),
           null,
           false);
+
     try {
       if (observations.size()
           != HistoryPlan.plan(program, OracleLimits.DEFAULT).checkpoints().size() + 1)
@@ -150,23 +169,29 @@ public final class ConcurrentHistory {
             List.of("Missing or extra graph observations"),
             null,
             false);
+
       var budget = new HistoryBudget(limits);
       // Share the verification budget across proof and matching, not just across their forks.
       new ConcurrentHistory(budget, null, null, List.of()).explore(program);
+
       var search = new ConcurrentHistory(budget, trace, history, observations);
       var found = search.explore(program);
+
       if (found == null)
         return new HistoryOracle.Result(
             ExactVerifier.Verdict.VIOLATED, List.of(search.mismatch), null, false);
+
       var problems = new ArrayList<String>();
       for (var observation : observations)
         if (observation.graph().isEmpty()) problems.addAll(observation.problems());
+
       return new HistoryOracle.Result(
           found.incomplete ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED,
           problems,
           new OracleResult(found.graph(), found.checkpoints, found.machine.steps(), trace.events()),
           false);
     } catch (HistoryLimitException | OracleLimitException limit) {
+
       return new HistoryOracle.Result(
           ExactVerifier.Verdict.INCONCLUSIVE, List.of(limit.getMessage()), null, false);
     }
@@ -176,13 +201,15 @@ public final class ConcurrentHistory {
     var pending = new ArrayDeque<State>();
     pending.push(new State(program));
     boolean completed = false;
-    var joins = new java.util.HashSet<JoinKey>();
+    var joins = new HashSet<JoinKey>();
     // A scheduler state can hold several clearing histories; memo storage retains those too.
     long pendingStates = 1, memoStates = 0;
+
     while (!pending.isEmpty()) {
       budget.states(pendingStates + memoStates);
       var state = pending.pop();
       pendingStates -= state.frontier.size();
+
       if (state.finished) {
         if (audit) {
           completed = true;
@@ -196,6 +223,7 @@ public final class ConcurrentHistory {
         }
         continue;
       }
+
       for (var entry : state.threads.entrySet()) {
         if (entry.getValue().blocked || entry.getValue().ended) continue;
         budget.spend(1);
@@ -205,6 +233,7 @@ public final class ConcurrentHistory {
               next.threads.get(entry.getKey()).context, next.threads.get(entry.getKey()).phase);
           // GC may run before any task, including scope exit, while all live handles still protect.
           next.frontier.expand(next.graph());
+
           for (var successor : next.advance(entry.getKey())) {
             successor.settle();
             // Joining orders the whole preceding group before future work, so race clocks are
@@ -350,6 +379,7 @@ public final class ConcurrentHistory {
       var thread = threads.get(worker);
       require(!thread.tasks.isEmpty(), "Missing thread continuation");
       var task = thread.tasks.pop();
+
       switch (task) {
         case Execute execute -> {
           var instruction = execute.instruction();
@@ -357,9 +387,11 @@ public final class ConcurrentHistory {
             case Instruction.Acquire acquire -> {
               return acquire(worker, acquire);
             }
+
             case Instruction.ReferenceState state -> {
               return state(worker, state);
             }
+
             case Instruction.IfPresent present -> {
               boolean value = machine.present(present.name());
               machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);
@@ -370,6 +402,7 @@ public final class ConcurrentHistory {
                 thread.body(present.body());
               }
             }
+
             case Instruction.Scope scope -> {
               machine.step(scope.id(), false);
               emit(worker);
@@ -377,11 +410,13 @@ public final class ConcurrentHistory {
               thread.tasks.push(new Leave(0));
               thread.body(scope.body());
             }
+
             case Instruction.Repeat repeat -> {
               machine.step(repeat.id(), false);
               emit(worker);
               thread.tasks.push(new Iterate(repeat, repeat.count()));
             }
+
             case Instruction.Parallel parallel -> {
               machine.step(parallel.id(), false);
               emit(worker);
@@ -399,6 +434,7 @@ public final class ConcurrentHistory {
                 threads.put(declaration.id(), child);
               }
             }
+
             case Instruction.Checkpoint point -> {
               machine.marker(point.id(), ExecutionTrace.Kind.OPERATION, 0);
               emit(worker);
@@ -406,10 +442,12 @@ public final class ConcurrentHistory {
               capture();
               checkpoints.add(new OracleResult.Checkpoint(point.id(), visit, graph()));
             }
+
             case Instruction.PollQueue poll -> poll(worker, poll);
             case Instruction.Operation operation -> operation(worker, operation);
           }
         }
+
         case Iterate iterate -> {
           if (iterate.remaining() > 0) {
             machine.step(iterate.instruction().id(), true);
@@ -420,6 +458,7 @@ public final class ConcurrentHistory {
             thread.body(iterate.instruction().body());
           }
         }
+
         case Leave leave -> {
           machine.leaveScope();
           if (leave.acquisition() != 0) {
@@ -427,20 +466,24 @@ public final class ConcurrentHistory {
             emit(worker);
           }
         }
+
         case Start start -> {
           machine.marker(start.group(), ExecutionTrace.Kind.WORKER_START, 0);
           emit(worker);
         }
+
         case End end -> {
           machine.leaveScope();
           machine.marker(end.group(), ExecutionTrace.Kind.WORKER_END, 0);
           emit(worker);
           thread.ended = true;
         }
+
         case Phase phase -> {
           machine.marker(phase.barrier(), ExecutionTrace.Kind.PHASE_START, 0);
           emit(worker);
         }
+
         case Join join -> {
           for (var declaration : join.group().workers()) {
             machine.marker(join.group().id(), ExecutionTrace.Kind.JOIN, declaration.id());
@@ -448,6 +491,7 @@ public final class ConcurrentHistory {
           }
           joined = true;
         }
+
         case Finish ignored -> {
           capture();
           finished = true;
@@ -510,9 +554,9 @@ public final class ConcurrentHistory {
       var choices =
           audit
               ? value.target() == null
-                  ? java.util.Collections.<ObjectId>singletonList(null)
+                  ? Collections.<ObjectId>singletonList(null)
                   : Arrays.asList(value.target(), null)
-              : java.util.Collections.singletonList(
+              : Collections.singletonList(
                   target(identity(worker, ReferenceHistory.Kind.ACQUIRE).target()));
       var results = new ArrayList<State>();
       for (var target : choices) {

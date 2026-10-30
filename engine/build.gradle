@@ -38,13 +38,7 @@ dependencyLocking {
 }
 
 tasks.named('test') {
-    useJUnitPlatform()
-    exclude '**/ObserverArtifactsTest.class'
-    exclude '**/RunEngineTest.class'
-    exclude '**/JitEvidenceTest.class'
-    exclude '**/HotSpotCollectorTest.class'
-    exclude '**/OpenJ9IntegrationTest.class'
-    exclude '**/OpenJ9EvidenceTest.class'
+    useJUnitPlatform { excludeTags 'observer', 'hotspot', 'openj9' }
 }
 
 def observerIntegration = tasks.register('observerIntegration', Test) {
@@ -53,8 +47,7 @@ def observerIntegration = tasks.register('observerIntegration', Test) {
     dependsOn ':runtime:observerSmoke17', ':runtime:observerSmoke21'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
-    useJUnitPlatform()
-    include '**/ObserverArtifactsTest.class'
+    useJUnitPlatform { includeTags 'observer' }
     [17, 21].each {
         inputs.dir(project(':runtime').layout.buildDirectory.dir("observer/java${it}"))
                 .withPathSensitivity(PathSensitivity.RELATIVE)
@@ -69,13 +62,11 @@ tasks.named('check') { dependsOn observerIntegration }
 def sequentialIntegration = tasks.register('sequentialIntegration', Test) {
     group = 'verification'
     description = 'Runs generated cases, offline verification, replay, and process failure checks.'
+    doNotTrackState('Target VM builds and environment can change outside Gradle inputs.')
     dependsOn tasks.named('installDist')
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
-    useJUnitPlatform()
-    include '**/RunEngineTest.class'
-    include '**/JitEvidenceTest.class'
-    include '**/HotSpotCollectorTest.class'
+    useJUnitPlatform { includeTags 'hotspot' }
     inputs.dir(layout.buildDirectory.dir('install/gorrect/support'))
             .withPathSensitivity(PathSensitivity.RELATIVE)
     [17, 21].each { feature ->
@@ -89,12 +80,11 @@ tasks.named('check') { dependsOn sequentialIntegration }
 def openj9Integration = tasks.register('openj9Integration', Test) {
     group = 'verification'
     description = 'Runs OpenJ9 cases when GORRECT_OPENJ9_JAVA names a target executable.'
+    doNotTrackState('Target VM builds and environment can change outside Gradle inputs.')
     dependsOn tasks.named('installDist')
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
-    useJUnitPlatform()
-    include '**/OpenJ9IntegrationTest.class'
-    include '**/OpenJ9EvidenceTest.class'
+    useJUnitPlatform { includeTags 'openj9' }
     def target = providers.environmentVariable('GORRECT_OPENJ9_JAVA')
     onlyIf { target.isPresent() }
     doFirst { systemProperty 'gorrect.openj9.java', target.get() }

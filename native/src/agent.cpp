@@ -42,6 +42,9 @@ void check(jvmtiError error) {
 }
 template <typename T> struct JvmtiMemory {
   T *data = nullptr;
+  JvmtiMemory() = default;
+  JvmtiMemory(const JvmtiMemory &) = delete;
+  JvmtiMemory &operator=(const JvmtiMemory &) = delete;
   ~JvmtiMemory() {
     if (data)
       jvmti->Deallocate(reinterpret_cast<unsigned char *>(data));
@@ -98,7 +101,8 @@ const ClassInfo *type_for(jlong tag) {
 }
 bool is_array_tag(jlong tag) { return tag >= array_base; }
 bool logical_type(const ClassInfo *type) {
-  return type && (type->kind == 0 || type->kind == 4 || type->kind == 5);
+  return type && (type->kind == ClassKind::object || type->kind == ClassKind::soft_reference ||
+                  type->kind == ClassKind::weak_reference);
 }
 
 // Reserve all callback storage before FollowReferences. The callbacks neither allocate nor call
@@ -155,7 +159,7 @@ struct Capture {
       auto index = static_cast<std::size_t>(-*pointer - 1);
       if (index < class_seen.size() && !class_seen[index]) {
         class_seen[index] = true;
-        add({6, static_cast<jlong>(index + 1), 0, 0, 0, 0, 0, 0});
+        add({RecordKind::class_visit, static_cast<jlong>(index + 1), 0, 0, 0, 0, 0, 0});
       }
       return;
     }
@@ -166,7 +170,7 @@ struct Capture {
     if (seen[index] == 0) {
       seen[index] = physical;
       auto type = type_for(class_tag);
-      add({0, physical, type ? type->id : 0, size, length, 0, 0, 0});
+      add({RecordKind::object, physical, type ? type->id : 0, size, length, 0, 0, 0});
     }
   }
 };
@@ -182,8 +186,8 @@ jint JNICALL reference_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapRefe
   auto root_class = source ? type_for(*source) : nullptr;
   bool target_workload = logical_type(type) || is_array_tag(*target);
   bool source_workload = logical_type(owner) || (source && is_array_tag(*source));
-  bool root_field =
-      kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && root_class && root_class->kind == 3;
+  bool root_field = kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && root_class &&
+                    root_class->kind == ClassKind::roots;
   if (*target < 0)
     capture.object(target, class_tag, size, length);
   // Skip irrelevant records, but keep traversing: foreign objects can lead back to the workload.
@@ -204,14 +208,15 @@ jint JNICALL reference_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapRefe
       depth = info->jni_local.depth;
       method = method_token(info->jni_local.method);
     }
-    capture.add({3, target_tag, kind, thread, depth, slot, method, location});
+    capture.add({RecordKind::root, target_tag, kind, thread, depth, slot, method, location});
   } else {
     jlong index = -1;
     if (info && (kind == JVMTI_HEAP_REFERENCE_FIELD || kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD))
       index = info->field.index;
     if (info && kind == JVMTI_HEAP_REFERENCE_ARRAY_ELEMENT)
       index = info->array.index;
-    capture.add({1, capture.tag(source), target_tag, kind, index, referrer_class_tag, 0, 0});
+    capture.add({RecordKind::reference, capture.tag(source), target_tag, kind, index,
+                 referrer_class_tag, 0, 0});
   }
   return capture.full ? JVMTI_VISIT_ABORT : JVMTI_VISIT_OBJECTS;
 }
@@ -252,9 +257,9 @@ jint JNICALL primitive_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapRefe
   auto metadata =
       kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD ? type_for(*object) : type_for(class_tag);
   // A primitive callback can precede the object's reference callback; assign its owner tag here.
-  if (logical_type(metadata) || (metadata && metadata->kind == 3))
-    capture.add({2, capture.tag(object), info->field.index, type, primitive_bits(value, type),
-                 class_tag, 0, 0});
+  if (logical_type(metadata) || (metadata && metadata->kind == ClassKind::roots))
+    capture.add({RecordKind::primitive_field, capture.tag(object), info->field.index, type,
+                 primitive_bits(value, type), class_tag, 0, 0});
   return capture.full ? JVMTI_VISIT_ABORT : 0;
 }
 jint JNICALL array_callback(jlong class_tag, jlong, jlong *object, jint count,
@@ -265,11 +270,11 @@ jint JNICALL array_callback(jlong class_tag, jlong, jlong *object, jint count,
   if (!(capture.observed(*object) || is_array_tag(*object)))
     return 0;
   // The marker distinguishes a visited empty array from missing primitive-array evidence.
-  capture.add({4, *object, count, type, 0, 0, 0, 0});
+  capture.add({RecordKind::array_values, *object, count, type, 0, 0, 0, 0});
   if (type == JVMTI_PRIMITIVE_TYPE_LONG) {
     auto data = static_cast<const jlong *>(values);
     for (jint index = 0; index < count && !capture.full; ++index)
-      capture.add({5, *object, index, type, data[index], class_tag, 0, 0});
+      capture.add({RecordKind::array_element, *object, index, type, data[index], class_tag, 0, 0});
   }
   return capture.full ? JVMTI_VISIT_ABORT : 0;
 }
@@ -297,7 +302,7 @@ void JNICALL compiled_unload(jvmtiEnv *, jmethodID, const void *address) {
 std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
   std::set<std::int64_t> tokens;
   for (const auto &record : snapshot.records)
-    if (record.kind == 3 && record.f != 0)
+    if (record.kind == RecordKind::root && record.f != 0)
       tokens.insert(record.f);
   std::vector<MethodInfo> result;
   for (auto token : tokens) {
@@ -326,7 +331,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_gcFinishes(JNIEnv *env, jclass) {
   return entry(env, []() -> jlong {
     require_agent();
-    return (capabilities & 2) ? gc_finishes.load() : -1;
+    return (capabilities & capability::gc_events) ? gc_finishes.load() : -1;
   });
 }
 extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
@@ -347,8 +352,10 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
     desired.can_generate_compiled_method_load_events =
         available.can_generate_compiled_method_load_events;
     check(jvmti->AddCapabilities(&desired));
-    capabilities = 1 | 16 | (desired.can_generate_garbage_collection_events ? 2 : 0) |
-                   (desired.can_generate_compiled_method_load_events ? 4 : 0);
+    capabilities =
+        capability::tagging | capability::reference_fields |
+        (desired.can_generate_garbage_collection_events ? capability::gc_events : 0) |
+        (desired.can_generate_compiled_method_load_events ? capability::compilation_events : 0);
     jvmtiEventCallbacks callbacks{};
     callbacks.GarbageCollectionStart = gc_start;
     callbacks.GarbageCollectionFinish = gc_finish;
@@ -391,25 +398,28 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
     std::vector<ClassInfo> pending;
     for (jsize index = 0; index < count; ++index) {
       auto type = static_cast<jclass>(env->GetObjectArrayElement(types, index));
-      jint kind = values[static_cast<std::size_t>(index)];
-      if (kind < 0 || kind > 5)
+      jint raw_kind = values[static_cast<std::size_t>(index)];
+      if (raw_kind < static_cast<jint>(ClassKind::object) ||
+          raw_kind > static_cast<jint>(ClassKind::weak_reference))
         throw std::runtime_error("Unknown class kind");
       jlong previous = 0;
       check(jvmti->GetTag(type, &previous));
       if (previous != 0)
         throw std::runtime_error("Class is already tagged");
+      auto kind = static_cast<ClassKind>(raw_kind);
       ClassInfo metadata{index + 1, kind, signature(type), {}};
       for (const auto &old : pending)
         if (old.signature == metadata.signature)
           throw std::runtime_error("Duplicate registered class");
-      if (kind == 1 && metadata.signature != "[Ljava/lang/Object;")
+      if (kind == ClassKind::reference_array && metadata.signature != "[Ljava/lang/Object;")
         throw std::runtime_error("Reference arrays must use Object[]");
-      if (kind == 2 && metadata.signature != "[J")
+      if (kind == ClassKind::data_array && metadata.signature != "[J")
         throw std::runtime_error("Data arrays must use long[]");
-      if (kind == 4 || kind == 5) {
+      if (kind == ClassKind::soft_reference || kind == ClassKind::weak_reference) {
         auto parent = env->GetSuperclass(type);
-        if (!parent || signature(parent) != (kind == 4 ? "Ljava/lang/ref/SoftReference;"
-                                                       : "Ljava/lang/ref/WeakReference;")) {
+        if (!parent || signature(parent) != (kind == ClassKind::soft_reference
+                                                 ? "Ljava/lang/ref/SoftReference;"
+                                                 : "Ljava/lang/ref/WeakReference;")) {
           env->DeleteLocalRef(parent);
           throw std::runtime_error(
               "Reference wrappers require direct SoftReference/WeakReference subclasses");
@@ -445,7 +455,7 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
         }
         env->PopLocalFrame(nullptr);
       }
-      if (kind == 0 || kind == 3) {
+      if (kind == ClassKind::object || kind == ClassKind::roots) {
         // This restriction makes GetClassFields order match heap callback field indices.
         // Supporting inheritance/interfaces requires resolving their JVMTI index contributions.
         auto parent = env->GetSuperclass(type);
@@ -497,7 +507,8 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_bindArrayIdentity0(
     check(jvmti->GetTag(type, &class_tag));
     env->DeleteLocalRef(type);
     auto metadata = type_for(class_tag);
-    if (!metadata || (metadata->kind != 1 && metadata->kind != 2))
+    if (!metadata ||
+        (metadata->kind != ClassKind::reference_array && metadata->kind != ClassKind::data_array))
       throw std::runtime_error("Array class is not registered");
     const char *characters = env->GetStringUTFChars(shape, nullptr);
     if (!characters)
@@ -554,9 +565,12 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_capture0(JNIEnv *env, jc
     auto error = jvmti->FollowReferences(0, nullptr, nullptr, &callbacks, &capture);
     capture.snapshot.starts_after = gc_starts.load();
     capture.snapshot.finishes_after = gc_finishes.load();
-    capture.snapshot.status = error != JVMTI_ERROR_NONE ? 2 : (capture.full ? 1 : 0);
+    capture.snapshot.status = error != JVMTI_ERROR_NONE ? CaptureStatus::jvmti_error
+                              : capture.full            ? CaptureStatus::record_limit
+                                                        : CaptureStatus::complete;
     capture.snapshot.error = error;
-    capture.snapshot.capabilities = capabilities | (compilation_overflow ? 8 : 0);
+    capture.snapshot.capabilities =
+        capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
     // Allocate metadata, encoded bytes, and the Java result only after callbacks have finished.
     capture.snapshot.classes = classes;
     capture.snapshot.arrays = arrays;
@@ -576,7 +590,7 @@ extern "C" JNIEXPORT jlong JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_capabilities0(JNIEnv *env, jclass) {
   return entry(env, [&]() -> jlong {
     require_agent();
-    return capabilities | (compilation_overflow ? 8 : 0);
+    return capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
   });
 }
 extern "C" JNIEXPORT jboolean JNICALL

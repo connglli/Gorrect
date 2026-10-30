@@ -18,6 +18,7 @@ public record ControlMessage(
     FAILED
   }
 
+  /** Writes and flushes one frame; ownership of the output stream remains with the caller. */
   public void write(DataOutputStream out) throws IOException {
     out.writeInt(MAGIC);
     out.writeInt(1);
@@ -30,6 +31,7 @@ public record ControlMessage(
     out.flush();
   }
 
+  /** Reads one frame and checks its version, run, and scalar bounds without closing the stream. */
   public static ControlMessage read(DataInputStream in, long expectedRun) throws IOException {
     if (in.readInt() != MAGIC || in.readInt() != 1)
       throw new IOException("Unsupported control frame");

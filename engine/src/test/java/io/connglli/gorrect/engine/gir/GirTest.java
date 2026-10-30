@@ -11,6 +11,8 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import java.util.regex.Pattern;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -45,7 +47,7 @@ class GirTest {
     assertEquals(program, GirParser.parse(formatted));
     assertTrue(formatted.contains("created: allocate a N;"));
     assertTrue(formatted.contains("    write-root r a;"));
-    assertTrue(!java.util.regex.Pattern.compile("(?m)^\\s*[0-9]+:").matcher(formatted).find());
+    assertTrue(!Pattern.compile("(?m)^\\s*[0-9]+:").matcher(formatted).find());
   }
 
   @Test
@@ -100,7 +102,7 @@ class GirTest {
   void documentationExampleExecutesAsDescribed() throws IOException {
     try (var input = getClass().getResourceAsStream("/docs/gir.md")) {
       String document =
-          new String(java.util.Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8)
+          new String(Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8)
               .replace("\r\n", "\n");
       String source = document.split("```text\\n", 2)[1].split("```", 2)[0];
       var result = Oracle.interpret(GirParser.parse(source));
@@ -130,7 +132,7 @@ class GirTest {
   void canonicalFormatPreservesTheEntireProgramAndOperationIds() throws IOException {
     try (var input = getClass().getResourceAsStream("/cases/core.gir")) {
       String source =
-          new String(java.util.Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8)
+          new String(Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8)
               .replace("\r\n", "\n");
       var program = GirParser.parse(source);
       assertEquals(program, GirParser.parse(GirFormatter.format(program)));

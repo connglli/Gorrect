@@ -13,10 +13,17 @@ public final class WorkloadGenerator {
 
   private WorkloadGenerator() {}
 
+  /** Generates the default two modeled visits using {@link #generate(long, String, int, int)}. */
   public static GirProgram generate(long seed, String workload, int workers) {
     return generate(seed, workload, workers, 2);
   }
 
+  /**
+   * Constructs and validates one deterministic case for this generator version and input tuple.
+   * Rounds are actual modeled parallel-block visits, including any warm-up; no extra calls are
+   * added at execution time. The accepted candidate is checked against default oracle bounds.
+   * Invalid settings or a rejected candidate throw without advancing another case's random state.
+   */
   public static GirProgram generate(long seed, String workload, int workers, int rounds) {
     validate(workload, workers, rounds);
     var random = new Random(seed);

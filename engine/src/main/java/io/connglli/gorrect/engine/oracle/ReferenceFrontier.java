@@ -45,6 +45,11 @@ final class ReferenceFrontier {
     states = new LinkedHashSet<>(source.states);
   }
 
+  /**
+   * Adds a new wrapper incarnation from model construction or an executed store. Strong values are
+   * ignored; non-strong values must carry a fresh wrapper ID. An initially null referent is cleared
+   * without pending queue delivery. Duplicate IDs are rejected before mutation.
+   */
   void register(Value.Reference value) {
     if (value.kind() == Value.ReferenceKind.STRONG) return;
     if (indices.containsKey(value.wrapper()))
@@ -63,11 +68,16 @@ final class ReferenceFrontier {
     }
   }
 
-  /** Includes arbitrary legal GC activity between observations, without requiring any clearing. */
+  /**
+   * Expands candidates with arbitrary legal GC clearing between observations, without requiring any
+   * clearing. Graph must include all live caller/worker handles so acquisition protection is
+   * preserved. Only frontier state changes; ordinary graph payload remains unchanged.
+   */
   void expand(Graph graph) {
     var strong = reach(graph, null, Set.of(), 0);
     var closure = new LinkedHashSet<>(states);
     var queue = new ArrayDeque<>(states);
+
     while (!queue.isEmpty()) {
       var state = queue.removeFirst();
       for (int index = 0; index < instances.size(); index++) {
@@ -76,9 +86,11 @@ final class ReferenceFrontier {
         if (state.cleared().get(index)
             || instance.target() == null
             || strong.contains(instance.target())) continue;
+
         var soft = reach(graph, state, Set.of(), 1);
         if (instance.kind() == Value.ReferenceKind.WEAK && soft.contains(instance.target()))
           continue;
+
         // A reference object may outlive its owner. Retaining that wrapper does not create a
         // strong referent root; it supplies only its own soft/weak edge for this transition.
         var eligible =
@@ -95,6 +107,7 @@ final class ReferenceFrontier {
                 instance.target(),
                 eligible,
                 instance.kind() == Value.ReferenceKind.WEAK);
+
         var cleared = copy(state.cleared());
         var pending = copy(state.pending());
         spend(instances.size());
@@ -107,6 +120,7 @@ final class ReferenceFrontier {
             pending.set(member);
           }
         }
+
         var next = new State(cleared, pending, state.delivered());
         if (closure.add(next)) {
           budget.states(closure.size());
@@ -114,26 +128,38 @@ final class ReferenceFrontier {
         }
       }
     }
+
     states = closure;
   }
 
+  /**
+   * Narrows candidates to those permitting this observed acquisition; returns whether any survive.
+   * The caller may make a non-null result a strong handle only after this succeeds. Unknown wrapper
+   * IDs are model errors; false leaves an empty frontier for this candidate path.
+   */
   boolean acquire(WrapperId id, ObjectId target) {
     int index = index(id);
     var instance = instances.get(index);
+
     states.removeIf(
         state ->
             target == null
                 ? !state.cleared().get(index)
                 : state.cleared().get(index) || !target.equals(instance.target()));
+
     return !states.isEmpty();
   }
 
+  /** Filters candidates by one clearing-state observation, returning whether any survive. */
   boolean observeCleared(WrapperId id, boolean cleared) {
     int index = index(id);
     states.removeIf(state -> state.cleared().get(index) != cleared);
     return !states.isEmpty();
   }
 
+  /**
+   * Marks the known wrapper cleared in every candidate without adding queue delivery eligibility.
+   */
   void programClear(WrapperId id) {
     int index = index(id);
     var next = new LinkedHashSet<State>();
@@ -145,6 +171,10 @@ final class ReferenceFrontier {
     states = next;
   }
 
+  /**
+   * Filters candidates by a queue result and consumes a non-null delivery. Null permits arbitrary
+   * delivery delay without narrowing; unknown, impossible, or duplicate deliveries return false.
+   */
   boolean poll(WrapperId id) {
     if (id == null) return true; // Queue delivery can lag clearing by an unbounded interval.
     Integer index = indices.get(id);
@@ -205,15 +235,22 @@ final class ReferenceFrontier {
     return Set.copyOf(result);
   }
 
+  /**
+   * Narrows candidates to those whose accessible model graph matches the observation. Returns no
+   * differences when at least one survives, otherwise diagnostics from an attempted comparison.
+   * Neither input graph is changed; unreachable retained objects are permitted by the verifier.
+   */
   List<String> match(Graph model, Graph observed) {
     var next = new LinkedHashSet<State>();
     List<String> problems = List.of("No legal clearing history matches the snapshot");
+
     for (var state : states) {
       spend();
       var result = ExactVerifier.verifyAccessible(view(model, state), observed, true);
       if (result.verdict() == ExactVerifier.Verdict.SATISFIED) next.add(state);
       else problems = result.differences();
     }
+
     states = next;
     return next.isEmpty() ? problems : List.of();
   }

@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.connglli.gorrect.engine.model.ObjectId;
 import org.junit.jupiter.api.Test;

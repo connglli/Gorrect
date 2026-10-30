@@ -19,6 +19,11 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
   /** OpenJ9 extended-frame kind: 0 interpreted, 1 compiled, 2 inlined. */
   public record Frame(String owner, String method, String descriptor, int kind) {}
 
+  /**
+   * Worker-supplied visit/phase/point labels paired with raw VM frames from that calling thread.
+   * Point and collection follow {@link ExecutionEvidence.Frame}; the host validates the labels
+   * against synchronization evidence before using the frame kinds to establish compilation.
+   */
   public record Witness(
       int worker,
       int group,
@@ -37,6 +42,7 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
     witnesses = List.copyOf(witnesses);
   }
 
+  /** Writes the raw version 1 envelope in witness order, replacing any existing file. */
   public void write(Path path) throws IOException {
     try (var out = new DataOutputStream(new BufferedOutputStream(Files.newOutputStream(path)))) {
       out.writeInt(MAGIC);
@@ -45,6 +51,7 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
       out.writeLong(pid);
       out.writeLong(vmStart);
       out.writeInt(witnesses.size());
+
       for (var witness : witnesses) {
         out.writeInt(witness.worker());
         out.writeInt(witness.group());
@@ -61,10 +68,14 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
           out.writeInt(frame.kind());
         }
       }
+
       out.writeLong(END);
     }
   }
 
+  /**
+   * Checks framing, bounds, frame kinds, and the expected VM/run; execution proof is a host check.
+   */
   public static StackEvidence read(Path path, long run, long pid, long vmStart) throws IOException {
     if (Files.size(path) > 64L * 1024 * 1024)
       throw new IOException("Stack evidence exceeds byte limit");
@@ -78,8 +89,10 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
           || in.readLong() != pid
           || in.readLong() != vmStart)
         throw new IOException("Stack evidence VM or run identity mismatch");
+
       var witnesses = new ArrayList<Witness>();
       int frameCount = 0;
+
       for (int count = count(in, MAX_WITNESSES); count > 0; count--) {
         int worker = in.readInt(), group = in.readInt();
         long round = in.readLong();
@@ -112,8 +125,10 @@ public record StackEvidence(long run, long pid, long vmStart, List<Witness> witn
         }
         witnesses.add(new Witness(worker, group, round, phase, point, collection, thread, frames));
       }
+
       if (in.readLong() != END || in.read() != -1)
         throw new IOException("Incomplete stack evidence");
+
       return new StackEvidence(run, pid, vmStart, witnesses);
     }
   }

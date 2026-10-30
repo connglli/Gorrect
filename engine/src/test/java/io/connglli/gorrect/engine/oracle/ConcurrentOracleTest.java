@@ -1,11 +1,14 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import java.util.ArrayList;
 import java.util.List;
 import org.junit.jupiter.api.Test;
 
@@ -80,7 +83,7 @@ class ConcurrentOracleTest {
             assertThrows(GirException.class, () -> Oracle.interpret(program));
           else {
             var result = Oracle.interpret(program);
-            var expected = new java.util.ArrayList<>(List.of(0L, 0L));
+            var expected = new ArrayList<>(List.of(0L, 0L));
             if (writeLeft) expected.set(left, 11L);
             if (writeRight) expected.set(right, 22L);
             assertEquals(expected, result.finalGraph().objects().get(ObjectId.initial(1)).data());

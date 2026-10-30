@@ -15,6 +15,7 @@ import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
@@ -23,7 +24,15 @@ import java.util.TreeMap;
 import java.util.concurrent.Phaser;
 import java.util.concurrent.atomic.AtomicReference;
 
-/** One target process's endpoint and bounded scalar recorder. It owns no workload references. */
+/**
+ * Main-thread endpoint for one generated case. Open it before graph construction, execute and join
+ * workers, capture the final checkpoint, then call {@link #complete} and close it. Generated
+ * failure paths call {@link #fail} before closing instead.
+ *
+ * <p>Control and persistence methods belong to the main thread. Worker observations go through
+ * their {@link WorkerContext}; only joined workers' buffers are serialized. Session bookkeeping
+ * retains no workload object references.
+ */
 public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final SocketChannel socket;
   private final DataInputStream in;
@@ -49,14 +58,18 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     int capacity = Integer.parseInt(args[5]);
     if (run <= 0 || capacity <= 0 || capacity > ExecutionTrace.MAX_EVENTS)
       throw new IllegalArgumentException("Invalid trace capacity or run token");
+
     referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
     recorders(capacity);
+
     socket = SocketChannel.open(UnixDomainSocketAddress.of(args[0]));
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
+
     try {
       System.load(args[3]);
       control = VmControl.open(directory, run);
+
       var properties = VmFacts.read();
       properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
@@ -64,9 +77,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       properties.setProperty("gc.control", control.collectionControl());
       properties.setProperty("gc.problem", control.gcProblem());
       properties.setProperty("gc.evidence", Boolean.toString(control.collectionEvidence()));
+
       try (var stream = Files.newOutputStream(directory.resolve("target.properties"))) {
         properties.store(stream, "Target identity");
       }
+
       send(ControlMessage.Kind.HELLO, 0, 0, "");
       acknowledge(0);
     } catch (Throwable failure) {
@@ -76,6 +91,13 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     }
   }
 
+  /**
+   * Loads the observer and VM bridge, writes startup facts, and waits for engine acknowledgement.
+   * Failure closes any opened endpoint and bridge. The caller owns the returned session.
+   *
+   * @param args socket path, positive run ID, bundle directory, observer library, capture-record
+   *     limit, and total trace capacity, in that order
+   */
   public static TargetSession open(String[] args) throws IOException {
     return new TargetSession(args);
   }
@@ -128,9 +150,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
         bounds.load(input);
       }
     else bounds.setProperty("0", Integer.toString(capacity));
+
     int remaining = capacity;
     var ids = bounds.stringPropertyNames().stream().map(Integer::parseInt).sorted().toList();
     if (!ids.contains(0)) throw new IOException("Recorder plan omits the main worker");
+
     // Counts only size storage; writeTrace emits actual appends, never unused or predicted records.
     for (int id : ids) {
       int requested = Integer.parseInt(bounds.getProperty(Integer.toString(id)));
@@ -142,29 +166,42 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     }
   }
 
+  /** A generated worker entry point, invoked once on its own thread for this group visit. */
   @FunctionalInterface
   public interface WorkerTask {
+    /** Executes with its private recorder; generated code must bracket the body with begin/end. */
     void run(WorkerContext worker) throws Exception;
   }
 
   /**
-   * Starts isolated worker frames, publishes construction through Thread.start, and joins peers.
+   * Prepares and runs one parallel-block visit, publishing prior construction through Thread.start
+   * and joining every worker before return. IDs and tasks are aligned arrays; owner declares each
+   * generated worker method used for compilation preparation.
+   *
+   * <p>Each task must record normal completion through its context. A worker failure cancels peer
+   * barriers; the session joins peers and rethrows the first observed failure. Main-thread
+   * interruption cancels and joins workers before propagating. Once execution starts, group/window
+   * evidence is retained for both successful and failed visits.
    */
   public void parallel(int operation, int[] ids, WorkerTask[] tasks, Class<?> owner)
       throws Exception {
     if (ids.length != tasks.length || ids.length == 0 || ids.length > 16)
       throw new IllegalArgumentException("Invalid worker group");
+
     long round = visits.merge(operation, 1L, Long::sum);
     Method[] methods = new Method[ids.length];
     for (int index = 0; index < ids.length; index++)
       methods[index] =
           owner.getDeclaredMethod(
               ExecutionEvidence.workerMethod(ids[index]), TargetSession.class, WorkerContext.class);
+
     var compilations = control.prepare(round, ids, methods);
+
     var phaser = new Phaser(ids.length);
     var failure = new AtomicReference<Throwable>();
     var contexts = new ArrayList<WorkerContext>();
     var threads = new ArrayList<Thread>();
+
     for (int index = 0; index < ids.length; index++) {
       int id = ids[index];
       var recorder = recorders.get(id);
@@ -186,6 +223,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
               },
               "gorrect-worker-" + id + "-" + round));
     }
+
     long gcBefore = NativeObserver.gcFinishes();
     boolean joined = false;
     try {
@@ -206,14 +244,16 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
           new ExecutionEvidence.Group(
               operation,
               round,
-              java.util.Arrays.stream(ids).boxed().toList(),
+              Arrays.stream(ids).boxed().toList(),
               joined,
               gcBefore,
               gcAfter,
               compilations));
       contexts.forEach(context -> windows.addAll(context.windows()));
     }
+
     if (failure.get() instanceof Exception error) throw error;
+
     if (failure.get() instanceof Error error) throw error;
   }
 
@@ -230,31 +270,48 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     if (interrupted) Thread.currentThread().interrupt();
   }
 
-  /** A collection control point receives no graph object arguments. */
+  /**
+   * Issues a main-thread collection request for a GIR operation. The session supplies its next
+   * one-based ordinal; policy and completion evidence belong to the VM bridge. No graph object is
+   * passed to the bridge.
+   */
   public void collect(int operation) {
     control.collect(operation, 0, 0, 0, 0, ++collections);
   }
 
-  /** Call at a named-root checkpoint; generated code must have no live GIR reference bindings. */
+  /**
+   * Captures named-root evidence, persists its bytes, and waits for engine acknowledgement before
+   * resuming mutations. Workers must be joined and GIR reference bindings released. Operation zero
+   * denotes the final capture; other operations retain a per-site visit number.
+   */
   public void checkpoint(int operation) throws IOException {
     long occurrence = visits.merge(operation, 1L, Long::sum);
     checkpoint++;
+
     byte[] bytes = NativeObserver.capture(run, checkpoint, records);
     Files.write(directory.resolve("snapshots").resolve(checkpoint + ".gsnap"), bytes);
+
     send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
+
     acknowledge(checkpoint);
   }
 
+  /** Persists complete traces and VM witnesses, then reports success after the final checkpoint. */
   public void complete() throws IOException {
     writeTrace(true);
     control.finish();
+
     send(ControlMessage.Kind.COMPLETE, 0, 0, "");
     complete = true;
   }
 
+  /**
+   * Persists incomplete traces and available VM witnesses, then reports a bounded failure message.
+   */
   public void fail(Throwable failure) throws IOException {
     writeTrace(false);
     control.finish();
+
     // Bound failure text to the modified-UTF length used by control frames.
     String detail = failure.getClass().getName() + ": " + failure.getMessage();
     send(ControlMessage.Kind.FAILED, 0, 0, detail.substring(0, Math.min(detail.length(), 4000)));
@@ -264,12 +321,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     var events = new ArrayList<ExecutionTrace.Event>();
     recorders.values().forEach(recorder -> recorder.appendTo(events));
     new ExecutionTrace(run, finished, events).write(directory.resolve("traces/execution.gtrace"));
+
     if (referenceRecording) {
       var references = new ArrayList<ReferenceHistory.Event>();
       recorders.values().forEach(recorder -> recorder.appendReferences(references));
       new ReferenceHistory(run, finished, references)
           .write(directory.resolve("traces/references.ghistory"));
     }
+
     new ExecutionEvidence(run, finished, groups, windows)
         .write(directory.resolve("traces/workers.gevidence"));
   }
@@ -285,6 +344,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       throw new IOException("Unexpected engine acknowledgement");
   }
 
+  /**
+   * Releases the endpoint and bridge, retaining an incomplete trace if completion was not reported.
+   */
   @Override
   public void close() throws IOException {
     try {

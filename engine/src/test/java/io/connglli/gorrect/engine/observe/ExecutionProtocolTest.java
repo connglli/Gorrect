@@ -1,6 +1,9 @@
 package io.connglli.gorrect.engine.observe;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertArrayEquals;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
@@ -10,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.DataInputStream;
 import java.io.DataOutputStream;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.Arrays;
@@ -119,7 +123,7 @@ class ExecutionProtocolTest {
     Files.write(file, bytes);
     assertThrows(IOException.class, () -> ExecutionTrace.read(file, 99));
     byte[] unsupported = bytes.clone();
-    java.nio.ByteBuffer.wrap(unsupported).putInt(4, 2);
+    ByteBuffer.wrap(unsupported).putInt(4, 2);
     Files.write(file, unsupported);
     assertThrows(IOException.class, () -> ExecutionTrace.read(file, 42));
     Files.write(file, Arrays.copyOf(bytes, bytes.length + 1));

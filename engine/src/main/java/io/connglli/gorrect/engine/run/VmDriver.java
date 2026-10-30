@@ -6,39 +6,57 @@ import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
 import java.util.Set;
 
-/** Dispatches VM mechanics while keeping capability checks and the oracle shared. */
+/**
+ * Host integration boundary for launch policy and VM evidence. Drivers interpret only the selected
+ * VM's facts and recordings; graph expectations remain in the portable oracle. Preflight capability
+ * checks establish availability, while verifiers establish what happened during this run.
+ */
 final class VmDriver {
   private VmDriver() {}
 
+  /**
+   * Returns the command prefix through VM options and agent setup, including the executable. The
+   * runner appends classpath, generated main class, and control arguments. Directory is the run
+   * bundle; observer names the bundled native library. Collector mode must already be resolved.
+   */
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
     return profile.vm().equals("hotspot")
         ? HotSpotDriver.launchArguments(profile, directory, observer)
         : OpenJ9Driver.launchArguments(profile, directory, observer);
   }
 
+  /**
+   * Selects the requested family/mode using target facts, never the engine JDK's flag inventory.
+   */
   static List<String> collectorArguments(TargetProfile profile, Properties facts) {
     return profile.vm().equals("hotspot")
         ? HotSpotDriver.collectorArguments(profile, facts)
         : List.of("-Xgcpolicy:" + profile.collector());
   }
 
+  /**
+   * Confirms the collector family from target policy/options and beans; mode is checked separately.
+   */
   static boolean selected(TargetProfile profile, Properties facts) {
     return profile.vm().equals("hotspot")
         ? HotSpotDriver.selected(profile.collector(), facts)
         : OpenJ9Driver.selected(profile.collector(), facts);
   }
 
+  /** Resolves the actual mode from target facts, rejecting unrecognized HotSpot modes. */
   static String mode(TargetProfile profile, Properties facts) {
     return profile.vm().equals("hotspot")
         ? HotSpotDriver.mode(profile.collector(), facts)
         : "default";
   }
 
+  /** Checks VM-family identity only; it makes no collector or capability claim. */
   static boolean matches(TargetProfile profile, Properties facts) {
     String name = facts.getProperty("java.vm.name", "");
     return profile.vm().equals("openj9")
@@ -46,29 +64,40 @@ final class VmDriver {
         : (name.contains("HotSpot") || name.contains("OpenJDK")) && !name.contains("OpenJ9");
   }
 
+  /**
+   * Decodes raw worker witnesses for this run, retaining false compiled flags for missing or
+   * interpreted methods. Missing files and malformed recordings raise IOException. The stress
+   * verifier separately matches each witness to its worker window and GIR request.
+   */
   static Set<ExecutionEvidence.Frame> compiledFrames(
       TargetProfile profile, Path directory, long run) throws IOException {
     if (profile.vm().equals("hotspot"))
       return HotSpotDriver.compiledFrames(directory.resolve("traces/workers.jfr"), run);
-    var target = new Properties();
-    try (var input = java.nio.file.Files.newInputStream(directory.resolve("target.properties"))) {
-      target.load(input);
-    }
-    return OpenJ9Driver.compiledFrames(directory.resolve("traces/workers.gstacks"), run, target);
+    return OpenJ9Driver.compiledFrames(
+        directory.resolve("traces/workers.gstacks"), run, Artifacts.target(directory));
   }
 
+  /**
+   * Returns a mutable list of preflight gaps from the actual target report, including identity,
+   * control policy, and requested capabilities. Empty means the run can be attempted; it does not
+   * satisfy execution-dependent stress requirements. Malformed required facts raise runtime errors.
+   */
   static List<String> requirements(TargetProfile profile, Properties target) {
     var unmet = new ArrayList<String>();
     if (Integer.parseInt(target.getProperty("java.feature")) < 17)
       unmet.add("Target JDK is older than 17");
+
     if (profile.vm().equals("hotspot")) HotSpotDriver.identity(profile, target, unmet);
     else OpenJ9Driver.identity(profile, target, unmet);
+
     if (!target.getProperty("gc.control", "").equals(profile.gc().control())
         || !target.getProperty("gc.problem", "").isEmpty())
       unmet.add(
           "GC control unavailable: " + target.getProperty("gc.problem", "missing control report"));
+
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
     if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
+
     for (String requirement : profile.requirements()) {
       boolean available =
           switch (requirement) {
@@ -88,9 +117,13 @@ final class VmDriver {
           };
       if (!available && !unmet.contains(requirement)) unmet.add(requirement);
     }
+
     return unmet;
   }
 
+  /**
+   * Checks only VM-specific requested/installed level ranges; diagnostics and frames need checking.
+   */
   static boolean installed(TargetProfile profile, ExecutionEvidence.Compilation compilation) {
     return profile.jit() != null
         && compilation.requested() == profile.jit().level()
@@ -98,8 +131,9 @@ final class VmDriver {
         && compilation.installed() <= (profile.vm().equals("hotspot") ? 4 : 1);
   }
 
+  /** Maps provenance keys to installation files; absent optional paths are retained for hashing. */
   static Map<String, Path> installations(TargetProfile profile, Path home) throws IOException {
-    var paths = new java.util.LinkedHashMap<String, Path>();
+    var paths = new LinkedHashMap<String, Path>();
     for (String name :
         List.of("release", "lib/server/libjvm.so", "lib/server/libjvm.dylib", "bin/server/jvm.dll"))
       paths.put("target/" + name, home.resolve(name));

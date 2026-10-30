@@ -20,7 +20,7 @@ The Java 21 engine derives expectations from GIR and launches a separate JDK 17+
 +----------------------------------------+                  +----------------------------------------------+
 ```
 
-The protocol is a shared library and file format. The runner manages the target process and its control connection.
+The protocol is a shared library and file format. `RunEngine` coordinates preparation; `RunCompiler`, `TargetRunner`, and `RunVerifier` own compilation, target process/control, and offline verification. Artifact decoding and provenance belong to `Artifacts`.
 
 ## Languages and build units
 
@@ -39,7 +39,7 @@ Engine and runtime depend on protocol; runtime has no engine or oracle dependenc
 
 ### GIR frontend and model
 
-The frontend parses, formats, and statically validates [GIR](./gir.md). Its immutable syntax describes declarations, bindings, and structured control flow. A case-local host model stores logical objects, roots, and handles; heap writes replace immutable records so retained checkpoints remain unchanged. Execution checks dynamic preconditions such as null owners and target shapes.
+The frontend parses, formats, and statically validates [GIR](./gir.md). Its immutable syntax describes declarations, bindings, and structured control flow. Shared structural traversal visits every instruction once in declaration order; execution and history search retain their own control flow. A case-local host model stores logical objects, roots, and handles; heap writes replace immutable records so retained checkpoints remain unchanged. Execution checks dynamic preconditions such as null owners and target shapes.
 
 ### Oracle and verifier
 
@@ -107,4 +107,4 @@ The manifest records input/resolved profiles, seeds, compiler/target identities,
 
 ## Checks
 
-Java tests cover the frontend, model, oracle, emission, and codecs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, native capture, offline verification, and replay. Set `GORRECT_OPENJ9_JAVA` to a target executable to include `:engine:openj9Integration` in `check`. Independent exhaustive models check histories; corrupted evidence, executing/interpreted stack fixtures, and injected process failures test proof boundaries and diagnostics.
+Gradle `check` includes strict Javadoc and Java tests for the frontend, model, oracle, emission, and codecs. JUnit tags select unit, observer, HotSpot, and configured OpenJ9 suites. Target suites run fresh because external JVM builds can change independently of Gradle inputs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, capture, offline verification, and replay. Set `GORRECT_OPENJ9_JAVA` to include `:engine:openj9Integration`. Independent exhaustive models check histories; damaged evidence, actual/interpreted frames, and injected failures test proof boundaries and diagnostics.

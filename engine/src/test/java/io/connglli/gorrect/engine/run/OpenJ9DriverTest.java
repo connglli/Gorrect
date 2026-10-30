@@ -1,12 +1,17 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.StackEvidence;
 import java.io.IOException;
+import java.nio.ByteBuffer;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.Arrays;
 import java.util.List;
 import java.util.Properties;
 import org.junit.jupiter.api.Test;
@@ -74,10 +79,10 @@ class OpenJ9DriverTest {
     assertThrows(IOException.class, () -> StackEvidence.read(path, 1, 42, 1000));
     new StackEvidence(1, 42, 1000, List.of()).write(path);
     var bytes = Files.readAllBytes(path);
-    Files.write(path, java.util.Arrays.copyOf(bytes, bytes.length - 1));
+    Files.write(path, Arrays.copyOf(bytes, bytes.length - 1));
     assertThrows(IOException.class, () -> StackEvidence.read(path, 1, 42, 1000));
     var badCount = bytes.clone();
-    java.nio.ByteBuffer.wrap(badCount).putInt(32, Integer.MAX_VALUE);
+    ByteBuffer.wrap(badCount).putInt(32, Integer.MAX_VALUE);
     Files.write(path, badCount);
     assertThrows(IOException.class, () -> StackEvidence.read(path, 1, 42, 1000));
   }

@@ -19,18 +19,29 @@ import java.util.Set;
 
 /** Projects raw evidence without reconstructing values from the oracle. */
 public final class SnapshotProjector {
-  private static final long FIELD = 2, ARRAY_ELEMENT = 3, STATIC_FIELD = 8;
+  private static final long CLASS = 1,
+      FIELD = 2,
+      ARRAY_ELEMENT = 3,
+      STATIC_FIELD = 8,
+      JNI_GLOBAL = 21;
   private static final long INT = 73, LONG = 74;
 
   /**
-   * The prototype covers named static roots. Raw stack roots are retained but are not yet mapped to
-   * GIR binding IDs, so verification requiring local handles must remain inconclusive.
+   * Capture projection and its coverage diagnostics. Empty graph means unusable coverage rather
+   * than an observed empty heap. The prototype maps named static roots; raw stack origins are
+   * retained but not mapped to GIR binding IDs.
    */
   public record Projection(Optional<Graph> graph, List<String> problems) {
     public Projection {
       problems = List.copyOf(problems);
     }
 
+    /**
+     * Compares deterministic strong-reference named-root obligations when a usable graph is
+     * present. Missing projection or live expected GIR handles yields INCONCLUSIVE; neither case is
+     * treated as a missing-object mismatch. Invalid expected strong graphs raise
+     * IllegalArgumentException.
+     */
     public ExactVerifier.Result verify(Graph expected) {
       if (graph.isEmpty())
         return new ExactVerifier.Result(ExactVerifier.Verdict.INCONCLUSIVE, problems);
@@ -88,6 +99,15 @@ public final class SnapshotProjector {
     }
 
     Graph decode() {
+      resolveLayouts();
+      indexRecords();
+      resolveObjects();
+      resolveWrappers();
+      validateFieldRecords();
+      return buildGraph();
+    }
+
+    private void resolveLayouts() {
       require(
           snapshot.status() == HeapSnapshot.Status.COMPLETE && snapshot.jvmtiError() == 0,
           "Heap capture is incomplete: " + snapshot.status());
@@ -98,6 +118,7 @@ public final class SnapshotProjector {
           layout.references().isEmpty()
               || (snapshot.capabilities() & HeapSnapshot.REFERENCE_FIELDS) != 0,
           "Non-strengthening reference-field capture is unavailable");
+
       // Resolve logical field roles against actual VM metadata, never declaration-order guesses.
       for (var type : snapshot.classes()) {
         require(
@@ -110,6 +131,7 @@ public final class SnapshotProjector {
               field.index() >= 0 && indices.add(field.index()) && names.add(field.name()),
               "Duplicate or invalid field metadata");
       }
+
       for (var object : layout.objects()) {
         var type = type(object.signature());
         require(
@@ -134,17 +156,22 @@ public final class SnapshotProjector {
                 == null,
             "Duplicate object layout");
       }
+
       for (var shape : layout.arrays()) {
         require(
             shape.kind() != Shape.Kind.OBJECT && arrays.putIfAbsent(shape.name(), shape) == null,
             "Duplicate or invalid array layout");
       }
+
       for (var identity : snapshot.arrays()) {
         require(
             identity.tag() > 0 && arrayIds.putIfAbsent(identity.tag(), identity) == null,
             "Duplicate array tag");
         objectId(identity.worker(), identity.site(), identity.occurrence());
       }
+    }
+
+    private void indexRecords() {
       for (var record : snapshot.records()) {
         switch (record.kind()) {
           case OBJECT ->
@@ -166,10 +193,15 @@ public final class SnapshotProjector {
           }
         }
       }
+
       require(
           snapshot.records().stream()
-              .noneMatch(record -> record.kind() == HeapSnapshot.Kind.ROOT && record.b() == 21),
+              .noneMatch(
+                  record -> record.kind() == HeapSnapshot.Kind.ROOT && record.b() == JNI_GLOBAL),
           "Unexpected JNI global root to a workload object");
+    }
+
+    private void resolveObjects() {
       // Resolve all physical tags before linking edges, preserving cycles and shared targets.
       var used = new HashSet<ObjectId>();
       for (var entry : objects.entrySet()) {
@@ -208,6 +240,9 @@ public final class SnapshotProjector {
         require(used.add(id), "Duplicate logical object identity " + id);
         identities.put(tag, id);
       }
+    }
+
+    private void resolveWrappers() {
       for (var layout : layout.references()) {
         var type = type(layout.signature());
         require(
@@ -244,7 +279,9 @@ public final class SnapshotProjector {
           wrappers.values().stream().map(Value.Reference::wrapper).distinct().count()
               == wrappers.size(),
           "Duplicate wrapper incarnation");
-      validateFieldRecords();
+    }
+
+    private Graph buildGraph() {
       var heap = new HashMap<ObjectId, HeapObject>();
       for (var entry : objects.entrySet()) {
         long tag = entry.getKey();
@@ -287,12 +324,14 @@ public final class SnapshotProjector {
         }
         heap.put(identities.get(tag), new HeapObject(shape, refs, data));
       }
+
       // An unvisited holder cannot establish null roots merely by lacking reference records.
       var rootType = type(layout.roots().signature());
       require(
           rootType.kind() == HeapSnapshot.ClassKind.ROOTS
               && visitedClasses.contains((long) rootType.id()),
           "Named-root class was not visited");
+
       var roots = new HashMap<String, Value.Reference>();
       for (var field : rootType.fields()) {
         require(Modifier.isStatic(field.modifiers()), "Root holder has instance fields");
@@ -304,7 +343,9 @@ public final class SnapshotProjector {
           roots.put(name, reference(-rootType.id(), field.index(), STATIC_FIELD));
         }
       }
+
       require(roots.size() == layout.roots().fields().size(), "Declared root field is missing");
+
       return new Graph(heap, roots, Map.of());
     }
 
@@ -327,7 +368,7 @@ public final class SnapshotProjector {
         if (type == null) continue;
         long index = record.kind() == HeapSnapshot.Kind.REFERENCE ? record.d() : record.b();
         if (record.kind() == HeapSnapshot.Kind.REFERENCE && owner > 0) {
-          if (record.c() == 1) {
+          if (record.c() == CLASS) {
             require(record.b() == -type.id(), "Object-to-class reference mismatch");
             continue;
           }

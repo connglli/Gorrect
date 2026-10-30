@@ -1,6 +1,7 @@
 package io.connglli.gorrect.runtime;
 
 import com.sun.management.HotSpotDiagnosticMXBean;
+import java.io.IOException;
 import java.lang.management.ManagementFactory;
 import java.util.Properties;
 
@@ -39,7 +40,7 @@ public final class HotSpotFacts {
     return properties;
   }
 
-  public static void main(String[] args) throws java.io.IOException {
+  public static void main(String[] args) throws IOException {
     read().store(System.out, "HotSpot facts");
   }
 }

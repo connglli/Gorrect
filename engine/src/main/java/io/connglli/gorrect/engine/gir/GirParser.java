@@ -8,6 +8,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 
 /** Parses GIR into immutable, statically validated syntax trees. */
 public final class GirParser {
@@ -285,7 +286,7 @@ public final class GirParser {
     private int column = 1;
 
     private Lexer(String source) {
-      this.source = java.util.Objects.requireNonNull(source);
+      this.source = Objects.requireNonNull(source);
     }
 
     private Token next() {

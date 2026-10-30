@@ -1,6 +1,9 @@
 package io.connglli.gorrect.engine.fuzz;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.gir.GirFormatter;
 import io.connglli.gorrect.engine.gir.GirParser;

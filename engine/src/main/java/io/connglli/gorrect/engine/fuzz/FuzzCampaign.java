@@ -12,8 +12,10 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.time.Duration;
 import java.util.ArrayList;
+import java.util.List;
 import java.util.Map;
 import java.util.Random;
+import java.util.regex.Pattern;
 
 /** A bounded single-job campaign. Each retained case uses the ordinary run and replay format. */
 public final class FuzzCampaign {
@@ -27,10 +29,19 @@ public final class FuzzCampaign {
       int workers,
       long durationMillis,
       String stopped,
-      java.util.List<Case> cases) {}
+      List<Case> cases) {}
 
   private FuzzCampaign() {}
 
+  /**
+   * Freezes a profile and runs seeded cases serially into a fresh campaign directory. Every attempt
+   * retains its seed and run bundle; the summary is updated after each attempt. Duration bounds
+   * compiler/target waits without interrupting model preparation or artifact retention.
+   *
+   * <p>Returns the combined CLI status, preserving confirmed violations and separating campaign
+   * expiry from target timeout. Success requires a completed passing case. Invalid parameters or
+   * I/O failures propagate. Output is a caller-owned progress stream and is not closed.
+   */
   public static int run(
       Path profileFile,
       Path output,
@@ -75,7 +86,7 @@ public final class FuzzCampaign {
             workers,
             duration.toMillis(),
             "running",
-            java.util.List.of()));
+            List.of()));
     while (cases.isEmpty() || System.nanoTime() < deadline) {
       if (Thread.currentThread().isInterrupted()) {
         stopped = "interrupted";
@@ -134,7 +145,7 @@ public final class FuzzCampaign {
               workers,
               duration.toMillis(),
               "running",
-              java.util.List.copyOf(cases)));
+              List.copyOf(cases)));
       if (!durationLimit) status = RunReport.combineExitStatus(status, result.exitStatus());
       if (result.execution() == RunReport.Outcome.UNSUPPORTED
           || result.execution() == RunReport.Outcome.INVALID_WORKLOAD
@@ -163,7 +174,7 @@ public final class FuzzCampaign {
             workers,
             duration.toMillis(),
             stopped,
-            java.util.List.copyOf(cases)));
+            List.copyOf(cases)));
     out.println("Campaign " + stopped + "; " + cases.size() + " case(s); artifacts: " + output);
     if (status == 0
         && cases.stream()
@@ -172,8 +183,9 @@ public final class FuzzCampaign {
     return status;
   }
 
+  /** Parses a positive integer duration with s/m/h suffix, bounded to one day. */
   public static Duration duration(String value) {
-    var match = java.util.regex.Pattern.compile("([0-9]+)(ms|s|m|h)").matcher(value);
+    var match = Pattern.compile("([0-9]+)(ms|s|m|h)").matcher(value);
     if (!match.matches())
       throw new IllegalArgumentException("Duration needs a unit: ms, s, m, or h");
     long amount = Long.parseLong(match.group(1));

@@ -19,6 +19,8 @@ import java.nio.charset.StandardCharsets;
 import java.time.Duration;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
+import org.junit.jupiter.api.Assertions;
 import org.junit.jupiter.api.Test;
 
 class OracleTest {
@@ -34,9 +36,7 @@ class OracleTest {
   void checksAliasesCyclesRetargetingPayloadAndSnapshotImmutability() throws IOException {
     String source;
     try (var input = getClass().getResourceAsStream("/cases/core.gir")) {
-      source =
-          new String(
-              java.util.Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8);
+      source = new String(Objects.requireNonNull(input).readAllBytes(), StandardCharsets.UTF_8);
     }
     var result = Oracle.interpret(GirParser.parse(source));
     var node = new Shape("Node", Shape.Kind.OBJECT, 2, 1);
@@ -290,7 +290,7 @@ class OracleTest {
 
   @Test
   void budgetsBoundEmptyLoopsInitialGraphsAndFinalSnapshots() {
-    org.junit.jupiter.api.Assertions.assertTimeoutPreemptively(
+    Assertions.assertTimeoutPreemptively(
         Duration.ofSeconds(2),
         () -> {
           var program = GirParser.parse("gir 1; program { repeat 9223372036854775807 {} }");

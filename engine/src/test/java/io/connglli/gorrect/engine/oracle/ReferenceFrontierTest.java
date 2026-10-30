@@ -1,9 +1,22 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.connglli.gorrect.engine.model.*;
-import java.util.*;
+import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.ObjectId;
+import io.connglli.gorrect.engine.model.Shape;
+import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.model.WrapperId;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 
 class ReferenceFrontierTest {

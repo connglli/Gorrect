@@ -8,6 +8,7 @@ import java.nio.channels.Channels;
 import java.nio.channels.SocketChannel;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Properties;
 
@@ -17,7 +18,7 @@ public final class FailureTarget {
 
   public static void main(String[] args) throws Exception {
     if (Arrays.asList(args).contains("io.connglli.gorrect.runtime.VmFacts")) {
-      var command = new java.util.ArrayList<String>();
+      var command = new ArrayList<String>();
       command.add(Path.of(System.getProperty("java.home"), "bin", "java").toString());
       command.addAll(Arrays.asList(args).subList(1, args.length));
       System.exit(new ProcessBuilder(command).inheritIO().start().waitFor());

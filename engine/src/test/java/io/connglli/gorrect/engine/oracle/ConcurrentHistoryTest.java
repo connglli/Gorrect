@@ -1,11 +1,17 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertDoesNotThrow;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 
 import io.connglli.gorrect.engine.gir.GirParser;
+import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class ConcurrentHistoryTest {
@@ -30,11 +36,7 @@ class ConcurrentHistoryTest {
         GirParser.parse(
             "gir 1; shape N object 0 0; root r = null; program { read-volatile-root n N r; release"
                 + " n; checkpoint; }");
-    var graph =
-        new io.connglli.gorrect.engine.model.Graph(
-            java.util.Map.of(),
-            java.util.Map.of("r", io.connglli.gorrect.engine.model.Value.Reference.NULL),
-            java.util.Map.of());
+    var graph = new Graph(Map.of(), Map.of("r", Value.Reference.NULL), Map.of());
     var history =
         new ReferenceHistory(
             1,
@@ -43,8 +45,8 @@ class ConcurrentHistoryTest {
                 new ReferenceHistory.Event(1, ReferenceHistory.Kind.STRONG_READ, 0, null, null)));
     var observations =
         List.of(
-            new HistoryOracle.Observation(java.util.Optional.of(graph), List.of()),
-            new HistoryOracle.Observation(java.util.Optional.of(graph), List.of()));
+            new HistoryOracle.Observation(Optional.of(graph), List.of()),
+            new HistoryOracle.Observation(Optional.of(graph), List.of()));
     for (int presence = 0; presence <= 1; presence++) {
       var trace =
           new ExecutionTrace(

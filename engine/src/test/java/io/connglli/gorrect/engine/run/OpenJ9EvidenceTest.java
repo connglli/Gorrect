@@ -1,23 +1,29 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
-import io.connglli.gorrect.engine.config.JsonFiles;
+import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.oracle.Oracle;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
+import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 import javax.tools.ToolProvider;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 
 /** Real VM frames must override synthetic installation claims, including overloaded methods. */
+@Tag("openj9")
 class OpenJ9EvidenceTest {
   @TempDir Path directory;
 
@@ -28,9 +34,7 @@ class OpenJ9EvidenceTest {
     Path source = directory.resolve("Case.java");
     Files.writeString(source, SOURCE);
     String classpath =
-        support.resolve("runtime.jar")
-            + java.io.File.pathSeparator
-            + support.resolve("protocol.jar");
+        support.resolve("runtime.jar") + File.pathSeparator + support.resolve("protocol.jar");
     assertEquals(
         0,
         ToolProvider.getSystemJavaCompiler()
@@ -45,17 +49,17 @@ class OpenJ9EvidenceTest {
                 "-d",
                 classes.toString(),
                 source.toString()));
-    var profileJson = new com.google.gson.JsonObject();
+    var profileJson = new JsonObject();
     profileJson.addProperty("version", 1);
     profileJson.addProperty("vm", "openj9");
     profileJson.addProperty("java", "unused-java");
     profileJson.addProperty("collector", "gencon");
     profileJson.addProperty("observation", "named-roots-diagnostic");
-    var libraries = new com.google.gson.JsonObject();
+    var libraries = new JsonObject();
     for (String name : List.of("runtime", "protocol", "observer"))
       libraries.addProperty(name, "unused");
     profileJson.add("support", libraries);
-    profileJson.add("jit", new com.google.gson.JsonObject());
+    profileJson.add("jit", new JsonObject());
     var profile = TargetProfile.parse(profileJson, directory);
     for (String mode : List.of("compiled", "interpreted", "other", "descriptor")) {
       Path run = Files.createDirectory(directory.resolve(mode));
@@ -73,7 +77,7 @@ class OpenJ9EvidenceTest {
           List.of(
               "-agentpath:" + support.resolve("libgorrect_observer.so"),
               "-cp",
-              classes + java.io.File.pathSeparator + classpath,
+              classes + File.pathSeparator + classpath,
               "Case",
               run.toString(),
               mode,
@@ -82,13 +86,13 @@ class OpenJ9EvidenceTest {
           new ProcessBuilder(command)
               .redirectOutput(run.resolve("stdout.log").toFile())
               .redirectError(run.resolve("stderr.log").toFile());
-      RunEngine.cleanEnvironment(builder, java.util.Map.of());
+      ProcessSupport.cleanEnvironment(builder, Map.of());
       var process = builder.start();
       try {
         assertTrue(process.waitFor(45, TimeUnit.SECONDS), "OpenJ9 stack fixture deadline exceeded");
         assertEquals(0, process.exitValue(), Files.readString(run.resolve("stderr.log")));
       } finally {
-        RunEngine.terminate(process);
+        ProcessSupport.terminate(process);
       }
       var target = new Properties();
       try (var in = Files.newInputStream(run.resolve("target.properties"))) {
@@ -138,12 +142,15 @@ class OpenJ9EvidenceTest {
   }
 
   private static final String SOURCE =
-      """
+"""
       import io.connglli.gorrect.runtime.*;
       import io.connglli.gorrect.runtime.observe.NativeObserver;
       import io.connglli.gorrect.protocol.StackEvidence;
       import java.nio.file.*;
-      import java.util.*;
+      import java.util.ArrayList;
+import java.util.List;
+import java.util.Map;
+import java.util.Objects;
       public class Case {
         static List<StackEvidence.Witness> witnesses = new ArrayList<>();
         static int round, point;
@@ -170,5 +177,5 @@ class OpenJ9EvidenceTest {
               .write(directory.resolve("traces/workers.gstacks"));
         }
       }
-      """;
+""";
 }

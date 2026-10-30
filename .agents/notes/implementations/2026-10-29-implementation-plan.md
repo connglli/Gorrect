@@ -100,13 +100,9 @@ The normal build passes 266 Java tests, native JDK 17/21 checks, and strict Java
 
 ## 10. Refactor code and documentation quality
 
-Goal: refactor the whole project using practices from exemplary Java open-source projects.
+Status: complete. [Stage 10 notes](./completed-2026-10-30-stage10.md) record the selected Google/JUnit/OpenJDK conventions and component audit. Execution phases and snapshot-projection passes have focused responsibilities; structural GIR queries are shared independently of execution. Typed runtime controls, explicit native wire types, buffered codecs, clearer contracts/imports, tagged test suites, and normal-build Javadoc checks improve maintainability. Cohesive search algorithms and format-specific decoders remain explicit.
 
-Review mature projects' contribution guides and representative code, then select references and record the applicable conventions. Audit all modules, tests, and build support for code smells: duplication, oversized classes or methods, unclear naming, awkward APIs, and exception or resource-handling problems. Refactor in small, behavior-preserving steps.
-
-Rewrite Javadoc to specify contracts and comments to explain necessary reasoning, following the [documentation standard](../../../docs/AGENTS.md). Add focused automated checks where they prevent recurring problems.
-
-Complete when the conventions are applied consistently, identified smells are resolved or justified, and formatting, warning checks, tests, and supported-target regressions pass. Preserve GIR semantics, observation guarantees, CLI behavior, and reproducible artifacts.
+The normal build passes 275 Java tests and native/Javadoc checks, preserving all original cases and adding nine regressions. Eleven emission baselines preserve Java bytes and layout values; selected HotSpot C1/C2, OpenJ9 contended execution, old-bundle offline verification, and exact-class replay pass. Malformed fuzz profiles report input errors before creating a campaign. Target suites run fresh against external VM builds. The OpenJ9 matrix retains its known Metronome assertion (15/16 passing), without a driver workaround. Formats remain version 1; the local bug archive stays untracked.
 
 ## 11. Expand stress generation and campaign execution
 

@@ -1,8 +1,13 @@
 package io.connglli.gorrect.engine.cli;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonParser;
+import io.connglli.gorrect.engine.config.JsonFiles;
 import java.io.ByteArrayOutputStream;
+import java.io.IOException;
 import java.io.PrintStream;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
@@ -14,6 +19,36 @@ import org.junit.jupiter.params.provider.ValueSource;
 
 class CliTest {
   @TempDir Path directory;
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "\"vmArgs\":true",
+        "\"support\":true",
+        "\"environment\":[]",
+        "\"limits\":true",
+        "\"jit\":true",
+        "\"gc\":[]",
+        "\"requirements\":{}"
+      })
+  void malformedFuzzProfilesAreInputErrorsBeforeAnyRunIsCreated(String field) throws IOException {
+    Path profile = directory.resolve("profile.json"), output = directory.resolve("campaign");
+    Files.writeString(
+        profile,
+        """
+        {"version":1,"vm":"hotspot","java":"unused-java","collector":"serial",
+         "observation":"named-roots-diagnostic",
+         "support":{"runtime":"unused","protocol":"unused","observer":"unused"}}
+        """);
+    var raw = JsonFiles.read(profile);
+    var replacement = JsonParser.parseString("{" + field + "}").getAsJsonObject();
+    replacement.entrySet().forEach(entry -> raw.add(entry.getKey(), entry.getValue()));
+    JsonFiles.write(profile, raw);
+    var result = invoke("fuzz", "--profile", profile.toString(), "--out", output.toString());
+    assertEquals(2, result.status());
+    assertTrue(result.error().contains("Expected JSON"));
+    assertFalse(Files.exists(output));
+  }
 
   @ParameterizedTest
   @ValueSource(strings = {"probe", "run", "verify", "replay", "fuzz"})

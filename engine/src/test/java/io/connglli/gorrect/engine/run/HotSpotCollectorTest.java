@@ -1,6 +1,8 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
@@ -9,19 +11,23 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Properties;
+import java.util.jar.JarOutputStream;
 import java.util.stream.Stream;
 import org.junit.jupiter.api.Assumptions;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
 import org.junit.jupiter.params.provider.MethodSource;
 
+@Tag("hotspot")
 class HotSpotCollectorTest {
   @Test
   void unavailableWhiteBoxControlDoesNotFallBackToSystemGc() throws IOException {
     Path selected = profile(21, "serial", "default"), empty = directory.resolve("client.jar");
-    try (var jar = new java.util.jar.JarOutputStream(Files.newOutputStream(empty))) {
+    try (var jar = new JarOutputStream(Files.newOutputStream(empty))) {
       jar.flush();
     }
     var raw = JsonFiles.read(selected);
@@ -143,7 +149,7 @@ class HotSpotCollectorTest {
     if (collector.equals("g1")) {
       pass(RunEngine.replay(strong, directory.resolve("replay")));
       var manifest = JsonFiles.read(strong.resolve("manifest.json"));
-      var target = new java.util.Properties();
+      var target = new Properties();
       try (var in = Files.newInputStream(strong.resolve("target.properties"))) {
         target.load(in);
       }
@@ -179,21 +185,10 @@ class HotSpotCollectorTest {
   }
 
   private Path profile(int feature, String collector, String mode) throws IOException {
-    Path support = Path.of(System.getProperty("gorrect.support"));
-    var raw = new JsonObject();
-    raw.addProperty("version", 1);
-    raw.addProperty("vm", "hotspot");
-    raw.addProperty("java", System.getProperty("gorrect.java" + feature));
-    raw.addProperty("collector", collector);
+    var raw =
+        TestProfiles.create("hotspot", System.getProperty("gorrect.java" + feature), collector);
     raw.addProperty("collectorMode", mode);
-    raw.addProperty("observation", "named-roots-diagnostic");
     raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-Xmx128m")));
-    var artifacts = new JsonObject();
-    artifacts.addProperty("runtime", support.resolve("runtime.jar").toString());
-    artifacts.addProperty("protocol", support.resolve("protocol.jar").toString());
-    artifacts.addProperty(
-        "observer", support.resolve(System.mapLibraryName("gorrect_observer")).toString());
-    raw.add("support", artifacts);
     raw.add(
         "requirements",
         JsonFiles.GSON.toJsonTree(List.of("tagging", "named-roots", "gc-completion")));

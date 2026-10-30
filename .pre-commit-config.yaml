@@ -27,8 +27,6 @@ repos:
     hooks:
       - id: google-java-formatter
         files: ^(engine|runtime|protocol)/.*\.java$
-        # Keep formatting stable without unused-import cleanup.
-        args: [--, --skip-removing-unused-imports]
         # Avoid concurrent first-use downloads to the hook's shared JAR.
         require_serial: true
         stages: [pre-commit]

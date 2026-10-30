@@ -8,6 +8,7 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Properties;
@@ -113,7 +114,7 @@ final class OpenJ9Driver {
   }
 
   static Map<String, Path> installations(Path home) throws IOException {
-    var paths = new java.util.LinkedHashMap<String, Path>();
+    var paths = new LinkedHashMap<String, Path>();
     // OpenJ9 splits VM, GC, JIT, and JVMTI code across libraries; libjvm alone is insufficient.
     for (String name :
         List.of(

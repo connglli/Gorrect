@@ -1,12 +1,21 @@
 package io.connglli.gorrect.engine.oracle;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
 
 import io.connglli.gorrect.engine.gir.GirParser;
-import io.connglli.gorrect.engine.model.*;
+import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.ObjectId;
+import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.ReferenceHistory;
-import java.util.*;
+import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
+import java.util.List;
+import java.util.Map;
+import java.util.Optional;
 import org.junit.jupiter.api.Test;
 
 class AtomicHistoryModelTest {

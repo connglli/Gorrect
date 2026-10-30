@@ -30,6 +30,10 @@ public record RunReport(
     problems = List.copyOf(problems);
   }
 
+  /**
+   * Returns the CLI status, with a confirmed violation taking precedence over other outcomes. Zero
+   * requires completed execution, a satisfied verdict, and no unmet requirements.
+   */
   public int exitStatus() {
     if (verdict == ExactVerifier.Verdict.VIOLATED) return 1;
     if (execution == Outcome.INVALID_WORKLOAD) return 2;
@@ -42,6 +46,9 @@ public record RunReport(
     return execution == Outcome.INTERRUPTED ? 130 : 4;
   }
 
+  /**
+   * Creates an execution/checking failure with an inconclusive graph verdict and one diagnostic.
+   */
   public static RunReport failure(Outcome outcome, String problem) {
     return new RunReport(outcome, ExactVerifier.Verdict.INCONCLUSIVE, List.of(), List.of(problem));
   }

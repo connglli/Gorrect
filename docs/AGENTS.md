@@ -14,7 +14,7 @@ Give each fact one authoritative home and link to it elsewhere.
 * [README.md](../README.md) introduces the project and directs readers to its documentation and working entry points.
 * [AGENTS.md](../AGENTS.md) holds the project context, engineering practices, and contributor workflow.
 * [.pre-commit-config.yaml](../.pre-commit-config.yaml) and [requirements.dev.txt](../requirements.dev.txt) define the hook tooling; [.clang-format](../.clang-format) defines native formatting style. Documentation should point to these files rather than repeat their settings, versions, or hook inventory.
-* Source and tests hold implementation details, executable contracts, and invariants. Comments explain decisions that the code cannot express.
+* Source and tests hold implementation details, executable contracts, and invariants. Javadoc states meaningful input, return, failure, ownership, mutability, and concurrency contracts. Inline comments explain decisions the code cannot express; omit boilerplate accessor descriptions and repeated specifications.
 
 As design documents are added, separate the conceptual model and semantic contracts from implementation mechanics such as module layout, VM tooling, process protocols, and artifact formats. Record which document owns each subject. Link only to files that exist.
 

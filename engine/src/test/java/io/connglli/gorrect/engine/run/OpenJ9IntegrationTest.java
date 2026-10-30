@@ -1,22 +1,29 @@
 package io.connglli.gorrect.engine.run;
 
-import static org.junit.jupiter.api.Assertions.*;
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.fuzz.WorkloadGenerator;
 import io.connglli.gorrect.engine.gir.GirFormatter;
+import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Objects;
+import java.util.Set;
+import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
 
 /** Exercises supported semantics and independent coverage on an explicitly selected OpenJ9. */
+@Tag("openj9")
 class OpenJ9IntegrationTest {
   @TempDir Path directory;
 
@@ -49,14 +56,14 @@ class OpenJ9IntegrationTest {
     var generated = WorkloadGenerator.generate(42, "concurrent-jit", 2, 2);
     // Isolate VM compilation evidence; campaign runs assess scheduling-dependent joint stress.
     var program =
-        new io.connglli.gorrect.engine.gir.GirProgram(
+        new GirProgram(
             generated.version(),
             generated.shapes(),
             generated.objects(),
             generated.roots(),
             generated.body(),
             generated.labels(),
-            java.util.Set.of("compiled-execution"));
+            Set.of("compiled-execution"));
     pass(RunEngine.run(input(GirFormatter.format(program)), selected, run));
     pass(RunEngine.verify(run));
     if (collector.equals("gencon")) {
@@ -105,19 +112,8 @@ class OpenJ9IntegrationTest {
   }
 
   private Path profile(String collector, boolean jit) throws IOException {
-    Path support = Path.of(System.getProperty("gorrect.support"));
-    var raw = new JsonObject();
-    raw.addProperty("version", 1);
-    raw.addProperty("vm", "openj9");
-    raw.addProperty("java", System.getProperty("gorrect.openj9.java"));
-    raw.addProperty("collector", collector);
-    raw.addProperty("observation", "named-roots-diagnostic");
+    var raw = TestProfiles.create("openj9", System.getProperty("gorrect.openj9.java"), collector);
     raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-Xmx128m", "-Xshareclasses:none")));
-    var libraries = new JsonObject();
-    libraries.addProperty("runtime", support.resolve("runtime.jar").toString());
-    libraries.addProperty("protocol", support.resolve("protocol.jar").toString());
-    libraries.addProperty("observer", support.resolve("libgorrect_observer.so").toString());
-    raw.add("support", libraries);
     raw.add(
         "requirements",
         JsonFiles.GSON.toJsonTree(
@@ -150,10 +146,7 @@ class OpenJ9IntegrationTest {
 
   private Path resource(String name) throws IOException {
     try (var in = getClass().getResourceAsStream("/cases/" + name + ".gir")) {
-      return input(
-          new String(
-              java.util.Objects.requireNonNull(in).readAllBytes(),
-              java.nio.charset.StandardCharsets.UTF_8));
+      return input(new String(Objects.requireNonNull(in).readAllBytes(), StandardCharsets.UTF_8));
     }
   }
 

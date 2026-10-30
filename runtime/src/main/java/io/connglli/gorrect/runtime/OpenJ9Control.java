@@ -9,7 +9,6 @@ import java.lang.reflect.Method;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Properties;
 import java.util.concurrent.TimeUnit;
 
 /** Launch policy requests compilation; native VM frames independently witness actual calls. */
@@ -23,13 +22,13 @@ final class OpenJ9Control implements VmControl {
   private int frameCount;
   private long characters;
 
-  OpenJ9Control(Path directory, long run, Properties settings, String control) {
+  OpenJ9Control(Path directory, long run, VmControl.JitSettings settings, String control) {
     output = directory.resolve("traces/workers.gstacks");
     this.run = run;
     this.control = control;
     configured = settings != null;
-    warmup = settings == null ? 0 : Integer.parseInt(settings.getProperty("warmupRounds"));
-    timeout = settings == null ? 0 : Integer.parseInt(settings.getProperty("deadlineMillis"));
+    warmup = settings == null ? 0 : settings.warmupRounds();
+    timeout = settings == null ? 0 : settings.deadlineMillis();
     // Exercise the extension before graph construction; discovery alone does not establish
     // usability.
     problem =
@@ -42,9 +41,11 @@ final class OpenJ9Control implements VmControl {
   public List<ExecutionEvidence.Compilation> prepare(long round, int[] workers, Method[] methods)
       throws InterruptedException {
     if (!configured || round <= warmup) return List.of();
+
     var result = new ArrayList<ExecutionEvidence.Compilation>();
     var installed = new boolean[methods.length];
     long deadline = System.nanoTime() + TimeUnit.MILLISECONDS.toNanos(timeout);
+
     do {
       boolean pending = false;
       for (int index = 0; index < methods.length; index++) {
@@ -54,6 +55,7 @@ final class OpenJ9Control implements VmControl {
       if (!pending || System.nanoTime() >= deadline) break;
       Thread.sleep(1);
     } while (true);
+
     for (int index = 0; index < methods.length; index++)
       result.add(
           new ExecutionEvidence.Compilation(
@@ -62,6 +64,7 @@ final class OpenJ9Control implements VmControl {
               1,
               installed[index] ? 1 : 0,
               installed[index] ? "" : "No compiled code after modeled warm-up"));
+
     return result;
   }
 
@@ -71,6 +74,7 @@ final class OpenJ9Control implements VmControl {
     String[] raw = NativeObserver.openJ9Stack();
     if (raw == null || raw.length % 4 != 0)
       throw new IllegalStateException("OpenJ9 stack capture failed");
+
     var frames = new ArrayList<StackEvidence.Frame>();
     long size = 0;
     for (int index = 0; index < raw.length; index += 4) {
@@ -79,11 +83,13 @@ final class OpenJ9Control implements VmControl {
               raw[index], raw[index + 1], raw[index + 2], Integer.parseInt(raw[index + 3])));
       size += raw[index].length() + raw[index + 1].length() + raw[index + 2].length();
     }
+
     synchronized (witnesses) {
       if (witnesses.size() >= StackEvidence.MAX_WITNESSES
           || frameCount + frames.size() > StackEvidence.MAX_FRAMES
           || characters + size > 8L * 1024 * 1024)
         throw new IllegalStateException("OpenJ9 stack evidence buffer exhausted");
+
       frameCount += frames.size();
       characters += size;
       witnesses.add(
