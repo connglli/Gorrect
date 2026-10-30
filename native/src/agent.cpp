@@ -1,3 +1,4 @@
+#include "openj9_stack.hpp"
 #include "snapshot_wire.hpp"
 #include <array>
 #include <atomic>
@@ -17,6 +18,7 @@ constexpr jlong array_base = 1LL << 62;
 constexpr std::size_t max_arrays = 4096;
 constexpr jint max_records = 1'000'000;
 jvmtiEnv *jvmti = nullptr;
+jvmtiExtensionFunction extended_stacks = nullptr;
 // Serializes registration, binding, and capture. Heap callbacks must never acquire this lock.
 std::mutex control_mutex;
 // Copied metadata and weak JVMTI tags retain no Java objects or classes.
@@ -333,6 +335,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *, void *) {
     if (vm->GetEnv(&environment, JVMTI_VERSION_1_2) != JNI_OK)
       return JNI_ERR;
     jvmti = static_cast<jvmtiEnv *>(environment);
+    extended_stacks = openj9_stacks(jvmti);
     jvmtiCapabilities available{}, desired{};
     check(jvmti->GetPotentialCapabilities(&available));
     // Tagging is essential; missing GC or compilation events are reported as capability gaps.
@@ -589,5 +592,54 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_wasCompiled0(JNIEnv *env
       if (code.address && code.method == id)
         return JNI_TRUE;
     return JNI_FALSE;
+  });
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_openJ9Stack(JNIEnv *env, jclass) {
+  return entry(env, [&]() -> jobjectArray {
+    require_agent();
+    if (!extended_stacks)
+      return nullptr;
+    std::array<OpenJ9Frame, 64> frames{};
+    jint count = 0;
+    // EXTRA_FRAME_INFO | MARK_INLINED_FRAMES; a null thread selects this JNI caller.
+    check(extended_stacks(jvmti, jint{12}, static_cast<jthread>(nullptr), jint{0},
+                          static_cast<jint>(frames.size()), frames.data(), &count));
+    if (count < 0 || count > static_cast<jint>(frames.size()))
+      throw std::runtime_error("Invalid OpenJ9 stack frame count");
+    auto string_class = env->FindClass("java/lang/String");
+    if (!string_class)
+      return nullptr;
+    auto result = env->NewObjectArray(count * 4, string_class, nullptr);
+    env->DeleteLocalRef(string_class);
+    if (!result)
+      return nullptr;
+    for (jint index = 0; index < count; ++index) {
+      JvmtiMemory<char> name, descriptor;
+      check(jvmti->GetMethodName(frames[index].method, &name.data, &descriptor.data, nullptr));
+      jclass owner = nullptr;
+      check(jvmti->GetMethodDeclaringClass(frames[index].method, &owner));
+      std::string owner_signature;
+      try {
+        owner_signature = signature(owner);
+      } catch (...) {
+        env->DeleteLocalRef(owner);
+        throw;
+      }
+      env->DeleteLocalRef(owner);
+      std::array<std::string, 4> fields{owner_signature, ascii(name.data), ascii(descriptor.data),
+                                        std::to_string(frames[index].type)};
+      for (jint field = 0; field < 4; ++field) {
+        auto value = env->NewStringUTF(fields[field].c_str());
+        if (!value)
+          return nullptr;
+        env->SetObjectArrayElement(result, index * 4 + field, value);
+        env->DeleteLocalRef(value);
+        if (env->ExceptionCheck())
+          return nullptr;
+      }
+    }
+    return result;
   });
 }

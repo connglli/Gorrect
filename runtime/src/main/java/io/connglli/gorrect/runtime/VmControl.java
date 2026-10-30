@@ -52,6 +52,7 @@ interface VmControl extends AutoCloseable {
     if (settings == null && control.equals("system") && !evidence)
       return disabled("JIT control is not configured", control, false);
     try {
+      if (VmFacts.isOpenJ9()) return new OpenJ9Control(directory, run, settings, control);
       return new HotSpotControl(directory, run, settings, control, evidence);
     } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
       return disabled("VM control unavailable: " + failure, control, evidence);

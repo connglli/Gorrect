@@ -94,11 +94,9 @@ Collection-complete checkpoints follow an explicit collect with validated cycle 
 
 ## 9. Complete the OpenJ9 integration
 
-Goal: reuse the profile format, CLI, GIR, and oracle on another JVM.
+Status: complete for the OpenJ9 driver, runtime controls, collector-policy checks, and compiled-frame evidence. Existing commands, profiles, GIR, and oracles serve gencon, balanced, optavgpause, optthruput, and metronome. Launch-time JIT policy and code-load events are checked independently against raw extended-stack witnesses. Replay tracks OpenJ9's separate implementation libraries. Cycle completion, reclamation, and existing unsupported observation/history profiles remain explicit.
 
-Build on stage 3's probe. Implement the OpenJ9 driver, runtime bridge, collector policies, compilation evidence, and necessary observer adaptations behind the shared commands. Keep collector and compiler details within the integration.
-
-Complete when common strong-reference, concurrent, JIT, and supported conditional-reference cases run on declared OpenJ9 profiles. `probe` must report requirements the selected build cannot establish. Any discovered assumption in the shared semantic contracts needs a separately reviewed correction.
+The normal build passes 266 Java tests, native JDK 17/21 checks, and strict Javadoc. Selected OpenJ9 JDK 21 checks cover strong arrays, workers, conditional references, compiled/interpreted execution, offline verification, replay, and a seeded concurrent-JIT campaign. The Metronome contended case aborts during class unloading; a standalone Java/JVMTI reproducer confirms the assertion independently of Gorrect. The selected-target matrix retains this failure. [Stage 9 notes](./completed-2026-10-30-stage9.md) record verified coverage and limits; OpenJ9 JDK 17 remains untested.
 
 ## 10. Refactor code and documentation quality
 

@@ -27,7 +27,13 @@ public record TargetProfile(
     Jit jit,
     Gc gc) {
   public static final Set<String> ENVIRONMENT_OPTIONS =
-      Set.of("JAVA_TOOL_OPTIONS", "JDK_JAVA_OPTIONS", "_JAVA_OPTIONS", "CLASSPATH");
+      Set.of(
+          "JAVA_TOOL_OPTIONS",
+          "JDK_JAVA_OPTIONS",
+          "_JAVA_OPTIONS",
+          "OPENJ9_JAVA_OPTIONS",
+          "IBM_JAVA_OPTIONS",
+          "CLASSPATH");
 
   public record Support(String runtime, String protocol, String observer, String whitebox) {
     public Support(String runtime, String protocol, String observer) {
@@ -35,18 +41,18 @@ public record TargetProfile(
     }
   }
 
-  /** HotSpot installation requests; actual compiled execution requires separate frame evidence. */
+  /** VM installation settings; OpenJ9 level 1 means installed code, not an optimization tier. */
   public record Jit(int level, int warmupRounds, int deadlineMillis) {}
 
   /** Collection request policy; completion still requires independently decoded VM events. */
   public record Gc(String control) {}
 
   public boolean usesWhiteBox() {
-    return jit != null || gc.control().equals("whitebox-full");
+    return vm.equals("hotspot") && (jit != null || gc.control().equals("whitebox-full"));
   }
 
   public boolean collectionEvidence() {
-    return jit != null || requirements.contains("gc-completion");
+    return vm.equals("hotspot") && (jit != null || requirements.contains("gc-completion"));
   }
 
   public TargetProfile withCollectorMode(String mode) {
@@ -144,7 +150,7 @@ public record TargetProfile(
       if (argument.indexOf('\0') >= 0
           || !argument.startsWith("-")
           || argument.matches(
-              "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-XX:[+-]Use.*GC|-XX:[+-]ZGenerational|-XX:ShenandoahGCMode=.*|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
+              "(?i)(-cp|-classpath|--class-path.*|-jar|-m|--module.*|-agent.*|-javaagent.*|-Xbootclasspath.*|-Xgcpolicy.*|-Xoptionsfile.*|-Xdump.*|-XX:[+-]Use.*GC|-XX:[+-]ZGenerational|-XX:ShenandoahGCMode=.*|-XX:(ErrorFile|OnError|OnOutOfMemoryError|Flags|VMOptionsFile)=.*|-version|--version|-help|--help|-X|--dry-run|-Djava.class.path=.*)"))
         throw new IllegalArgumentException("Conflicting or reserved VM argument " + argument);
     }
     var environment = new HashMap<String, String>();
@@ -174,7 +180,7 @@ public record TargetProfile(
     if (object.has("jit") && !object.get("jit").isJsonNull()) {
       var settings = object.getAsJsonObject("jit");
       JsonFiles.fields(settings, "level", "warmupRounds", "deadlineMillis");
-      if (!vm.equals("hotspot") || artifacts.whitebox() == null)
+      if (vm.equals("hotspot") && artifacts.whitebox() == null)
         throw new IllegalArgumentException("HotSpot JIT control requires support.whitebox");
       long warmup =
           settings.has("warmupRounds") ? JsonFiles.number(settings.get("warmupRounds")) : 1;
@@ -182,14 +188,22 @@ public record TargetProfile(
         throw new IllegalArgumentException("Invalid JIT warm-up count");
       jit =
           new Jit(
-              limit(settings, "level", 4, 4),
+              limit(settings, "level", vm.equals("hotspot") ? 4 : 1, vm.equals("hotspot") ? 4 : 1),
               (int) warmup,
               limit(settings, "deadlineMillis", 5000, 60000));
-      if (args.contains("-XX:-UnlockDiagnosticVMOptions"))
+      if (vm.equals("hotspot") && args.contains("-XX:-UnlockDiagnosticVMOptions"))
         throw new IllegalArgumentException("JIT control requires diagnostic VM options");
     }
     for (String argument : args)
-      if (argument.matches("-XX:[+-]WhiteBoxAPI"))
+      if (vm.equals("openj9") && jit != null && argument.startsWith("-Xjit"))
+        throw new IllegalArgumentException("OpenJ9 JIT options belong to profile.jit");
+      else if (vm.equals("openj9")
+          && jit != null
+          && (argument.startsWith("-Xaot")
+              || (argument.startsWith("-Xshareclasses")
+                  && !argument.equals("-Xshareclasses:none"))))
+        throw new IllegalArgumentException("OpenJ9 JIT profiles disable shared-cache/AOT reuse");
+      else if (argument.matches("-XX:[+-]WhiteBoxAPI"))
         throw new IllegalArgumentException("WhiteBox options belong to the driver");
     var requirements =
         object.has("requirements")
@@ -221,14 +235,15 @@ public record TargetProfile(
     String gcControl =
         gcSettings.has("control")
             ? text(gcSettings, "control")
-            : jit == null ? "system" : "whitebox-full";
+            : jit == null || !vm.equals("hotspot") ? "system" : "whitebox-full";
     if (!Set.of("system", "whitebox-full").contains(gcControl))
       throw new IllegalArgumentException("Unknown GC control " + gcControl);
     if (gcControl.equals("whitebox-full")
         && (!vm.equals("hotspot") || artifacts.whitebox() == null))
       throw new IllegalArgumentException(
           "WhiteBox GC control requires HotSpot and support.whitebox");
-    if ((jit != null || gcControl.equals("whitebox-full"))
+    if (vm.equals("hotspot")
+        && (jit != null || gcControl.equals("whitebox-full"))
         && args.contains("-XX:-UnlockDiagnosticVMOptions"))
       throw new IllegalArgumentException("WhiteBox control requires diagnostic VM options");
     if (Set.of("iu", "passive").contains(mode) && args.contains("-XX:-UnlockExperimentalVMOptions"))

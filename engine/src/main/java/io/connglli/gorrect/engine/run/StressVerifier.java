@@ -138,24 +138,24 @@ final class StressVerifier {
     Set<ExecutionEvidence.Frame> frames = Set.of();
     if (required.contains("compiled-execution"))
       try {
-        frames = HotSpotDriver.compiledFrames(directory.resolve("traces/workers.jfr"), run);
+        frames = VmDriver.compiledFrames(profile, directory, run);
         for (var frame : frames) {
           var key = new WindowKey(frame.worker(), frame.group(), frame.round(), frame.phase());
           var window = windows.get(key);
           if (window == null || window.thread() != frame.thread())
-            throw new IOException("JFR witness does not match a worker window");
+            throw new IOException("VM frame witness does not match a worker window");
           if (frame.point() == ExecutionEvidence.ENTER && frame.phase() != 0)
-            throw new IOException("JFR entry witness has a noninitial phase");
+            throw new IOException("VM entry witness has a noninitial phase");
           int last =
               (int)
                   declarations.get(frame.group()).workers().getFirst().body().stream()
                       .filter(op -> op instanceof Instruction.Barrier)
                       .count();
           if (frame.point() == ExecutionEvidence.EXIT && frame.phase() != last)
-            throw new IOException("JFR exit witness has a nonfinal phase");
+            throw new IOException("VM exit witness has a nonfinal phase");
           if (frame.point() >= ExecutionEvidence.BEFORE_COLLECTION
               && !requests.getOrDefault(key, Set.of()).contains(frame.collection()))
-            throw new IOException("JFR witness has no matching collection request");
+            throw new IOException("VM witness has no matching collection request");
         }
       } catch (IOException failure) {
         frames = Set.of();
@@ -223,9 +223,7 @@ final class StressVerifier {
       if (compilation.size() != 1) return false;
       var value = compilation.getFirst();
       if (!value.method().equals(ExecutionEvidence.workerMethod(worker))
-          || value.requested() != profile.jit().level()
-          || value.installed() < value.requested()
-          || value.installed() > 4
+          || !VmDriver.installed(profile, value)
           || !value.problem().isEmpty()) return false;
       var first =
           windows.stream()

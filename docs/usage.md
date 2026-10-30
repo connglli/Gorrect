@@ -1,6 +1,6 @@
 # Running Gorrect
 
-The CLI supports exact and bounded concurrent [GIR](./gir.md) on HotSpot Serial, Parallel, G1, ZGC, and Shenandoah, JDK 17+, where the build provides them. OpenJ9 remains planned work.
+The CLI supports exact and bounded concurrent [GIR](./gir.md) on JDK 17+ targets. HotSpot collectors are Serial, Parallel, G1, ZGC, and Shenandoah; OpenJ9 policies are gencon, balanced, optavgpause, optthruput, and metronome. Availability depends on the selected build.
 
 ## Build and configure
 
@@ -56,16 +56,16 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. The resolved launch environment is retained. |
 | `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `compilation-events`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings` and `reference-reclamation` remain unsupported. |
 | `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
-| `jit` | Optional HotSpot controls: `level`, `warmupRounds`, and `deadlineMillis`. Requires `support.whitebox`; the driver supplies bootstrap and WhiteBox flags. |
-| `gc` | Optional `control`: `system` requests `System.gc()`; `whitebox-full` requires a matching `support.whitebox` client. The default is `system` without JIT controls, `whitebox-full` with them. GC controls work independently of JIT. |
+| `jit` | Optional `level`, `warmupRounds`, and `deadlineMillis`. HotSpot levels 1–4 require `support.whitebox`. OpenJ9 accepts only level 1, meaning installed code without an optimization-tier claim; it needs no WhiteBox client. |
+| `gc` | Optional `control`: `system` requests `System.gc()`; HotSpot `whitebox-full` requires a matching `support.whitebox` client. The default is `whitebox-full` for HotSpot JIT profiles, `system` otherwise. GC controls work independently of JIT. |
 
 Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
 
-Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) requests cycle-completion evidence. For `gc-completion`, every executed `collect` must contain a completed qualifying whole-heap/major VM cycle with the requested cause. Ignored requests, partial cycles, pauses alone, and missing JFR evidence leave coverage unmet. Write `collect; checkpoint;` to observe after such a request; completion does not force reference clearing, queue delivery, or reclamation.
+Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) requests cycle-completion evidence. For HotSpot `gc-completion`, every executed `collect` must contain a completed qualifying whole-heap/major VM cycle with the requested cause. Ignored requests, partial cycles, pauses alone, and missing JFR evidence leave coverage unmet. Write `collect; checkpoint;` to observe after such a request; completion does not force reference clearing, queue delivery, or reclamation. OpenJ9 cycle-completion evidence is unsupported.
 
 Place checkpoints after reference bindings end; live-binding capture is unsupported. Scalars can remain live. Contended histories require ordinary-object shapes and a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md) defines capture effects.
 
-For JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. `warmupRounds` counts modeled visits to each parallel block before installation requests; warm-up adds no unmodeled mutations. Compilation level requests installation; actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
+For HotSpot JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. OpenJ9 users can copy [openj9-gencon.example.json](../profiles/openj9-gencon.example.json) and add `"jit": {}`. The OpenJ9 driver requests compilation on the first modeled worker calls and disables shared-cache/AOT reuse. `warmupRounds` counts modeled visits to each parallel block before checking installation; warm-up adds no unmodeled mutations. Actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
 
 For the JDK 21 test-library layout, set `JDK_TEST_LIB` to the target source tree's `test/lib` directory and build a client with the engine JDK:
 

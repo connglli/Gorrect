@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "vm": "openj9",
+  "java": "<jdk>/bin/java",
+  "collector": "gencon",
+  "observation": "named-roots-diagnostic",
+  "support": {
+    "runtime": "../../engine/build/install/gorrect/support/runtime.jar",
+    "protocol": "../../engine/build/install/gorrect/support/protocol.jar",
+    "observer": "../../engine/build/install/gorrect/support/libgorrect_observer.so"
+  },
+  "vmArgs": ["-Xmx128m"],
+  "requirements": ["tagging", "named-roots", "gc-events"]
+}
