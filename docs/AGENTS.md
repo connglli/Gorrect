@@ -13,20 +13,13 @@ Give each fact one authoritative home and link to it elsewhere.
 * [implementation.md](./implementation.md) holds component and language boundaries, the build layout, runtime and observer responsibilities, JVM integrations, protocols, and run artifacts.
 * [README.md](../README.md) introduces the project and directs readers to its documentation and working entry points.
 * [AGENTS.md](../AGENTS.md) holds the project context, engineering practices, and contributor workflow.
+* [Agent notes](../.agents/notes/README.md) are the source of truth for working plans, investigations, unresolved design decisions, review findings, and task coordination/progress. Accepted behavior and implemented contracts belong in the owning specifications and source; notes link to those authoritative homes.
 * [.pre-commit-config.yaml](../.pre-commit-config.yaml) and [requirements.dev.txt](../requirements.dev.txt) define the hook tooling; [.clang-format](../.clang-format) defines native formatting style. Documentation should point to these files rather than repeat their settings, versions, or hook inventory.
 * Source and tests hold implementation details, executable contracts, and invariants. Javadoc states meaningful input, return, failure, ownership, mutability, and concurrency contracts. Inline comments explain decisions the code cannot express; omit boilerplate accessor descriptions and repeated specifications.
 
 As design documents are added, separate the conceptual model and semantic contracts from implementation mechanics such as module layout, VM tooling, process protocols, and artifact formats. Record which document owns each subject. Link only to files that exist.
 
 Keep temporary explorations and implementation plans separate from durable specifications. Change history belongs in commit messages; durable documents describe the agreed contract and the implementation that exists. Label unresolved design proposals explicitly so readers can distinguish them from decisions.
-
-## Agent notes
-
-Keep working notes under [`.agents/notes/`](../.agents/notes/README.md): design explorations and tradeoffs in [designs/](../.agents/notes/designs/), implementation plans in [implementations/](../.agents/notes/implementations/), and change-review records in [commits/](../.agents/notes/commits/).
-
-Name each note `YYYY-MM-DD-<short-title>.md`. Prefix the filename with `completed-` when its work is finished, or `deprecated-` when it has been superseded or abandoned. Keep the original date and title after the prefix.
-
-Notes may contain alternatives, investigation history, and unresolved questions. They support collaboration and do not establish a contract by themselves. Incorporate accepted decisions into the document that owns the subject and link to that document from the note.
 
 ## Writing rules
 

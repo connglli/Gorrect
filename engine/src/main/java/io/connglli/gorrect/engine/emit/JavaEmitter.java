@@ -442,6 +442,8 @@ public final class JavaEmitter {
         var owner = binding(op.owner());
         String ref = "reference" + op.id(), result = "b" + op.id();
         referenceShapes.put(result, shapes.get(op.shape()));
+        var acquired = new Binding(result, shapes.get(op.shape()), op.id());
+        describeBinding(acquired);
         line("{");
         line(
             "java.lang.ref.Reference<?> "
@@ -460,7 +462,7 @@ public final class JavaEmitter {
                 + ".get();");
         reference(op.id(), "ACQUIRE", result + " == null ? 0L : 1L", ref, result);
         line("if (" + result + " != null) {");
-        block(op.body(), op.name(), new Binding(result, shapes.get(op.shape()), op.id()));
+        block(op.body(), op.name(), acquired);
         line(
             recorder()
                 + ".record("
@@ -897,6 +899,12 @@ public final class JavaEmitter {
     var binding = new Binding("b" + id, shape, id);
     scopes.peek().put(name, binding);
     if (shape != null) referenceShapes.put(binding.name(), shape);
+    describeBinding(binding);
+    return binding.name();
+  }
+
+  private void describeBinding(Binding binding) {
+    var shape = binding.shape();
     if (shape != null && observation.bindings()) {
       String type =
           switch (shape.kind()) {
@@ -906,7 +914,7 @@ public final class JavaEmitter {
           };
       bindings.add(
           new ObservationLayout.LocalBinding(
-              id,
+              binding.id(),
               worker,
               worker == 0 ? "execute" : ExecutionEvidence.workerMethod(worker),
               "(Lio/connglli/gorrect/runtime/TargetSession;"
@@ -915,7 +923,6 @@ public final class JavaEmitter {
               binding.name(),
               type));
     }
-    return binding.name();
   }
 
   private Binding binding(String name) {

@@ -11,6 +11,7 @@ import static io.connglli.gorrect.engine.run.ProcessSupport.terminate;
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.engine.oracle.CheckpointPlan;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.OracleResult;
 import io.connglli.gorrect.protocol.ControlMessage;
@@ -20,6 +21,7 @@ import java.io.IOException;
 import java.net.SocketTimeoutException;
 import java.nio.file.Path;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
@@ -49,6 +51,12 @@ final class TargetRunner {
       Long campaignDeadline)
       throws IOException, InterruptedException {
     var messages = new ArrayList<ControlMessage>();
+    var checkpoints = new CheckpointPlan(oracle);
+    boolean bounded =
+        manifest.get("referenceHistory").getAsBoolean()
+            || manifest.get("concurrentHistory").getAsBoolean();
+    var visits = new HashMap<Integer, Long>();
+    boolean finalCapture = false;
     Process process = null;
     boolean hello = false;
     long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(profile.limits().runSeconds());
@@ -140,7 +148,7 @@ final class TargetRunner {
           return RunReport.failure(RunReport.Outcome.RUNTIME_ERROR, message.detail());
 
         if (message.kind() == ControlMessage.Kind.COMPLETE) {
-          if (index != oracle.checkpoints().size() + 1 || message.sequence() != index)
+          if (!finalCapture || message.sequence() != index)
             return RunReport.failure(
                 RunReport.Outcome.PROTOCOL_ERROR, "Premature target completion");
           if (!process.waitFor(milliseconds(deadline), TimeUnit.MILLISECONDS))
@@ -159,15 +167,16 @@ final class TargetRunner {
                   RunReport.Outcome.CRASH, "Target exited with " + process.exitValue());
         }
 
-        int operation =
-            index < oracle.checkpoints().size() ? oracle.checkpoints().get(index).operation() : 0;
-        long occurrence =
-            index < oracle.checkpoints().size() ? oracle.checkpoints().get(index).occurrence() : 1;
-        if (index > oracle.checkpoints().size()
+        var visit = new CheckpointPlan.Visit(message.operation(), message.occurrence());
+        boolean planned = checkpoints.permits(visit.operation(), visit.occurrence());
+        if (!bounded)
+          planned &=
+              index < checkpoints.visits().size() && checkpoints.visits().get(index).equals(visit);
+        if (finalCapture
+            || !planned
             || message.kind() != ControlMessage.Kind.CHECKPOINT
             || message.sequence() != index + 1L
-            || message.operation() != operation
-            || message.occurrence() != occurrence)
+            || message.occurrence() != visits.getOrDefault(message.operation(), 0L) + 1)
           return RunReport.failure(
               RunReport.Outcome.PROTOCOL_ERROR, "Checkpoint order or identity mismatch");
 
@@ -176,6 +185,8 @@ final class TargetRunner {
         } catch (IOException exception) {
           return RunReport.failure(RunReport.Outcome.EXTRACTION_ERROR, exception.toString());
         }
+        visits.put(message.operation(), message.occurrence());
+        finalCapture = message.operation() == 0;
         acknowledge(out, run, ++index);
       }
     } catch (SocketTimeoutException exception) {

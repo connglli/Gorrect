@@ -47,7 +47,6 @@ class ReferenceGirTest {
   @ValueSource(
       strings = {
         "acquire held N owner 0 { release held; }",
-        "acquire held N owner 0 { checkpoint; }",
         "acquire held N owner 0 {} write-root r held;",
         "acquire held Missing owner 0 {}",
         "is-cleared state owner 1;",

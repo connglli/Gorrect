@@ -114,6 +114,16 @@ public final class HistoryOracle {
     return check(program, trace, history, observations, limits, true);
   }
 
+  /** Orphan identity records indicate missing cross-channel evidence, not a heap refutation. */
+  static boolean linked(ExecutionTrace trace, ReferenceHistory history) {
+    var workers = trace.byWorker();
+    for (var event : history.events())
+      if (event.sequence() <= 0
+          || event.sequence() > workers.getOrDefault(event.worker(), List.of()).size())
+        return false;
+    return true;
+  }
+
   private static Result check(
       GirProgram program,
       ExecutionTrace trace,
@@ -122,7 +132,9 @@ public final class HistoryOracle {
       HistoryLimits limits,
       boolean prefix) {
     GirValidator.validate(program);
-    if ((!prefix && (!trace.complete() || !history.complete())) || trace.run() != history.run())
+    if ((!prefix && (!trace.complete() || !history.complete()))
+        || trace.run() != history.run()
+        || !linked(trace, history))
       return new Result(
           ExactVerifier.Verdict.INCONCLUSIVE,
           List.of("Reference history is incomplete or belongs to another run"),
@@ -145,7 +157,10 @@ public final class HistoryOracle {
       require(
           checker.referencePosition == history.events().size(),
           "Unexpected reference history suffix");
-      require(checker.checkpoint == observations.size(), "Unexpected graph observation suffix");
+      if (checker.checkpoint != observations.size()) {
+        checker.incomplete = true;
+        checker.problems.add("Missing or extra graph observations for the validated path");
+      }
 
       var execution =
           new OracleResult(
@@ -174,7 +189,9 @@ public final class HistoryOracle {
       if (prefix
           && (checker == null
               || checker.position != trace.events().size()
-              || checker.referencePosition != history.events().size()))
+              || checker.referencePosition != history.events().size()
+              || checker.incomplete
+              || checker.checkpoint != observations.size()))
         return new Result(
             ExactVerifier.Verdict.INCONCLUSIVE,
             List.of("Invalid precondition has unvalidated prefix evidence"),
@@ -335,9 +352,14 @@ public final class HistoryOracle {
   }
 
   private void snapshot(int operation, long occurrence) {
-    require(checkpoint < observations.size(), "Graph observation is missing");
-    var observation = observations.get(checkpoint++);
     machine.chargeSnapshot(machine.graph().accessible());
+    if (checkpoint >= observations.size()) {
+      checkpoint++;
+      incomplete = true;
+      problems.add("Graph observation is missing");
+      return;
+    }
+    var observation = observations.get(checkpoint++);
     if (observation.graph().isEmpty()) {
       incomplete = true;
       problems.addAll(observation.problems());

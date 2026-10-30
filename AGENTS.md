@@ -44,9 +44,45 @@ Resolve compiler warnings in code you introduce or change. Use explicit imports 
 
 Follow [docs/AGENTS.md](./docs/AGENTS.md). Keep change history in commits and keep any changelog concise.
 
-Use [agent notes](./.agents/notes/README.md) and follow their [conventions](./docs/AGENTS.md#agent-notes).
+Use [agent notes](./.agents/notes/README.md) and follow their [conventions](#agent-notes).
 
 Before extending the design, ask whether the mechanism is necessary, whether a simpler one satisfies the contract, and whether its behavior can be analyzed and tested independently.
+
+## Agent notes
+
+Keep working notes under [`.agents/notes/`](./.agents/notes/README.md): design explorations and tradeoffs in [designs/](./.agents/notes/designs/), implementation plans in [implementations/](./.agents/notes/implementations/), change-review records in [commits/](./.agents/notes/commits/), and active coordination and progress trackers in [dashboard/](./.agents/notes/dashboard/).
+
+Name each standalone note `YYYY-MM-DD-<short-title>.md`; collaborative dashboards use the dated directories described below. Prefix the filename with `completed-` when its work is finished, or `deprecated-` when it has been superseded or abandoned. Keep the original date and title after the prefix.
+
+Follow the [documentation ownership standard](./docs/AGENTS.md#where-a-fact-belongs) when recording working decisions and promoting accepted contracts.
+
+## Work modes and coordination
+
+A **workstream** is a set of related tasks whose agents collaborate through one shared dashboard. Independent workstreams have separate dashboards and isolated code worktrees.
+
+### Work modes
+
+| Mode | Execution |
+| --- | --- |
+| **Solo** | The main agent performs the work without subagents. |
+| **Team** | The main agent may delegate parallel tasks within one collaborative workstream. |
+| **Pipeline** | The main agent coordinates any number of independent workstreams and subagents, scheduling concurrent work within available tool capacity. |
+
+Default to **Team** unless the user selects another mode. The user can change modes at any time; that choice persists until changed again. Record the active mode in the dashboard index. Apply mode changes to scheduling, preserve worktrees and completed results, and pause excess work safely when reducing concurrency. A mode change does not authorize discarding work or committing a review unit.
+
+### Workstream dashboards
+
+Create each collaborative workstream's shared dashboard under `.agents/notes/dashboard/YYYY-MM-DD-<workstream>/`. Give agents names describing their work and assign file ownership and dependencies before changing shared interfaces. Keep code changes in isolated worktrees.
+
+Each dashboard has a `README.md` tracking its objective, named agents, ownership, dependencies, progress, findings, validation, and integration state. Each agent owns a status file. Keep substantive workstream communications in uniquely named files under `messages/`; notifications elsewhere should link to those messages. Ask agents to read peer messages and coordinate directly to avoid conflicts.
+
+### Continuous review pipeline
+
+The coordinator monitors running workstreams and reviews each finished task promptly, without waiting for other workstreams to finish. Give concrete feedback, request required fixes, and check the revised result. Keep reviewed results in an ordered ready queue until their dependencies and integration checks pass. Record reviews, fixes, queue position, and checks in the dashboards.
+
+A **review unit** is a finished task or cohesive set of tasks from one workstream. Keep one review unit staged in the current working branch for the user at a time. Merge and stage only that unit's reviewed changes; keep other workstreams and queued results isolated. While the user reviews it, continue permitted unfinished workstreams, monitor new results, and request fixes without changing the staged unit. Resolve the user's feedback on the current unit first.
+
+When the user authorizes the current commit, commit exactly the approved unit. Then merge and stage the next ready unit and request its review. Do not combine unrelated workstreams merely because they are ready, and do not stop permitted work while awaiting review. Dashboard notes follow the quality and lifecycle rules for agent notes.
 
 ## Before starting work
 
@@ -60,7 +96,7 @@ Before extending the design, ask whether the mechanism is necessary, whether a s
 1. Run the formatting, compiler, and test checks relevant to the change. Report failures and checks that could not run.
 2. Run the existing pre-commit hooks on changed files. Preserve both the `pre-commit` and `commit-msg` hook stages and their configuration.
 3. Review the diff and `git status` for unintended changes and generated artifacts.
-4. Stage all changes and ask the user to review changes before committing, unless the user has already authorized the commit in the session.
+4. Stage all changes belonging to the current review unit and ask the user to review before committing, unless that commit is already authorized. Keep other workstreams and queued changes isolated.
 5. Use a Conventional Commit message with a component scope, such as `feat(engine)` or `fix(runtime)`, a title of at most 50 characters, and a body that explains intent and design impact when needed. Follow [commit attribution](#commit-attribution) for agent co-author trailers.
 
 ## Commit attribution
