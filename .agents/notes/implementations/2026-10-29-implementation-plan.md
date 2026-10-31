@@ -135,7 +135,7 @@ Complete when CAS results control execution, repeated/recursive frames keep dist
 
 ## 15. Make references and queues first-class
 
-Status: in progress. [First-class no-queue soft/weak objects](./completed-2026-10-31-stage15a.md) form the first reviewable slice; registered-wrapper exposure, named queues, phantom processing and Cleaner actors retain separate gates.
+Status: in progress. [No-queue objects](./completed-2026-10-31-stage15a.md) and [initially-null registered queues](./completed-2026-10-31-stage15b.md) are implemented. Automatic pending processing, non-null registration, legacy exposure, phantom processing and Cleaner actors retain separate gates.
 
 Goal: model Reference objects as graph participants and cover asynchronous cleanup.
 

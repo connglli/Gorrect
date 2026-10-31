@@ -62,8 +62,25 @@ public sealed interface Instruction {
    */
   record IdentityHash(int id, Operand owner) implements Operation {}
 
-  /** Constructs a fresh no-queue soft/weak wrapper around the current reference operand. */
-  record AllocateReference(int id, String name, String shape, Operand value) implements Operation {}
+  /**
+   * Constructs a fresh soft/weak wrapper. Omitted queue means no registration; a named queue
+   * requires its exact nominal shape and a literal null referent in this slice. Registration is
+   * immutable and creates no strong root to the wrapper.
+   */
+  record AllocateReference(int id, String name, String shape, Operand value, String queue)
+      implements Operation {
+    public AllocateReference(int id, String name, String shape, Operand value) {
+      this(id, name, shape, value, null);
+    }
+  }
+
+  /**
+   * Requires a live non-null wrapper receiver and fresh scalar name. Calls enqueue once, clearing
+   * its referent even on failure. Binds long 1 only for first insertion into its registered queue,
+   * otherwise 0. Membership survives repeated false insertion; consumed wrappers cannot be inserted
+   * again. No-queue receivers return 0.
+   */
+  record EnqueueReference(int id, String name, String owner) implements Operation {}
 
   /**
    * Requires a declared root and shape and a fresh name. Reads the root once into a strong handle,
@@ -176,12 +193,23 @@ public sealed interface Instruction {
   }
 
   /**
-   * Polls the case's reference queue once without acquiring a referent. Records the delivered
-   * incarnation or an empty result. GC-cleared wrappers may arrive later, in any order, once each;
-   * an empty result establishes no processing progress. Initially null wrappers and explicitly
-   * cleared wrappers are not enqueued by those actions.
+   * Named form polls its queue once and binds the actual returned wrapper strongly, or null, using
+   * the queue's nominal type. It consumes exactly one member in any order; null requires an empty
+   * queue. The result name is fresh. Resource lifetime and prior insertion history are unchanged.
+   *
+   * <p>Bare legacy form discards the returned wrapper from its separate implicit queue. GC-cleared
+   * incarnations may arrive later, in any order, once each; an empty legacy result establishes no
+   * progress. Initial null and explicit clear alone create no automatic delivery.
    */
-  record PollQueue(int id) implements Operation {}
+  record PollQueue(int id, String name, String queue) implements Operation {
+    public PollQueue(int id) {
+      this(id, null, null);
+    }
+
+    public boolean named() {
+      return queue != null;
+    }
+  }
 
   /**
    * Requires a valid data-slot access and a fresh destination name. Reads the signed 64-bit value

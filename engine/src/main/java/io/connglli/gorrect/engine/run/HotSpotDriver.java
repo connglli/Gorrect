@@ -20,17 +20,32 @@ final class HotSpotDriver {
 
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
     var arguments = new ArrayList<String>();
-    arguments.add(VmDriver.executable(profile));
-    arguments.addAll(launchOptions(profile, directory, observer, targetFacts(directory)));
+    arguments.add(VmDriver.executable(profile, QueueResources.controlled(profile, directory)));
+    arguments.addAll(
+        launchOptions(
+            profile,
+            directory,
+            observer,
+            targetFacts(directory),
+            QueueResources.controlled(profile, directory)));
     return arguments;
   }
 
   /** Pure owned options shared by launch and retained live/offline evidence checks. */
   static List<String> launchOptions(
       TargetProfile profile, Path directory, String observer, Properties facts) {
+    return launchOptions(profile, directory, observer, facts, profile.retainedMetadata());
+  }
+
+  static List<String> launchOptions(
+      TargetProfile profile,
+      Path directory,
+      String observer,
+      Properties facts,
+      boolean controlled) {
     var arguments = new ArrayList<String>();
     arguments.addAll(profile.vmArgs());
-    if (profile.retainedMetadata()) arguments.add("-XX:+DisableAttachMechanism");
+    if (controlled) arguments.add("-XX:+DisableAttachMechanism");
     arguments.addAll(collectorArguments(profile, facts));
     arguments.add("-XX:ErrorFile=" + directory.resolve("logs/hs_err_pid%p.log"));
     arguments.add(VmDriver.observerArgument(profile, directory, observer));

@@ -41,6 +41,7 @@ public final class GirFormatter {
           };
       line(0, "shape " + shape.name() + " " + dimensions + ";");
     }
+    for (var queue : program.queues()) line(0, "queue " + queue.name() + " " + queue.shape() + ";");
     for (var object : program.objects()) {
       String references =
           object.references().stream()
@@ -133,7 +134,14 @@ public final class GirFormatter {
               + op.length();
       case Instruction.IdentityHash op -> "identity-hash " + operand(op.owner());
       case Instruction.AllocateReference op ->
-          "allocate-ref " + op.name() + " " + op.shape() + " " + operand(op.value());
+          "allocate-ref "
+              + op.name()
+              + " "
+              + op.shape()
+              + " "
+              + operand(op.value())
+              + (op.queue() == null ? "" : " " + op.queue());
+      case Instruction.EnqueueReference op -> "enqueue-ref " + op.name() + " " + op.owner();
       case Instruction.ReadRoot op ->
           (op.mode() == MemoryMode.VOLATILE ? "read-volatile-root " : "read-root ")
               + op.name()
@@ -168,7 +176,8 @@ public final class GirFormatter {
           "clear-ref " + op.owner() + (op.receiver() ? "" : " " + op.index());
       case Instruction.ReferenceState op ->
           "is-cleared " + op.name() + " " + op.owner() + (op.receiver() ? "" : " " + op.index());
-      case Instruction.PollQueue ignored -> "poll-queue";
+      case Instruction.PollQueue op ->
+          "poll-queue" + (op.named() ? " " + op.name() + " " + op.queue() : "");
       case Instruction.SameObject op ->
           "same-object " + op.name() + " " + operand(op.left()) + " " + operand(op.right());
       case Instruction.ReadData op ->

@@ -51,6 +51,7 @@ public final class GirParser {
     var shapes = new ArrayList<Shape>();
     var objects = new ArrayList<GirProgram.InitialObject>();
     var roots = new ArrayList<GirProgram.Root>();
+    var queues = new ArrayList<GirProgram.Queue>();
     var requirements = new HashSet<String>();
     while (!current.text().equals("program")) {
       switch (next().text()) {
@@ -81,6 +82,10 @@ public final class GirParser {
           expect(";");
           objects.add(new GirProgram.InitialObject(id, shape, references, data));
         }
+        case "queue" -> {
+          queues.add(new GirProgram.Queue(name(), name()));
+          expect(";");
+        }
         case "root" -> {
           String name = name();
           expect("=");
@@ -94,7 +99,7 @@ public final class GirParser {
     expect("program");
     var body = block(0);
     expect("");
-    return new GirProgram(version, shapes, objects, roots, body, labels, requirements);
+    return new GirProgram(version, shapes, objects, roots, body, labels, requirements, queues);
   }
 
   private List<Instruction> block(int depth) {
@@ -117,7 +122,13 @@ public final class GirParser {
             case "copy-array" ->
                 new Instruction.CopyArray(id, name(), integer(), name(), integer(), integer());
             case "identity-hash" -> new Instruction.IdentityHash(id, operand());
-            case "allocate-ref" -> new Instruction.AllocateReference(id, name(), name(), operand());
+            case "allocate-ref" -> {
+              String result = name(), shape = name();
+              var value = operand();
+              yield new Instruction.AllocateReference(
+                  id, result, shape, value, current.text().equals(";") ? null : name());
+            }
+            case "enqueue-ref" -> new Instruction.EnqueueReference(id, name(), name());
             case "read-volatile-root" ->
                 new Instruction.ReadRoot(id, name(), name(), name(), MemoryMode.VOLATILE);
             case "write-volatile-root" ->
@@ -182,7 +193,10 @@ public final class GirParser {
               yield new Instruction.ReferenceState(
                   id, result, owner, receiver ? -1 : integer(), receiver);
             }
-            case "poll-queue" -> new Instruction.PollQueue(id);
+            case "poll-queue" ->
+                current.text().equals(";")
+                    ? new Instruction.PollQueue(id)
+                    : new Instruction.PollQueue(id, name(), name());
             case "read-data" -> new Instruction.ReadData(id, name(), name(), integer());
             case "same-object" -> new Instruction.SameObject(id, name(), operand(), operand());
             case "write-data" -> new Instruction.WriteData(id, name(), integer(), operand());

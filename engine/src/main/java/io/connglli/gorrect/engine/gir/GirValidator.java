@@ -25,6 +25,7 @@ public final class GirValidator {
 
   private final Map<String, Shape> shapes = new HashMap<>();
   private final Set<String> roots = new HashSet<>();
+  private final Map<String, Shape> queues = new HashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private int nextOperation = 1;
   private int nextWorker = 1;
@@ -85,6 +86,13 @@ public final class GirValidator {
     for (var shape : program.shapes()) {
       name(shape.name());
       if (shapes.putIfAbsent(shape.name(), shape) != null) fail("Duplicate shape " + shape.name());
+    }
+    if (program.queues().size() > 64) fail("Named queue limit exceeded");
+    for (var queue : program.queues()) {
+      name(queue.name());
+      var shape = shape(queue.shape());
+      if (!shape.wrapper()) fail("Named queue requires a wrapper shape");
+      if (queues.putIfAbsent(queue.name(), shape) != null) fail("Duplicate queue " + queue.name());
     }
     var ids = new HashSet<ObjectId>();
     for (var object : program.objects()) {
@@ -257,6 +265,11 @@ public final class GirValidator {
         var shape = shape(op.shape());
         if (!shape.wrapper()) fail("allocate-ref requires a wrapper type");
         operand(op.value(), true);
+        if (op.queue() != null) {
+          if (!shape.equals(queue(op.queue()))) fail("Queue wrapper shape mismatch");
+          if (!(op.value() instanceof Operand.Null))
+            fail("Registered wrappers require literal null in this slice");
+        }
         declare(op.name(), shape);
       }
       case Instruction.ReadRoot op -> {
@@ -306,7 +319,15 @@ public final class GirValidator {
         declare(op.name(), null);
       }
 
-      case Instruction.PollQueue ignored -> {}
+      case Instruction.EnqueueReference op -> {
+        wrapper(op.owner());
+        declare(op.name(), null);
+      }
+      case Instruction.PollQueue op -> {
+        if (op.named()) {
+          declare(op.name(), queue(op.queue()));
+        } else if (op.name() != null) fail("Legacy poll has no result binding");
+      }
       case Instruction.IdentityHash op -> operand(op.owner(), true);
       case Instruction.SameObject op -> {
         operand(op.left(), true);
@@ -365,6 +386,12 @@ public final class GirValidator {
   private static void copyRange(int index, int length, int size) {
     if (index < 0 || length < 0 || index > size || length > size - index)
       fail("Invalid copy-array range");
+  }
+
+  private Shape queue(String name) {
+    var shape = queues.get(name);
+    if (shape == null) fail("Unknown named queue " + name);
+    return shape;
   }
 
   private void wrapper(String owner) {

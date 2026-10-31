@@ -21,6 +21,8 @@ public final class NativeObserver {
     }
   }
 
+  private static boolean queuesConfigured;
+
   private NativeObserver() {}
 
   /**
@@ -42,6 +44,42 @@ public final class NativeObserver {
     configure0(
         classes.stream().map(Registration::type).toArray(Class<?>[]::new),
         classes.stream().mapToInt(entry -> entry.kind().ordinal()).toArray());
+  }
+
+  /**
+   * Adds dedicated static queue/helper roles after graph configuration. The native policy copies
+   * metadata and weak tags only; it receives no workload values and retains no class mirrors.
+   */
+  public static void configureQueues(Class<?> queueRoots, Class<?> queueType) {
+    Objects.requireNonNull(queueRoots);
+    if (queuesConfigured) throw new IllegalStateException("Queue policy is already configured");
+    try {
+      Class.forName(queueRoots.getName(), true, queueRoots.getClassLoader());
+      Class.forName(Objects.requireNonNull(queueType).getName(), true, queueType.getClassLoader());
+    } catch (ClassNotFoundException failure) {
+      throw new IllegalStateException("Queue roots cannot be prepared", failure);
+    }
+    configureQueues0(queueRoots, Objects.requireNonNull(queueType));
+    queuesConfigured = true;
+  }
+
+  /** Two independent recording statuses from exactly one heap walk. */
+  public record QueueSnapshots(byte[] snapshot, byte[] resources) {
+    public QueueSnapshots {
+      Objects.requireNonNull(snapshot);
+      Objects.requireNonNull(resources);
+    }
+  }
+
+  /**
+   * Resource quota does not truncate an otherwise complete graph; global abort invalidates both.
+   */
+  public static QueueSnapshots captureQueues(long run, long checkpoint, int records) {
+    if (!queuesConfigured) throw new IllegalStateException("Queue capture is not configured");
+    byte[][] data = captureQueues0(run, checkpoint, records);
+    if (data == null || data.length != 2)
+      throw new IllegalStateException("Incomplete queue capture result");
+    return new QueueSnapshots(data[0], data[1]);
   }
 
   /**
@@ -102,7 +140,11 @@ public final class NativeObserver {
   }
 
   /** Raw evidence from one retained capture. Each byte array belongs to its caller. */
-  public record RetainedCapture(byte[] snapshot, byte[] frames) {
+  public record RetainedCapture(byte[] snapshot, byte[] frames, byte[] resources) {
+    public RetainedCapture(byte[] snapshot, byte[] frames) {
+      this(snapshot, frames, null);
+    }
+
     public RetainedCapture {
       Objects.requireNonNull(snapshot);
       Objects.requireNonNull(frames);
@@ -121,9 +163,10 @@ public final class NativeObserver {
     Objects.requireNonNull(threads);
     Objects.requireNonNull(workers);
     byte[][] evidence = captureRetained0(run, checkpoint, records, threads, workers, terminal);
-    if (evidence == null || evidence.length != 2)
+    if (evidence == null || evidence.length != (queuesConfigured ? 3 : 2))
       throw new IllegalStateException("Incomplete retained capture result");
-    return new RetainedCapture(evidence[0], evidence[1]);
+    return new RetainedCapture(
+        evidence[0], evidence[1], queuesConfigured ? Objects.requireNonNull(evidence[2]) : null);
   }
 
   /** Checks wire integrity and capture identity; graph coverage is checked by the engine. */
@@ -151,6 +194,10 @@ public final class NativeObserver {
   public static native String[] openJ9Stack();
 
   private static native void configure0(Class<?>[] classes, int[] kinds);
+
+  private static native void configureQueues0(Class<?> queueRoots, Class<?> queueType);
+
+  private static native byte[][] captureQueues0(long run, long checkpoint, int records);
 
   private static native void bindArrayIdentity0(
       Object array, String shape, int worker, int site, long occurrence);

@@ -37,6 +37,7 @@ import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.HeapSnapshot;
+import io.connglli.gorrect.protocol.QueueHistory;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -94,6 +95,7 @@ final class RunVerifier {
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      QueueResources.source(program, layout);
       boolean lexicalNatural = !observation.controlled() && layout.lexicalCandidates();
       if (observation.controlled() && layout.lexicalCandidates())
         throw new IOException("Lexical candidate selection requires natural observation");
@@ -113,7 +115,7 @@ final class RunVerifier {
       boolean capabilityEvidenceUsable = false;
       try {
         facts =
-            profile.retainedMetadata()
+            QueueResources.controlled(profile, directory)
                 ? ControlledLaunch.targetFacts(directory)
                 : target(directory);
         unmet.addAll(VmDriver.requirements(profile, facts));
@@ -194,7 +196,14 @@ final class RunVerifier {
                 ? ConcurrentHistory.check(
                     program, trace, history, observations, historyLimits(profile))
                 : HistoryOracle.check(
-                    program, trace, history, observations, historyLimits(profile));
+                    program,
+                    trace,
+                    history,
+                    ReferenceProgram.usesQueues(program)
+                        ? QueueHistory.read(directory.resolve("traces/queues.qhistory"), run)
+                        : null,
+                    observations,
+                    historyLimits(profile));
 
         problems.addAll(result.problems());
         captures.merge(exercised, unmet, problems);
@@ -452,9 +461,11 @@ final class RunVerifier {
       this.run = run;
       this.profile = profile;
       this.layout = layout;
-      if (profile.retainedMetadata()) {
+      if (profile.retainedMetadata() || layout.queuePlan() != null) {
         try {
-          ControlledLaunch.evidence(profile, manifest, ControlledLaunch.targetFacts(directory));
+          var facts = ControlledLaunch.targetFacts(directory);
+          ControlledLaunch.evidence(profile, manifest, facts, layout.queuePlan() != null);
+          if (layout.queuePlan() != null) QueueResources.admission(profile, manifest, facts);
         } catch (IOException | RuntimeException failure) {
           launchProblem = "Controlled launch evidence failed: " + failure;
           errors.add(launchProblem);
@@ -462,6 +473,7 @@ final class RunVerifier {
       }
       try {
         RetainedMetadata.selection(directory, profile, layout);
+        QueueResources.selection(directory, layout);
         if (profile.retainedMetadata()) RetainedMetadata.completion(directory, run);
       } catch (IOException | RuntimeException failure) {
         errors.add("Metadata certification failed: " + failure);
@@ -476,15 +488,17 @@ final class RunVerifier {
         if (launchProblem != null) throw new IOException(launchProblem);
         RetainedMetadata.selection(directory, profile, layout);
         compilationCoverage(capture, profile, unmet);
-        return projection(
-            directory,
-            capture,
-            layout,
-            ObservationProfile.parse(profile.observation()),
-            declarations,
-            exercised,
-            cut,
-            terminal);
+        var projection =
+            projection(
+                directory,
+                capture,
+                layout,
+                ObservationProfile.parse(profile.observation()),
+                declarations,
+                exercised,
+                cut,
+                terminal);
+        return queueProjection(capture, projection);
       } catch (IOException | RuntimeException failure) {
         String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
         errors.add(problem);
@@ -492,8 +506,19 @@ final class RunVerifier {
             capture == null
                 ? Optional.<Graph>empty()
                 : SnapshotProjector.project(capture, layout).graph();
-        return new SnapshotProjector.Projection(Optional.empty(), List.of(problem), named);
+        var projection =
+            new SnapshotProjector.Projection(Optional.empty(), List.of(problem), named);
+        return capture == null ? projection : queueProjection(capture, projection);
       }
+    }
+
+    private SnapshotProjector.Projection queueProjection(
+        HeapSnapshot capture, SnapshotProjector.Projection projection) {
+      if (launchProblem != null) return projection;
+      var result = QueueResources.project(directory, capture, layout, profile.vm(), projection);
+      if (layout.queuePlan() != null && !result.problems().isEmpty())
+        errors.addAll(result.problems());
+      return result;
     }
 
     NaturalCapture natural(long sequence, Set<Integer> candidates, Set<Integer> required) {
@@ -650,12 +675,18 @@ final class RunVerifier {
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
-      if (profile.retainedMetadata())
-        ControlledLaunch.evidence(profile, manifest, ControlledLaunch.targetFacts(directory));
+      if (profile.retainedMetadata() || ReferenceProgram.usesQueues(program)) {
+        var facts = ControlledLaunch.targetFacts(directory);
+        ControlledLaunch.evidence(profile, manifest, facts, ReferenceProgram.usesQueues(program));
+        if (ReferenceProgram.usesQueues(program))
+          QueueResources.admission(profile, manifest, facts);
+      }
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
 
+      QueueResources.source(program, layout);
+      QueueResources.selection(directory, layout);
       var plan = new CheckpointPlan(HistoryPlan.plan(program, OracleLimits.DEFAULT));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       var recorded = CheckpointPlan.recorded(program, trace);
@@ -678,6 +709,9 @@ final class RunVerifier {
                 ObservationProfile.parse(profile.observation()),
                 expectedBindings,
                 new HashSet<>());
+        projection =
+            QueueResources.project(
+                directory, snapshot(directory, run, index), layout, profile.vm(), projection);
         observations.add(
             new HistoryOracle.Observation(
                 projection.covered(), projection.problems(), projection.graph().isPresent()));
@@ -688,6 +722,9 @@ final class RunVerifier {
               program,
               trace,
               referenceHistory(directory, run, program),
+              ReferenceProgram.usesQueues(program)
+                  ? QueueHistory.read(directory.resolve("traces/queues.qhistory"), run)
+                  : null,
               observations,
               new HistoryLimits(
                   profile.limits().historyStates(), profile.limits().historyTransitions()));

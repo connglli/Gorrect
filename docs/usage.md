@@ -14,6 +14,8 @@ cp profiles/hotspot-serial.example.json profiles/local/hotspot-serial.json
 
 Set `java` in the copied profile to the target executable. Paths are absolute or relative to the profile. The example assumes that copy location and a Linux native build; adjust the library for another OS. Local profiles/runs are ignored. The engine supplies its own compiler; the target needs none.
 
+Choose an [example](../examples/) with a compatible [capture profile](./observation.md#coverage-and-observer-effects).
+
 ## Commands
 
 From the repository root:
@@ -81,7 +83,7 @@ javac --release 17 -d build/whitebox-classes \
 jar --create --file build/whitebox.jar -C build/whitebox-classes .
 ```
 
-Set `support.whitebox` to that JAR. The bundle records its hash/target identity. Start with [locals.gir](../examples/locals.gir), [natural-conditional.gir](../examples/natural-conditional.gir) or [reference-objects.gir](../examples/reference-objects.gir), using their compatible [capture profiles](./observation.md#coverage-and-observer-effects).
+Set `support.whitebox` to that JAR. The bundle records its hash/target identity.
 
 ## Artifacts and results
 

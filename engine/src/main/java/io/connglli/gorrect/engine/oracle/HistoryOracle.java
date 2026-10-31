@@ -15,6 +15,7 @@ import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import io.connglli.gorrect.protocol.QueueHistory;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.util.ArrayList;
 import java.util.List;
@@ -35,6 +36,9 @@ public final class HistoryOracle {
       problems = List.copyOf(problems);
       if (complete && graph.isEmpty())
         throw new IllegalArgumentException("Complete observation has no graph");
+      if (complete
+          && graph.orElseThrow().queues().values().stream().anyMatch(queue -> !queue.complete()))
+        throw new IllegalArgumentException("Complete observation has partial queue facts");
     }
 
     /** Legacy callers supply a full graph or no usable coverage. */
@@ -64,6 +68,9 @@ public final class HistoryOracle {
   private final ReferenceFrontier frontier;
   private final ExecutionTrace trace;
   private final ReferenceHistory history;
+  private final QueueHistory queueHistory;
+  private final List<GirProgram.Queue> queues;
+  private int queuePosition;
   private final List<Observation> observations;
   private final List<OracleResult.Checkpoint> checkpoints = new ArrayList<>();
   private final List<String> problems = new ArrayList<>();
@@ -77,7 +84,10 @@ public final class HistoryOracle {
       ExecutionTrace trace,
       ReferenceHistory history,
       List<Observation> observations,
-      HistoryLimits limits) {
+      HistoryLimits limits,
+      QueueHistory queueHistory) {
+    this.queueHistory = queueHistory;
+    queues = program.queues();
     typed = ReferenceProgram.usesFirstClass(program);
     machine = new GraphMachine(program, OracleLimits.DEFAULT);
     frontier = new ReferenceFrontier(limits);
@@ -114,7 +124,7 @@ public final class HistoryOracle {
     validateProgram(program);
     if (HistoryProgram.usesConcurrentHistory(program))
       return ConcurrentHistory.check(program, trace, history, observations, limits);
-    return check(program, trace, history, observations, limits, false);
+    return check(program, trace, history, observations, limits, false, null);
   }
 
   /**
@@ -130,7 +140,35 @@ public final class HistoryOracle {
       List<Observation> observations,
       HistoryLimits limits) {
     validateProgram(program);
-    return check(program, trace, history, observations, limits, true);
+    return check(program, trace, history, observations, limits, true, null);
+  }
+
+  /** Checks explicitly selected queue evidence without modifying the legacy reference channel. */
+  public static Result check(
+      GirProgram program,
+      ExecutionTrace trace,
+      ReferenceHistory history,
+      QueueHistory queues,
+      List<Observation> observations,
+      HistoryLimits limits) {
+    validateProgram(program);
+    if (!ReferenceProgram.usesQueues(program)) {
+      if (queues != null) throw new IllegalArgumentException("Unselected queue history");
+      return check(program, trace, history, observations, limits);
+    }
+    return check(program, trace, history, observations, limits, false, queues);
+  }
+
+  /** Prefix counterpart retaining actual queue API effects before a runtime failure. */
+  public static Result checkFailure(
+      GirProgram program,
+      ExecutionTrace trace,
+      ReferenceHistory history,
+      QueueHistory queues,
+      List<Observation> observations,
+      HistoryLimits limits) {
+    validateProgram(program);
+    return check(program, trace, history, observations, limits, true, queues);
   }
 
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
@@ -162,7 +200,21 @@ public final class HistoryOracle {
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits,
-      boolean prefix) {
+      boolean prefix,
+      QueueHistory queueHistory) {
+    if (ReferenceProgram.usesQueues(program)
+        && (queueHistory == null
+            || queueHistory.run() != trace.run()
+            || !prefix && !queueHistory.complete()
+            || queueHistory.events().stream()
+                .anyMatch(
+                    event ->
+                        event.sequence() > trace.byWorker().getOrDefault(0, List.of()).size())))
+      return new Result(
+          ExactVerifier.Verdict.INCONCLUSIVE,
+          List.of("Queue history is missing, incomplete or unlinked"),
+          null,
+          false);
     if ((!prefix && (!trace.complete() || !history.complete()))
         || trace.run() != history.run()
         || !linked(trace, history))
@@ -175,7 +227,7 @@ public final class HistoryOracle {
     HistoryOracle checker = null;
 
     try {
-      checker = new HistoryOracle(program, trace, history, observations, limits);
+      checker = new HistoryOracle(program, trace, history, observations, limits, queueHistory);
       checker.prefix = prefix;
       checker.execute(program.body());
 
@@ -188,6 +240,9 @@ public final class HistoryOracle {
       require(
           checker.referencePosition == history.events().size(),
           "Unexpected reference history suffix");
+      require(
+          queueHistory == null || checker.queuePosition == queueHistory.events().size(),
+          "Unexpected queue history suffix");
       if (checker.checkpoint != observations.size()) {
         checker.incomplete = true;
         checker.problems.add("Missing or extra graph observations for the validated path");
@@ -221,6 +276,7 @@ public final class HistoryOracle {
           && (checker == null
               || checker.position != trace.events().size()
               || checker.referencePosition != history.events().size()
+              || queueHistory != null && checker.queuePosition != queueHistory.events().size()
               || checker.incomplete
               || checker.checkpoint != observations.size()))
         return new Result(
@@ -296,7 +352,28 @@ public final class HistoryOracle {
           require(
               Objects.equals(value.heapTarget(), target(event.target())),
               "Reference construction changed its target");
+          if (queueHistory != null) {
+            var actual = takeQueue(QueueHistory.Kind.CREATE, allocation.id(), position);
+            queueSubject(actual, value.wrapper());
+            require(
+                actual.queue() == queueId(allocation.queue()) && actual.result() == 0,
+                "Reference constructor changed its actual queue argument");
+          }
           frontier.register(value, false);
+        }
+
+        case Instruction.EnqueueReference enqueue -> {
+          var value = machine.referenceValue(enqueue.owner(), -1);
+          machine.apply(enqueue);
+          expect();
+          var actual = takeQueue(QueueHistory.Kind.ENQUEUE, enqueue.id(), position);
+          queueSubject(actual, value.wrapper());
+          long result = ((Value.Scalar) machine.bound(enqueue.name())).value();
+          require(
+              actual.queue() == queueId(machine.registration(value.wrapper()))
+                  && actual.result() == result,
+              "Impossible explicit enqueue result or registration");
+          frontier.programClear(value.wrapper());
         }
 
         case Instruction.ReferenceState state -> {
@@ -313,6 +390,22 @@ public final class HistoryOracle {
 
         case Instruction.PollQueue poll -> {
           long result = choice(poll.id(), ExecutionTrace.Kind.QUEUE_POLL);
+          if (poll.named()) {
+            var actual = takeQueue(QueueHistory.Kind.POLL, poll.id(), position + 1);
+            var returned = id(actual.wrapper());
+            require(
+                actual.queue() == queueId(poll.queue())
+                    && actual.result() == result
+                    && (returned != null) == (result == 1),
+                "Named poll changed its queue, result or wrapper identity");
+            var members = machine.graph().queues().get(poll.queue()).members();
+            require(
+                returned == null ? members.isEmpty() : members.contains(returned),
+                "Impossible named queue delivery");
+            machine.pollNamed(poll, returned);
+            expect();
+            break;
+          }
           var event = take(ReferenceHistory.Kind.QUEUE, position + 1);
           require(
               (event.wrapper() != null) == (result == 1),
@@ -370,6 +463,33 @@ public final class HistoryOracle {
         }
       }
     }
+  }
+
+  private int queueId(String name) {
+    if (name == null) return 0;
+    for (int index = 0; index < queues.size(); index++)
+      if (queues.get(index).name().equals(name)) return index + 1;
+    throw new GirException("Unknown queue " + name);
+  }
+
+  private QueueHistory.Event takeQueue(QueueHistory.Kind kind, int operation, int sequence) {
+    // An API/scalar result may survive after its incomplete identity recorder stops.
+    if (prefix
+        && queueHistory != null
+        && !queueHistory.complete()
+        && queuePosition == queueHistory.events().size()) throw new EndOfPrefix();
+    require(
+        queueHistory != null && queuePosition < queueHistory.events().size(),
+        "Missing queue operation evidence");
+    var event = queueHistory.events().get(queuePosition++);
+    require(
+        event.kind() == kind && event.operation() == operation && event.sequence() == sequence,
+        "Queue operation linkage differs from executed GIR");
+    return event;
+  }
+
+  private static void queueSubject(QueueHistory.Event event, WrapperId id) {
+    require(Objects.equals(id(event.wrapper()), id), "Queue receiver identity differs from GIR");
   }
 
   private void scoped(List<Instruction> body) {

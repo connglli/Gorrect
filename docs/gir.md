@@ -26,7 +26,7 @@ program {
 }
 ```
 
-`main` initially reaches objects 1 and 2. The scope reads object 2's data into `saved`, changes it to 42, then creates an object containing the saved 9 and links it through the parent's second reference. Scope exit releases the three handles; all three objects remain reachable from `main`.
+Object 2 changes from 9 to 42; a fresh object stores its original 9. All three objects remain reachable through `main` after the handles leave scope.
 
 ## Objects and declarations
 
@@ -39,9 +39,10 @@ Objects have stable logical identities, declared shapes, indexed references and 
 | `shape N object 2 1;` | Object layout with reference slots 0/1 and data slot 0; no instance is created. |
 | `shape Links refs 4;` | Reference-array layout with four elements. |
 | `shape Payload data 8;` | Long-array layout with eight elements. |
-| `shape W weak;` / `shape S soft;` | Nominal no-queue wrapper type without indexed payload slots. |
+| `shape W weak;` / `shape S soft;` | Nominal wrapper type without indexed payload slots. |
 | `object 1 N [2, null] [7];` | Initial object ID 1: first reference targets ID 2, second is null, data is 7. |
 | `root main = 1;` / `root saved = null;` | Named strong root slots with the stated initial targets. |
+| `queue ready W;` | Named reference queue admitting only wrapper type `W`. |
 
 Initial references use IDs or `null`, with `soft(2)` / `weak(2)` for wrapped targets and `soft(null)` / `weak(null)` for cleared wrappers. Lists must match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
 
@@ -53,14 +54,15 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 
 ## Instructions
 
-The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) define exact preconditions, effects, step costs and rejection behavior. Reference operands are live handles or `null`; scalar operands are scalar bindings or signed 64-bit literals. Reference/data indices are separate zero-based signed 32-bit literals. Access requires a live non-null owner and an in-range slot; non-null reads must match their declared shape. Validation checks every block, including skipped arms and zero-iteration loops.
+[Instruction.java](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) defines exact preconditions, effects, step costs and rejection behavior. Reference operands are live handles or `null`; scalars are bindings or signed 64-bit literals. Reference/data indices are separate zero-based signed 32-bit literals. Access needs a live non-null owner and in-range slot; non-null reads must match their declared shape. Validation includes skipped arms and zero-iteration loops.
 
 | Form | Purpose |
 | --- | --- |
 | `allocate h N;` | Fresh zero-filled instance and strong handle. |
 | `clone copy original;` | Fresh shallow array copy with the source's nominal shape. |
 | `copy-array source sourceIndex destination destinationIndex length;` | Copy a complete shallow range, preserving identities and overlap semantics. |
-| `allocate-ref r W value;` | Fresh no-queue soft/weak wrapper. |
+| `allocate-ref r W value;` / `allocate-ref r W null ready;` | Fresh soft/weak wrapper, optionally registered with a named queue. |
+| `enqueue-ref inserted r;` | Clear even on failure; bind long 1 for first insertion, otherwise 0. |
 | `read-root h N root;` | Copy a named root into a strong handle. |
 | `read-volatile-root h N root;` | Volatile root read into a strong handle. |
 | `write-root root h;` | Replace a named root's target. |
@@ -74,7 +76,7 @@ The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/g
 | `acquire h N owner index { ... }` / `acquire h N r { ... }` | Acquire once; run the child scope if non-null. |
 | `is-cleared value owner index;` / `is-cleared value r;` | Observe cleared state as 0/1 without acquiring the referent. |
 | `clear-ref owner index;` / `clear-ref r;` | Explicitly clear without enqueueing. |
-| `poll-queue;` | Observe one implicit-queue delivery, or empty. |
+| `poll-queue;` / `poll-queue delivered ready;` | Implicit delivery, or consume any named member into a strong handle; null only if empty. |
 | `read-data value owner index;` | Copy a long slot into a scalar. |
 | `read-volatile-data value owner index;` | Volatile long-slot read. |
 | `write-data owner index value;` | Replace a long slot. |
@@ -97,21 +99,21 @@ The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/g
 | `parallel { worker name { ... } ... }` | Start workers together and join all. |
 | `barrier;` | Complete a worker phase and wait for peers. |
 
-Ordinary root, strong-reference and data reads/writes are plain; the listed volatile spellings select that mode per access. CAS and exchange have volatile effects; failed CAS has read effects and no spurious failure. `if-nonzero` evaluates once: zero selects else, every nonzero value selects then. Branch scopes export no bindings, while heap/root writes persist.
+Root, strong-reference and data reads/writes are plain unless explicitly volatile. CAS/exchange have volatile effects; failed CAS has only read effects. CAS never fails spuriously. `if-nonzero` evaluates once: zero selects else, every nonzero value selects then. Branch scopes export no bindings; heap/root writes persist.
 
-Reference bindings are strong until release or scope exit; acquired handles last through their whole acquisition body. Scalars retain no objects. Names cannot shadow active bindings or be reused after release in the same scope. Release applies only to the current scope. Releasing a handle removes its obligation without requiring immediate reclamation. The outer scope ends before the final capture. Checkpoints in selected branches count only executed visits; [observation profiles](./observation.md#coverage-and-observer-effects) determine physical local obligations.
+Reference bindings stay strong until release or scope exit; acquired handles last through their acquisition body. Scalars retain no objects. Names cannot shadow active bindings or be reused after release within a scope. Only current-scope bindings may be released, removing obligations without requiring reclamation. The outer scope ends before final capture. Conditional checkpoints count executed visits; [observation profiles](./observation.md#coverage-and-observer-effects) determine physical local obligations.
 
 Array cloning and range copying require strong sequential programs with controlled observation.
 
 ## Reference histories
 
-First-class wrappers are constructed only by `allocate-ref`. Root/strong-slot operations move the same wrapper pointer, so aliases share clear state. A wrapper handle protects the wrapper; an acquired handle protects its referent. A null wrapper differs from a cleared wrapper. Referents may be ordinary objects or older no-queue wrappers; see [reference-objects.gir](../examples/reference-objects.gir).
+Only `allocate-ref` creates first-class wrappers; roots and strong slots preserve their identity and shared clear state. Wrapper handles retain wrappers; acquired handles retain referents. A null wrapper differs from a cleared wrapper. No-queue referents can be ordinary objects or older wrappers; named registration requires literal `null`. Registration is immutable and does not root the wrapper; queued wrappers are strong roots before soft/weak processing.
 
-First-class wrappers require sequential controlled observation. Atomic/concurrent or natural first-class cases, initial wrapper declarations, named queues, phantom references and Cleaner actors are unsupported. Legacy slot wrappers remain opaque and their store operands are ordinary objects/null; they cannot be exposed as first-class values, including through paths avoided by one execution.
+First-class wrappers require sequential controlled observation with [qualified capture](./observation.md#tagged-reference-targets). Atomic/concurrent or natural execution, initial wrapper declarations, phantom references and Cleaner actors are unsupported. Legacy slot wrappers remain opaque, accept ordinary objects/null, and cannot become first-class values, even in unexecuted paths.
 
-Legacy reference histories cover fields and arrays, including supported parallel cases. The checker validates acquisition/state/clear choices and Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html)/[weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) clearing rules before deriving later expectations. Clearing is permanent per wrapper; replacing a slot creates a fresh [incarnation](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact contents. [references.gir](../examples/references.gir) is a complete example.
+Reference histories check acquisition/state/clear choices against Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html)/[weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) clearing rules before deriving expectations, including legacy fields/arrays in supported parallel cases. Clearing is permanent per wrapper; soft/weak slot writes create fresh [incarnations](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact contents. See [reference examples](../examples/).
 
-Clearing, notification and reclamation are distinct. Initially null or explicitly cleared wrappers are not enqueued by those actions; an empty poll proves no processing progress. Collection requests force none of these outcomes. Retained garbage is allowed; reclamation, finalization and resurrection checks remain unsupported.
+Clearing, notification and reclamation are distinct: initial null and explicit clear alone never enqueue; empty polls prove no processing progress. Collection requests guarantee none of these outcomes. Retained garbage is allowed; reclamation, finalization and resurrection checks are unsupported.
 
 ## Parallel workers
 

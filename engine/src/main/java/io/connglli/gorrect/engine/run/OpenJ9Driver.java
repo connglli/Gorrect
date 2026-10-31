@@ -23,13 +23,19 @@ final class OpenJ9Driver {
 
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
     var arguments = new ArrayList<String>();
-    arguments.add(VmDriver.executable(profile));
-    arguments.addAll(launchOptions(profile, directory, observer));
+    arguments.add(VmDriver.executable(profile, QueueResources.controlled(profile, directory)));
+    arguments.addAll(
+        launchOptions(profile, directory, observer, QueueResources.controlled(profile, directory)));
     return arguments;
   }
 
   /** Pure owned options; VM-reported launcher defaults are checked separately. */
   static List<String> launchOptions(TargetProfile profile, Path directory, String observer) {
+    return launchOptions(profile, directory, observer, profile.retainedMetadata());
+  }
+
+  static List<String> launchOptions(
+      TargetProfile profile, Path directory, String observer, boolean controlled) {
     var args = new ArrayList<String>();
     if (profile.jit() != null) {
       // Compile actual modeled worker calls, with no extra invocation or graph mutation.
@@ -42,8 +48,8 @@ final class OpenJ9Driver {
         args.add("-Xjit:count=0,limit={Case.worker*}");
     }
     args.addAll(profile.vmArgs());
-    if (profile.retainedMetadata()) args.add("-Dcom.ibm.tools.attach.enable=no");
-    if (profile.jit() != null || profile.retainedMetadata()) {
+    if (controlled) args.add("-Dcom.ibm.tools.attach.enable=no");
+    if (profile.jit() != null || controlled) {
       args.add("-Xshareclasses:none");
       args.add("-Xnoaot");
     }

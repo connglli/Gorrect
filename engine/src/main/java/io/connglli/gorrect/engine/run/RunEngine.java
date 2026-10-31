@@ -252,6 +252,8 @@ public final class RunEngine {
 
       var combination = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
       combination.addAll(VmDriver.unsupported(profile));
+      if (ReferenceProgram.usesQueues(program))
+        combination.addAll(QueueResources.configuration(profile));
       if (!combination.isEmpty())
         return finish(
             directory,
@@ -360,6 +362,8 @@ public final class RunEngine {
     JsonFiles.write(directory.resolve("generated/layout.json"), emission.layout());
     new ObserverPlan(profile.bindingMetadata())
         .write(directory.resolve("generated/observer.properties"));
+    if (emission.layout().queuePlan() != null)
+      emission.layout().queuePlan().write(directory.resolve("generated/queues.properties"));
 
     // Exact obligations still select one path; recorder capacity also covers the other arm.
     var storage =

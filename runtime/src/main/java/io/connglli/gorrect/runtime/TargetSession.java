@@ -8,6 +8,8 @@ import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.FrameEvidence;
 import io.connglli.gorrect.protocol.ObserverPlan;
+import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueuePlan;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
 import java.io.DataInputStream;
@@ -54,6 +56,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final boolean retained;
   private boolean codeBound, codeFinalizationAttempted;
   private final boolean typedReferences;
+  private final QueuePlan queuePlan;
+  private final QueueRecorder queueRecorder;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
   private long collections;
@@ -62,6 +66,16 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final int bindingCapacity;
 
   private TargetSession(String[] args, Class<?> intended) throws IOException {
+    this(args, intended, null, null, null);
+  }
+
+  private TargetSession(
+      String[] args,
+      Class<?> intended,
+      List<NativeObserver.Registration> registrations,
+      Class<?> queueRoots,
+      Class<?> queueType)
+      throws IOException {
     if (args.length != 6) throw new IllegalArgumentException("Invalid target launch arguments");
     run = Long.parseLong(args[1]);
     directory = Path.of(args[2]);
@@ -73,6 +87,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     retained = retainedPlan(directory);
     referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
     typedReferences = Files.exists(directory.resolve("generated/typed-references.properties"));
+    Path queues = directory.resolve("generated/queues.properties");
+    queuePlan = Files.exists(queues) ? QueuePlan.read(queues) : null;
+    queueRecorder = queuePlan == null ? null : new QueueRecorder(capacity);
     boolean localBindings =
         !System.getProperty("gorrect.observation", "named-roots-diagnostic")
             .equals("named-roots-diagnostic");
@@ -84,7 +101,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
 
-    boolean providerSetup = false;
+    boolean providerSetup = false, queueSetup = false;
     try {
       System.load(args[3]);
       providerSetup = retained;
@@ -100,9 +117,32 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
         checkCodeStatus(code);
       }
       providerSetup = false;
+      queueSetup = queuePlan != null;
+      Properties queueFacts = new Properties();
+      if (queuePlan != null) {
+        if (intended == null
+            || queueRoots == null
+            || queueType == null
+            || registrations == null
+            || !intended.getName().equals("Case")
+            || !queueRoots.getName().equals("Case$QueueRoots")
+            || intended.getClassLoader() != ClassLoader.getSystemClassLoader()
+            || queueRoots.getClassLoader() != intended.getClassLoader()
+            || !queueType.getName().equals("Case$Queue")
+            || queueType.getClassLoader() != intended.getClassLoader()
+            || queueType.getSuperclass() != java.lang.ref.ReferenceQueue.class)
+          throw new IllegalStateException(
+              "Named queues require intended system-defined resource metadata");
+        NativeObserver.configure(registrations);
+        NativeObserver.configureQueues(queueRoots, queueType);
+        queueFacts = QueueQualification.exercise();
+      } else if (registrations != null || queueRoots != null || queueType != null)
+        throw new IllegalStateException("Queue setup supplied without source selection");
+      queueSetup = false;
       control = VmControl.open(directory, run);
 
       var properties = VmFacts.read();
+      properties.putAll(queueFacts);
       properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
       properties.setProperty("observer.bindingMetadata", retained ? "retained-class" : "jvmti");
@@ -125,7 +165,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
         failure.addSuppressed(cleanup);
       }
       try {
-        send(ControlMessage.Kind.FAILED, 0, 0, startupFailureDetail(providerSetup, failure));
+        send(
+            ControlMessage.Kind.FAILED,
+            0,
+            0,
+            startupFailureDetail(providerSetup, queueSetup, failure));
       } catch (Throwable cleanup) {
         failure.addSuppressed(cleanup);
       }
@@ -168,6 +212,37 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    */
   public static TargetSession open(String[] args, Class<?> intended) throws IOException {
     return new TargetSession(args, Objects.requireNonNull(intended));
+  }
+
+  /** Opens a source-selected named-queue case, configuring copied metadata before HELLO/ACK. */
+  public static TargetSession open(
+      String[] args,
+      Class<?> intended,
+      List<NativeObserver.Registration> registrations,
+      Class<?> queueRoots,
+      Class<?> queueType)
+      throws IOException {
+    return new TargetSession(
+        args,
+        Objects.requireNonNull(intended),
+        List.copyOf(registrations),
+        Objects.requireNonNull(queueRoots),
+        Objects.requireNonNull(queueType));
+  }
+
+  @Override
+  public void queue(
+      int operation,
+      int kind,
+      int queue,
+      int result,
+      int creator,
+      int site,
+      long occurrence,
+      int slot) {
+    if (queueRecorder == null) throw new IllegalStateException("Queue evidence was not selected");
+    queueRecorder.record(
+        recorders.get(0).size(), operation, kind, queue, result, creator, site, occurrence, slot);
   }
 
   /**
@@ -494,10 +569,24 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), snapshot);
       Files.write(directory.resolve("snapshots/" + checkpoint + ".gframe"), evidence.frames());
       FrameEvidence.read(evidence.frames(), run, checkpoint);
+      if (queuePlan != null) {
+        if (evidence.resources() == null)
+          throw new IOException("Missing retained queue resource result");
+        writeQueues(evidence.resources());
+      }
+    } else if (queuePlan != null) {
+      var evidence = NativeObserver.captureQueues(run, checkpoint, records);
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), evidence.snapshot());
+      writeQueues(evidence.resources());
     } else {
       snapshot = NativeObserver.capture(run, checkpoint, records);
       Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), snapshot);
     }
+  }
+
+  private void writeQueues(byte[] bytes) throws IOException {
+    Files.write(directory.resolve("snapshots/" + checkpoint + ".gqueue"), bytes);
+    QueueCapture.read(bytes, run, checkpoint);
   }
 
   /** Records only nullness before capture, without acquiring or retaining a workload reference. */
@@ -546,6 +635,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     return (unsupported ? ControlMessage.RETAINED_UNSUPPORTED : "") + failureDetail(failure);
   }
 
+  static String startupFailureDetail(boolean providerSetup, boolean queueSetup, Throwable failure) {
+    if (queueSetup
+        && (failure instanceof IllegalArgumentException
+            || failure instanceof IllegalStateException))
+      return ControlMessage.QUEUES_UNSUPPORTED + failureDetail(failure);
+    return startupFailureDetail(providerSetup, failure);
+  }
+
   private static String failureDetail(Throwable failure) {
     // Bound failure text to the modified-UTF length used by control frames.
     String detail = failure.getClass().getName() + ": " + failure.getMessage();
@@ -573,6 +670,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       if (typedReferences) history.writeTyped(directory.resolve("traces/references.gtyped"));
       else history.write(directory.resolve("traces/references.ghistory"));
     }
+
+    if (queueRecorder != null)
+      queueRecorder.history(run, finished).write(directory.resolve("traces/queues.qhistory"));
 
     new ExecutionEvidence(run, finished, groups, windows)
         .write(directory.resolve("traces/workers.gevidence"));

@@ -1,0 +1,19 @@
+gir 1;
+shape W weak;
+queue ready W;
+root saved = null;
+program {
+  scope {
+    allocate-ref wrapped W null ready;
+    allocate-ref witness W wrapped;
+    enqueue-ref added wrapped;
+    write-root saved witness;
+  }
+  // Queue ownership protects wrapped after its handle expires.
+  collect;
+  checkpoint;
+  poll-queue delivered ready;
+  write-root saved delivered;
+  release delivered;
+  checkpoint;
+}

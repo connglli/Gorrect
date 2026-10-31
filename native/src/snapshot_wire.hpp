@@ -102,6 +102,9 @@ public:
     integer(static_cast<std::uint32_t>(value.size()));
     bytes_.insert(bytes_.end(), value.begin(), value.end());
   }
+  void bytes(const std::vector<std::uint8_t> &value) {
+    bytes_.insert(bytes_.end(), value.begin(), value.end());
+  }
   std::vector<std::uint8_t> finish() { return std::move(bytes_); }
 };
 

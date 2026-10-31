@@ -49,6 +49,7 @@ public final class ExactVerifier {
     var differences = new ArrayList<String>();
     bindings("root", required.roots(), observed.roots(), differences);
     bindings("handle", required.handles(), observed.handles(), differences);
+    bindings("queue", required.queues(), observed.queues(), differences);
     // Exact roots and outgoing slots expose invented reachability while allowing retained garbage.
     for (var id : new TreeSet<>(required.objects().keySet())) {
       if (differences.size() >= MAX_DIFFERENCES) break;

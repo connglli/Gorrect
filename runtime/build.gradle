@@ -167,3 +167,38 @@ dependencies {
     }
     tasks.named('check') { dependsOn parkingTest }
 }
+
+
+// Separate source set avoids colliding with the retained fixture's generated-style Case class.
+sourceSets {
+    queueNativeSmoke {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    queueNativeSmokeImplementation.extendsFrom implementation
+    queueNativeSmokeRuntimeOnly.extendsFrom runtimeOnly
+}
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { feature ->
+    ['plain', 'locals', 'retained', 'duplicate', 'wrong-type', 'zero', 'resource-quota', 'graph-quota'].each { mode ->
+        def task = tasks.register("queue${mode.split('-').collect { it.capitalize() }.join('')}Smoke${feature}", JavaExec) {
+            group = 'verification'
+            description = "Checks native queue ownership (${mode}) on Java ${feature}."
+            dependsOn tasks.named('queueNativeSmokeClasses'), configurations.nativeObserver
+            classpath = sourceSets.queueNativeSmoke.runtimeClasspath
+            mainClass = 'Case'
+            javaLauncher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(feature)
+            }
+            timeout = Duration.ofSeconds(60)
+            doFirst {
+                def library = configurations.nativeObserver.singleFile.absolutePath
+                def option = mode == 'retained' ? '=retained-class' : mode == 'locals' ? '=locals' : ''
+                setJvmArgs(["-agentpath:${library}${option}", '-Xint', '-Xcheck:jni', '-Xmx128m'])
+                setArgs([library, layout.buildDirectory.dir("queue/java${feature}/${mode}").get().asFile.absolutePath, mode])
+            }
+        }
+        tasks.named('check') { dependsOn task }
+    }
+}

@@ -214,6 +214,14 @@ public final class SnapshotProjector {
     }
   }
 
+  /** Actual captured wrapper identities, without expected membership or a Java wrapper lookup. */
+  public static Map<Long, WrapperId> wrapperIdentities(
+      HeapSnapshot snapshot, ObservationLayout layout) {
+    var decoder = new Decoder(snapshot, layout);
+    decoder.decode();
+    return Map.copyOf(decoder.referenceIds);
+  }
+
   private static final class Decoder {
     private final HeapSnapshot snapshot;
     private final ObservationLayout layout;

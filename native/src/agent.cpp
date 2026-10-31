@@ -1,6 +1,9 @@
+#include "heap_capture.hpp"
 #include "openj9_stack.hpp"
+#include "queue_wire.hpp"
 #include "retained_observer.hpp"
 #include "snapshot_wire.hpp"
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <cstring>
@@ -15,7 +18,6 @@ namespace {
 using namespace gorrect;
 // Negative tags identify registered classes; ordinary objects use [1, array_base),
 // and bound arrays use array_base + binding index + 1. These are not GIR object IDs.
-constexpr jlong array_base = 1LL << 62;
 constexpr std::size_t max_arrays = 4096;
 constexpr jint max_records = 1'000'000;
 jvmtiEnv *jvmti = nullptr;
@@ -24,6 +26,9 @@ jvmtiExtensionFunction extended_stacks = nullptr;
 std::mutex control_mutex;
 // Copied metadata and weak JVMTI tags retain no Java objects or classes.
 std::vector<ClassInfo> classes;
+// Resource-only classes follow the graph class-ID range without changing graph lookup.
+std::vector<ClassInfo> queue_classes;
+bool queue_setup_attempted = false;
 // Published entries never move or change. Mutators can read primitive identity cells without
 // taking the capture/registration lock or retaining a Java reference.
 std::array<ArrayIdentity, max_arrays> arrays;
@@ -86,9 +91,6 @@ std::string signature(jclass type) {
   check(jvmti->GetClassSignature(type, &name.data, nullptr));
   return ascii(name.data);
 }
-std::int64_t method_token(jmethodID method) {
-  return static_cast<std::int64_t>(reinterpret_cast<std::uintptr_t>(method));
-}
 void raise(JNIEnv *env, const char *type, const char *message) {
   if (env->ExceptionCheck())
     return;
@@ -121,185 +123,77 @@ const ClassInfo *type_for(jlong tag) {
     return nullptr;
   return &classes[static_cast<std::size_t>(-tag - 1)];
 }
-bool is_array_tag(jlong tag) { return tag >= array_base; }
-bool logical_type(const ClassInfo *type) {
-  return type && (type->kind == ClassKind::object || type->kind == ClassKind::soft_reference ||
-                  type->kind == ClassKind::weak_reference);
-}
 
-// Reserve all callback storage before FollowReferences. The callbacks neither allocate nor call
-// JNI.
-struct Capture {
-  Snapshot snapshot;
-  std::vector<bool> class_seen;
-  std::vector<jlong> seen;
-  std::size_t record_limit;
-  bool full = false;
-  Capture(jlong run, jlong checkpoint, jint capacity)
-      : class_seen(classes.size(), false), record_limit(static_cast<std::size_t>(capacity)) {
-    snapshot.run = run;
-    snapshot.checkpoint = checkpoint;
-    snapshot.records.reserve(static_cast<std::size_t>(capacity));
-    // Reserve room for capacity objects plus the one that can trigger record exhaustion.
-    std::size_t size = 1;
-    while (size < static_cast<std::size_t>(capacity) * 2)
-      size <<= 1;
-    seen.resize(size, 0);
+// Resource setup distinguishes allocation failure from unsupported metadata/layout.
+void queue_check(jvmtiError error) {
+  if (error == JVMTI_ERROR_OUT_OF_MEMORY)
+    throw std::bad_alloc();
+  check(error);
+}
+std::string queue_signature(jclass type) {
+  JvmtiMemory<char> name;
+  queue_check(jvmti->GetClassSignature(type, &name.data, nullptr));
+  return ascii(name.data);
+}
+jclass queue_class(JNIEnv *env, const char *name) {
+  auto type = env->FindClass(name);
+  if (!type)
+    throw std::runtime_error("Queue metadata class is unavailable");
+  return type;
+}
+struct LocalFrame {
+  JNIEnv *env;
+  explicit LocalFrame(JNIEnv *environment) : env(environment) {
+    if (env->PushLocalFrame(64) != JNI_OK)
+      throw std::bad_alloc();
   }
-  bool add(Record record) {
-    if (snapshot.records.size() == record_limit) {
-      full = true;
-      return false;
-    }
-    snapshot.records.push_back(record);
-    return true;
-  }
-  std::size_t position(jlong tag) const {
-    auto index =
-        static_cast<std::size_t>(static_cast<std::uint64_t>(tag) * 11400714819323198485ULL) &
-        (seen.size() - 1);
-    while (seen[index] != 0 && seen[index] != tag)
-      index = (index + 1) & (seen.size() - 1);
-    return index;
-  }
-  bool observed(jlong tag) const { return tag > 0 && seen[position(tag)] == tag; }
-  jlong tag(jlong *pointer) {
-    if (!pointer)
-      return 0;
-    // Keep tags stable across captures: some VMs reuse cached tags in primitive callbacks.
-    if (*pointer != 0)
-      return *pointer;
-    if (next_object_tag >= array_base) {
-      full = true;
-      return 0;
-    }
-    *pointer = next_object_tag++;
-    return *pointer;
-  }
-  void object(jlong *pointer, jlong class_tag, jlong size, jint length) {
-    if (*pointer < 0) {
-      auto index = static_cast<std::size_t>(-*pointer - 1);
-      if (index < class_seen.size() && !class_seen[index]) {
-        class_seen[index] = true;
-        add({RecordKind::class_visit, static_cast<jlong>(index + 1), 0, 0, 0, 0, 0, 0});
-      }
-      return;
-    }
-    jlong physical = tag(pointer);
-    if (physical == 0)
-      return;
-    auto index = position(physical);
-    if (seen[index] == 0) {
-      seen[index] = physical;
-      auto type = type_for(class_tag);
-      add({RecordKind::object, physical, type ? type->id : 0, size, length, 0, 0, 0});
-    }
-  }
+  ~LocalFrame() { env->PopLocalFrame(nullptr); }
 };
 
-jint JNICALL reference_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapReferenceInfo *info,
-                                jlong class_tag, jlong referrer_class_tag, jlong size,
-                                jlong *target, jlong *source, jint length, void *user) {
-  auto &capture = *static_cast<Capture *>(user);
-  if (capture.full)
-    return JVMTI_VISIT_ABORT;
-  auto type = type_for(class_tag);
-  auto owner = type_for(referrer_class_tag);
-  auto root_class = source ? type_for(*source) : nullptr;
-  bool target_workload = logical_type(type) || is_array_tag(*target);
-  bool source_workload = logical_type(owner) || (source && is_array_tag(*source));
-  bool root_field = kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && root_class &&
-                    root_class->kind == ClassKind::roots;
-  if (*target < 0)
-    capture.object(target, class_tag, size, length);
-  // Skip irrelevant records, but keep traversing: foreign objects can lead back to the workload.
-  if (!(target_workload || source_workload || root_field))
-    return capture.full ? JVMTI_VISIT_ABORT : JVMTI_VISIT_OBJECTS;
-  capture.object(target, class_tag, size, length);
-  jlong target_tag = capture.tag(target);
-  if (!source) {
-    jlong thread = 0, depth = -1, slot = -1, method = 0, location = -1;
-    if (kind == JVMTI_HEAP_REFERENCE_STACK_LOCAL && info) {
-      thread = info->stack_local.thread_id;
-      depth = info->stack_local.depth;
-      slot = info->stack_local.slot;
-      method = method_token(info->stack_local.method);
-      location = info->stack_local.location;
-    } else if (kind == JVMTI_HEAP_REFERENCE_JNI_LOCAL && info) {
-      thread = info->jni_local.thread_id;
-      depth = info->jni_local.depth;
-      method = method_token(info->jni_local.method);
+// Heap callback field indices concatenate declared fields from Object through the actual class.
+// These roles deliberately reject interface contributions rather than guessing their indices.
+ClassInfo queue_metadata(JNIEnv *env, jclass type, ClassKind kind, jint id) {
+  ClassInfo metadata{id, kind, queue_signature(type), {}};
+  jint status = 0;
+  queue_check(jvmti->GetClassStatus(type, &status));
+  if (!(status & (JVMTI_CLASS_STATUS_PREPARED | JVMTI_CLASS_STATUS_ARRAY)))
+    throw std::runtime_error("Queue class is not prepared: " + metadata.signature);
+  if (kind == ClassKind::reference_array)
+    return metadata;
+  std::vector<jclass> hierarchy;
+  for (auto current = static_cast<jclass>(env->NewLocalRef(type)); current;
+       current = env->GetSuperclass(current)) {
+    hierarchy.push_back(current);
+    if (hierarchy.size() > 4)
+      throw std::runtime_error("Queue hierarchy is unsupported");
+  }
+  if (env->ExceptionCheck())
+    throw std::bad_alloc();
+  jint field_index = 0;
+  for (auto level = hierarchy.rbegin(); level != hierarchy.rend(); ++level) {
+    JvmtiMemory<jclass> interfaces;
+    jint interface_count = 0;
+    queue_check(jvmti->GetImplementedInterfaces(*level, &interface_count, &interfaces.data));
+    if (interface_count != 0)
+      throw std::runtime_error("Queue interfaces are unsupported");
+    JvmtiMemory<jfieldID> fields;
+    jint count = 0;
+    queue_check(jvmti->GetClassFields(*level, &count, &fields.data));
+    if (count < 0 || count > 1024 - field_index)
+      throw std::runtime_error("Queue metadata capacity exhausted");
+    for (jint i = 0; i < count; ++i) {
+      JvmtiMemory<char> name, descriptor;
+      jint modifiers = 0;
+      queue_check(
+          jvmti->GetFieldName(*level, fields.data[i], &name.data, &descriptor.data, nullptr));
+      queue_check(jvmti->GetFieldModifiers(*level, fields.data[i], &modifiers));
+      metadata.fields.push_back(
+          {field_index++, modifiers, ascii(name.data), ascii(descriptor.data)});
     }
-    capture.add({RecordKind::root, target_tag, kind, thread, depth, slot, method, location});
-  } else {
-    jlong index = -1;
-    if (info && (kind == JVMTI_HEAP_REFERENCE_FIELD || kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD))
-      index = info->field.index;
-    if (info && kind == JVMTI_HEAP_REFERENCE_ARRAY_ELEMENT)
-      index = info->array.index;
-    capture.add({RecordKind::reference, capture.tag(source), target_tag, kind, index,
-                 referrer_class_tag, 0, 0});
   }
-  return capture.full ? JVMTI_VISIT_ABORT : JVMTI_VISIT_OBJECTS;
+  return metadata;
 }
-std::int64_t primitive_bits(jvalue value, jvmtiPrimitiveType type) {
-  switch (type) {
-  case JVMTI_PRIMITIVE_TYPE_BOOLEAN:
-    return value.z;
-  case JVMTI_PRIMITIVE_TYPE_BYTE:
-    return value.b;
-  case JVMTI_PRIMITIVE_TYPE_CHAR:
-    return value.c;
-  case JVMTI_PRIMITIVE_TYPE_SHORT:
-    return value.s;
-  case JVMTI_PRIMITIVE_TYPE_INT:
-    return value.i;
-  case JVMTI_PRIMITIVE_TYPE_LONG:
-    return value.j;
-  case JVMTI_PRIMITIVE_TYPE_FLOAT: {
-    std::uint32_t bits;
-    std::memcpy(&bits, &value.f, sizeof(bits));
-    return bits;
-  }
-  case JVMTI_PRIMITIVE_TYPE_DOUBLE: {
-    std::int64_t bits;
-    std::memcpy(&bits, &value.d, sizeof(bits));
-    return bits;
-  }
-  default:
-    return 0;
-  }
-}
-jint JNICALL primitive_callback(jvmtiHeapReferenceKind kind, const jvmtiHeapReferenceInfo *info,
-                                jlong class_tag, jlong *object, jvalue value,
-                                jvmtiPrimitiveType type, void *user) {
-  auto &capture = *static_cast<Capture *>(user);
-  if (capture.full)
-    return JVMTI_VISIT_ABORT;
-  auto metadata =
-      kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD ? type_for(*object) : type_for(class_tag);
-  // A primitive callback can precede the object's reference callback; assign its owner tag here.
-  if (logical_type(metadata) || (metadata && metadata->kind == ClassKind::roots))
-    capture.add({RecordKind::primitive_field, capture.tag(object), info->field.index, type,
-                 primitive_bits(value, type), class_tag, 0, 0});
-  return capture.full ? JVMTI_VISIT_ABORT : 0;
-}
-jint JNICALL array_callback(jlong class_tag, jlong, jlong *object, jint count,
-                            jvmtiPrimitiveType type, const void *values, void *user) {
-  auto &capture = *static_cast<Capture *>(user);
-  if (capture.full)
-    return JVMTI_VISIT_ABORT;
-  if (!(capture.observed(*object) || is_array_tag(*object)))
-    return 0;
-  // The marker distinguishes a visited empty array from missing primitive-array evidence.
-  capture.add({RecordKind::array_values, *object, count, type, 0, 0, 0, 0});
-  if (type == JVMTI_PRIMITIVE_TYPE_LONG) {
-    auto data = static_cast<const jlong *>(values);
-    for (jint index = 0; index < count && !capture.full; ++index)
-      capture.add({RecordKind::array_element, *object, index, type, data[index], class_tag, 0, 0});
-  }
-  return capture.full ? JVMTI_VISIT_ABORT : 0;
-}
+
 void JNICALL gc_start(jvmtiEnv *) { ++gc_starts; }
 void JNICALL gc_finish(jvmtiEnv *) { ++gc_finishes; }
 void JNICALL compiled_load(jvmtiEnv *, jmethodID method, jint, const void *address, jint,
@@ -362,36 +256,44 @@ std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
 }
 // Frames bracket the heap walk itself. All metadata queries and byte encoding follow the walk.
 Snapshot capture_snapshot(JNIEnv *env, jlong run, jlong checkpoint, jint capacity,
-                          FrameEvidence *frames = nullptr, jobjectArray threads = nullptr) {
-  Capture capture(run, checkpoint, capacity);
-  capture.snapshot.starts_before = gc_starts.load();
-  capture.snapshot.finishes_before = gc_finishes.load();
+                          FrameEvidence *frames = nullptr, jobjectArray threads = nullptr,
+                          Snapshot *resources = nullptr) {
+  if (queue_setup_attempted && queue_classes.empty())
+    throw std::runtime_error("Queue setup failed; observer cannot be reused");
+  if (!queue_classes.empty() && !resources)
+    throw std::runtime_error("Queue capture requires paired resource evidence");
+  HeapCapture capture(run, checkpoint, capacity, classes,
+                      queue_classes.empty() ? nullptr : &queue_classes, next_object_tag);
+  capture.graph.snapshot.starts_before = gc_starts.load();
+  capture.graph.snapshot.finishes_before = gc_finishes.load();
   jvmtiHeapCallbacks callbacks{};
-  callbacks.heap_reference_callback = reference_callback;
-  callbacks.primitive_field_callback = primitive_callback;
-  callbacks.array_primitive_value_callback = array_callback;
-  // Filtering by target class would hide unexpected references to foreign objects.
-  // No GC is requested here; the VM may still collect or materialize objects to perform the walk.
+  callbacks.heap_reference_callback = HeapCapture::reference_callback;
+  callbacks.primitive_field_callback = HeapCapture::primitive_callback;
+  callbacks.array_primitive_value_callback = HeapCapture::array_callback;
+  // Both policies see this same walk. Filtering by target would hide unexpected entries.
   auto error = jvmti->FollowReferences(0, nullptr, nullptr, &callbacks, &capture);
-  capture.snapshot.starts_after = gc_starts.load();
-  capture.snapshot.finishes_after = gc_finishes.load();
+  capture.graph.snapshot.starts_after = gc_starts.load();
+  capture.graph.snapshot.finishes_after = gc_finishes.load();
   if (frames)
     retained::after(env, *frames, threads);
-  capture.snapshot.status = error != JVMTI_ERROR_NONE ? CaptureStatus::jvmti_error
-                            : capture.full            ? CaptureStatus::record_limit
-                                                      : CaptureStatus::complete;
-  capture.snapshot.error = error;
-  capture.snapshot.capabilities =
-      capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
-  // Allocate metadata, encoded bytes, and the Java result only after callbacks have finished.
-  capture.snapshot.classes = classes;
-  capture.snapshot.arrays.assign(arrays.begin(),
-                                 arrays.begin() + array_count.load(std::memory_order_acquire));
-  capture.snapshot.methods = methods(env, capture.snapshot);
-  return std::move(capture.snapshot);
+  capture.finish(error,
+                 capabilities | (compilation_overflow ? capability::compilation_overflow : 0));
+  // Metadata copying, byte encoding and Java allocation stay outside heap callbacks.
+  capture.graph.snapshot.classes = classes;
+  capture.graph.snapshot.arrays.assign(
+      arrays.begin(), arrays.begin() + array_count.load(std::memory_order_acquire));
+  capture.graph.snapshot.methods = methods(env, capture.graph.snapshot);
+  if (capture.queues) {
+    capture.queues->snapshot.classes = classes;
+    capture.queues->snapshot.classes.insert(capture.queues->snapshot.classes.end(),
+                                            queue_classes.begin(), queue_classes.end());
+    *resources = std::move(capture.queues->snapshot);
+  }
+  return std::move(capture.graph.snapshot);
 }
-jbyteArray java_bytes(JNIEnv *env, const std::vector<std::uint8_t> &bytes) {
-  if (bytes.size() > 128U * 1024 * 1024)
+jbyteArray java_bytes(JNIEnv *env, const std::vector<std::uint8_t> &bytes,
+                      std::size_t limit = 128U * 1024 * 1024) {
+  if (bytes.size() > limit)
     throw std::runtime_error("Observer byte capacity exhausted");
   auto result = env->NewByteArray(static_cast<jsize>(bytes.size()));
   if (result)
@@ -601,6 +503,65 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
   });
 }
 extern "C" JNIEXPORT void JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureQueues0(JNIEnv *env, jclass,
+                                                                         jclass roots,
+                                                                         jclass queue_type) {
+  entry(env, [&] {
+    require_agent();
+    std::lock_guard<std::mutex> lock(control_mutex);
+    if (classes.empty() || queue_setup_attempted || !roots || !queue_type)
+      throw std::runtime_error("Invalid or repeated queue registration");
+    // A failed registration cannot reopen the graph-only path with partially tagged classes.
+    queue_setup_attempted = true;
+    LocalFrame locals(env);
+    auto base = queue_class(env, "java/lang/ref/ReferenceQueue");
+    auto helper = queue_class(env, "[Ljava/lang/ref/Reference;");
+    auto object = queue_class(env, "java/lang/Object");
+    auto parent = env->GetSuperclass(queue_type);
+    if (env->ExceptionCheck())
+      throw std::runtime_error("Queue parent is unavailable");
+    auto roots_parent = env->GetSuperclass(roots);
+    if (env->ExceptionCheck())
+      throw std::runtime_error("Queue roots parent is unavailable");
+    if (!env->IsSameObject(parent, base) || !env->IsSameObject(roots_parent, object))
+      throw std::runtime_error("Queue resources require direct supported subclasses");
+    std::array<jclass, 4> types{roots, queue_type, base, helper};
+    std::array<ClassKind, 4> kinds{ClassKind::roots, ClassKind::object, ClassKind::object,
+                                   ClassKind::reference_array};
+    std::vector<ClassInfo> pending;
+    pending.reserve(types.size());
+    for (std::size_t i = 0; i < types.size(); ++i) {
+      jlong previous = 0;
+      queue_check(jvmti->GetTag(types[i], &previous));
+      if (previous != 0)
+        throw std::runtime_error("Queue resource class is already tagged");
+      auto metadata =
+          queue_metadata(env, types[i], kinds[i], static_cast<jint>(classes.size() + i + 1));
+      for (const auto &old : classes)
+        if (old.signature == metadata.signature)
+          throw std::runtime_error("Queue class conflicts with graph registration");
+      for (const auto &old : pending)
+        if (old.signature == metadata.signature)
+          throw std::runtime_error("Duplicate queue resource class");
+      pending.push_back(std::move(metadata));
+    }
+    if (pending[0].fields.size() > 64)
+      throw std::runtime_error("Queue resource capacity exhausted");
+    auto identity = std::find_if(pending[1].fields.begin(), pending[1].fields.end(),
+                                 [](const FieldInfo &field) {
+                                   return field.name == "idQueue" && field.descriptor == "I" &&
+                                          !(field.modifiers & 0x0008) && (field.modifiers & 0x0010);
+                                 });
+    if (identity == pending[1].fields.end())
+      throw std::runtime_error("Queue identity field is unavailable");
+    // Existing registered graph tags are never changed. Only these new role classes are tagged.
+    for (std::size_t i = 0; i < types.size(); ++i)
+      queue_check(jvmti->SetTag(types[i], -static_cast<jlong>(pending[i].id)));
+    queue_classes = std::move(pending);
+  });
+}
+
+extern "C" JNIEXPORT void JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_bindArrayIdentity0(
     JNIEnv *env, jclass, jobject array, jstring shape, jint worker, jint site, jlong occurrence) {
   entry(env, [&] {
@@ -686,6 +647,41 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_capture0(JNIEnv *env, jc
     return java_bytes(env, encode(capture_snapshot(env, run, checkpoint, capacity)));
   });
 }
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureQueues0(JNIEnv *env, jclass,
+                                                                       jlong run, jlong checkpoint,
+                                                                       jint capacity) {
+  return entry(env, [&]() -> jobjectArray {
+    require_agent();
+    std::lock_guard<std::mutex> lock(control_mutex);
+    if (classes.empty() || queue_classes.empty() || run <= 0 || checkpoint <= 0 || capacity <= 0 ||
+        capacity > max_records || retained::enabled())
+      throw std::runtime_error("Invalid queue capture request");
+    Snapshot resources;
+    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, nullptr, nullptr, &resources);
+    auto byte_array_type = env->FindClass("[B");
+    if (!byte_array_type)
+      return nullptr;
+    auto result = env->NewObjectArray(2, byte_array_type, nullptr);
+    env->DeleteLocalRef(byte_array_type);
+    if (!result)
+      return nullptr;
+    auto raw = java_bytes(env, encode(snapshot));
+    if (!raw)
+      return nullptr;
+    env->SetObjectArrayElement(result, 0, raw);
+    env->DeleteLocalRef(raw);
+    if (env->ExceptionCheck())
+      return nullptr;
+    auto queue = java_bytes(env, encode_queue(resources), 128U * 1024 * 1024 + 24);
+    if (!queue)
+      return nullptr;
+    env->SetObjectArrayElement(result, 1, queue);
+    env->DeleteLocalRef(queue);
+    return env->ExceptionCheck() ? nullptr : result;
+  });
+}
+
 extern "C" JNIEXPORT jboolean JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_retainedMode0(JNIEnv *env, jclass) {
   return entry(env, []() -> jboolean {
@@ -719,11 +715,13 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureRetained0(
     if (classes.empty() || capacity <= 0 || capacity > max_records)
       throw std::runtime_error("Invalid retained capture request");
     auto frames = retained::before(env, run, checkpoint, threads, workers, terminal == JNI_TRUE);
-    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, &frames, threads);
+    Snapshot resources;
+    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, &frames, threads,
+                                     queue_classes.empty() ? nullptr : &resources);
     auto byte_array_type = env->FindClass("[B");
     if (!byte_array_type)
       return nullptr;
-    auto result = env->NewObjectArray(2, byte_array_type, nullptr);
+    auto result = env->NewObjectArray(queue_classes.empty() ? 2 : 3, byte_array_type, nullptr);
     env->DeleteLocalRef(byte_array_type);
     if (!result)
       return nullptr;
@@ -739,6 +737,13 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureRetained0(
       return nullptr;
     env->SetObjectArrayElement(result, 1, sample);
     env->DeleteLocalRef(sample);
+    if (!queue_classes.empty() && !env->ExceptionCheck()) {
+      auto queue = java_bytes(env, encode_queue(resources), 128U * 1024 * 1024 + 24);
+      if (!queue)
+        return nullptr;
+      env->SetObjectArrayElement(result, 2, queue);
+      env->DeleteLocalRef(queue);
+    }
     return env->ExceptionCheck() ? nullptr : result;
   });
 }

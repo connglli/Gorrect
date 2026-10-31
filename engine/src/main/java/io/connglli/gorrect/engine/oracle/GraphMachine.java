@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.HeapQueue;
 import io.connglli.gorrect.engine.model.HeapReference;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
@@ -34,6 +35,11 @@ final class GraphMachine {
   private final Map<ObjectId, HeapObject> objects = new HashMap<>();
   private final Map<WrapperId, HeapReference> referenceObjects = new HashMap<>();
   private final Map<String, Value.Reference> roots = new HashMap<>();
+  private final Map<String, Shape> queueShapes = new HashMap<>();
+  private final Map<String, Integer> queueIdentities = new HashMap<>();
+  private final Map<String, Set<WrapperId>> queues = new HashMap<>();
+  private final Map<WrapperId, String> registrations = new HashMap<>();
+  private final Set<WrapperId> inserted = new HashSet<>();
   private Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private int worker, group, phase;
   private long round;
@@ -79,6 +85,11 @@ final class GraphMachine {
     objects.putAll(source.objects);
     referenceObjects.putAll(source.referenceObjects);
     roots.putAll(source.roots);
+    queueShapes.putAll(source.queueShapes);
+    queueIdentities.putAll(source.queueIdentities);
+    source.queues.forEach((name, members) -> queues.put(name, new HashSet<>(members)));
+    registrations.putAll(source.registrations);
+    inserted.addAll(source.inserted);
     occurrences.putAll(source.occurrences);
     scopes = copyContext(source.context()).scopes();
     worker = source.worker;
@@ -99,8 +110,16 @@ final class GraphMachine {
     return new Context(source.worker(), source.group(), source.round(), source.phase(), scopes);
   }
 
+  private long queueCells() {
+    return queues.size()
+        + registrations.size()
+        + inserted.size()
+        + queues.values().stream().mapToLong(Set::size).sum();
+  }
+
   long forkCells() {
     return 1L
+        + queueCells()
         + objects.size()
         + referenceObjects.size()
         + roots.size()
@@ -115,7 +134,9 @@ final class GraphMachine {
       long steps,
       long slots,
       long snapshotCells,
-      long wrappers) {}
+      long wrappers,
+      Map<WrapperId, String> registrations,
+      Set<WrapperId> inserted) {}
 
   /** Quiescent search keys preserve budgets and bindings as well as the complete logical heap. */
   Object key() {
@@ -131,7 +152,15 @@ final class GraphMachine {
 
   private ModelKey key(Graph graph, List<Map<String, Binding>> scopes) {
     return new ModelKey(
-        graph, scopes, Map.copyOf(occurrences), steps, slots, snapshotCells, wrappers);
+        graph,
+        scopes,
+        Map.copyOf(occurrences),
+        steps,
+        slots,
+        snapshotCells,
+        wrappers,
+        Map.copyOf(registrations),
+        Set.copyOf(inserted));
   }
 
   private record ContextKey(
@@ -153,6 +182,7 @@ final class GraphMachine {
   /** Shared key cells exclude contexts, which the caller charges for graph and scope snapshots. */
   long sharedKeyCells() {
     return 1L
+        + queueCells()
         + objects.size()
         + referenceObjects.size()
         + roots.size()
@@ -248,6 +278,11 @@ final class GraphMachine {
     this.limits = limits;
     shapes = new HashMap<>();
     program.shapes().forEach(shape -> shapes.put(shape.name(), shape));
+    for (var queue : program.queues()) {
+      queueShapes.put(queue.name(), shape(queue.shape()));
+      queueIdentities.put(queue.name(), queueIdentities.size() + 1);
+      queues.put(queue.name(), new HashSet<>());
+    }
     if (program.objects().size() > limits.objects()) limit("initial objects");
     for (var initial : program.objects()) {
       var shape = shape(initial.shape());
@@ -409,6 +444,18 @@ final class GraphMachine {
             new HeapObject(target.object().shape(), references, target.object().data()));
       }
 
+      case Instruction.EnqueueReference op -> {
+        requireDeclaration(op.name());
+        var value = referenceValue(op.owner(), -1);
+        var queue = registrations.get(value.wrapper());
+        boolean added = queue != null && !inserted.contains(value.wrapper());
+        if (added) {
+          queues.get(queue).add(value.wrapper());
+          inserted.add(value.wrapper());
+        }
+        read = added ? 1 : 0;
+        bind(op.name(), op.id(), new Value.Scalar(read));
+      }
       case Instruction.ReferenceState ignored ->
           throw new GirException("Reference state requires a recorded history");
       case Instruction.PollQueue ignored ->
@@ -505,6 +552,7 @@ final class GraphMachine {
       case Instruction.ReadData ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.IdentityHash ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.SameObject ignored -> ExecutionTrace.Kind.SCALAR_READ;
+      case Instruction.EnqueueReference ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.Exchange exchange ->
           exchange.location().reference()
               ? ExecutionTrace.Kind.REFERENCE_READ
@@ -718,6 +766,12 @@ final class GraphMachine {
     var shape = shape(op.shape());
     if (!shape.wrapper()) throw new GirException("allocate-ref requires a wrapper type");
     var target = reference(op.value()).heapTarget();
+    if (op.queue() != null) {
+      if (!(op.value() instanceof Operand.Null) || target != null)
+        throw new GirException("Registered wrappers require literal null");
+      if (!shape.equals(queueShapes.get(op.queue())))
+        throw new GirException("Unknown queue or wrapper shape mismatch");
+    }
     if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
     if (slots >= limits.slots()) limit("slots");
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
@@ -726,13 +780,39 @@ final class GraphMachine {
     var value = Value.Reference.toWrapper(id);
 
     referenceObjects.put(id, object);
+    if (op.queue() != null) registrations.put(id, op.queue());
     bind(op.name(), op.id(), value);
     occurrences.put(op.id(), occurrence);
     wrappers++;
     slots++;
   }
 
-  /** Construction edge for a canonical no-queue wrapper; clearing belongs to the frontier. */
+  /**
+   * Removes one known member and binds its wrapper strongly. Null is valid only for an empty named
+   * queue. Every precondition is checked before membership, bindings or counters change.
+   */
+  void pollNamed(Instruction.PollQueue operation, WrapperId returned) {
+    if (operation.id() <= 0 || scopes.isEmpty())
+      throw new GirException("Invalid named poll context");
+    requireStep();
+    requireDeclaration(operation.name());
+    var members = queues.get(operation.queue());
+    if (!operation.named() || members == null) throw new GirException("Unknown named queue");
+    if (returned == null ? !members.isEmpty() : !members.contains(returned))
+      throw new GirException("Impossible named queue delivery");
+    if (returned != null) members.remove(returned);
+    bind(
+        operation.name(),
+        operation.id(),
+        returned == null ? Value.Reference.NULL : Value.Reference.toWrapper(returned));
+    marker(operation.id(), ExecutionTrace.Kind.QUEUE_POLL, returned == null ? 0 : 1);
+  }
+
+  String registration(WrapperId id) {
+    return registrations.get(id);
+  }
+
+  /** Construction edge for a canonical wrapper; clearing belongs to the frontier. */
   Value.Reference referenceValue(String owner, int index) {
     if (index != -1) return referenceSlot(owner, index);
     var pointer = reference(new Operand.Name(owner));
@@ -836,7 +916,9 @@ final class GraphMachine {
             + graph.objects().size()
             + graph.roots().size()
             + graph.handles().size()
-            + 2L * graph.wrappers().size();
+            + 2L * graph.wrappers().size()
+            + graph.queues().size()
+            + graph.queues().values().stream().mapToLong(queue -> queue.members().size()).sum();
     for (var object : graph.objects().values()) cells += object.shape().slots();
     if (cells > limits.snapshotCells() - snapshotCells) limit("snapshot cells");
     snapshotCells += cells;
@@ -872,6 +954,14 @@ final class GraphMachine {
     return new Target(value.target(), object);
   }
 
+  /** Copies each resource without changing its semantic membership. */
+  private Map<String, HeapQueue> queueGraph() {
+    var result = new HashMap<String, HeapQueue>();
+    queues.forEach(
+        (name, members) -> result.put(name, new HeapQueue(queueIdentities.get(name), members)));
+    return result;
+  }
+
   /** Copies the allocated heap and reference roots before reachability projection. */
   Graph graph() {
     var handles = new HashMap<Integer, Value.Reference>();
@@ -881,7 +971,7 @@ final class GraphMachine {
           handles.put(binding.operation(), reference);
       }
     }
-    return new Graph(objects, roots, handles, referenceObjects);
+    return new Graph(objects, roots, handles, referenceObjects, queueGraph());
   }
 
   /** All suspended callers and workers contribute strong handle obligations during GC search. */
@@ -892,7 +982,7 @@ final class GraphMachine {
         for (var binding : scope.values())
           if (binding.value() instanceof Value.Reference reference)
             handles.put(binding.operation(), reference);
-    return new Graph(objects, roots, handles, referenceObjects);
+    return new Graph(objects, roots, handles, referenceObjects, queueGraph());
   }
 
   /** Captures required obligations and charges their cumulative snapshot budget. */

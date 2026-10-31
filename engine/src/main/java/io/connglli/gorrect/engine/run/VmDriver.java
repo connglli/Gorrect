@@ -22,7 +22,11 @@ final class VmDriver {
   private VmDriver() {}
 
   static String executable(TargetProfile profile) {
-    if (!profile.retainedMetadata()) return profile.java();
+    return executable(profile, profile.retainedMetadata());
+  }
+
+  static String executable(TargetProfile profile, boolean controlled) {
+    if (!controlled) return profile.java();
     try {
       return Path.of(profile.java()).toRealPath().toString();
     } catch (IOException failure) {
@@ -50,9 +54,14 @@ final class VmDriver {
   }
 
   static List<String> launchOptions(TargetProfile profile, Path directory, Properties facts) {
+    return launchOptions(profile, directory, facts, profile.retainedMetadata());
+  }
+
+  static List<String> launchOptions(
+      TargetProfile profile, Path directory, Properties facts, boolean controlled) {
     return profile.vm().equals("hotspot")
-        ? HotSpotDriver.launchOptions(profile, directory, Artifacts.OBSERVER, facts)
-        : OpenJ9Driver.launchOptions(profile, directory, Artifacts.OBSERVER);
+        ? HotSpotDriver.launchOptions(profile, directory, Artifacts.OBSERVER, facts, controlled)
+        : OpenJ9Driver.launchOptions(profile, directory, Artifacts.OBSERVER, controlled);
   }
 
   /**

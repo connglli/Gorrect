@@ -23,6 +23,17 @@ public final class ReferenceProgram {
         || program.instructions().anyMatch(ReferenceProgram::usesReferences);
   }
 
+  /** Named resources and explicit enqueue need the selected queue evidence/capture contract. */
+  public static boolean usesQueues(GirProgram program) {
+    return !program.queues().isEmpty()
+        || program
+            .instructions()
+            .anyMatch(
+                instruction ->
+                    instruction instanceof Instruction.EnqueueReference
+                        || instruction instanceof Instruction.PollQueue poll && poll.named());
+  }
+
   public static boolean usesFirstClass(GirProgram program) {
     return program.shapes().stream().anyMatch(Shape::wrapper);
   }
@@ -58,6 +69,8 @@ public final class ReferenceProgram {
           && shapes.get(op.shape()).wrapper())
         gaps.add("Legacy slot acquisition cannot expose wrapper referents");
     }
+    if (usesQueues(program) && hasParallel(program))
+      gaps.add("Named queue histories require main-only execution");
     if (HistoryProgram.usesConcurrentHistory(program))
       gaps.add("First-class wrapper atomic/concurrent histories are unsupported");
     return List.copyOf(gaps);
@@ -69,6 +82,7 @@ public final class ReferenceProgram {
       case Instruction.ClearReference ignored -> true;
       case Instruction.ReferenceState ignored -> true;
       case Instruction.PollQueue ignored -> true;
+      case Instruction.EnqueueReference ignored -> true;
       case Instruction.WriteReference op -> op.kind() != Value.ReferenceKind.STRONG;
       default -> false;
     };

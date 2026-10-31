@@ -3,7 +3,7 @@ package io.connglli.gorrect.engine.model;
 import java.util.Objects;
 
 /**
- * Canonical no-queue wrapper vertex. History state determines whether its construction edge clears.
+ * Canonical wrapper vertex. History state determines clearing; resource state owns registration.
  */
 public record HeapReference(Shape shape, HeapId referent) {
   public HeapReference {

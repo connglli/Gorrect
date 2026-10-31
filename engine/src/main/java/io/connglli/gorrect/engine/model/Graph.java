@@ -7,18 +7,30 @@ import java.util.Map;
 /**
  * Immutable heap and reference roots. Named root slots remain present when null; live handles are
  * indexed by their declaring instruction IDs. Ordinary allocations and canonical first-class
- * wrapper vertices use separate identity maps; either may include unreachable garbage.
+ * wrapper vertices use separate identity maps; either may include unreachable garbage. Named queue
+ * resources carry independently covered identity/membership facts through {@link HeapQueue}.
  */
 public record Graph(
     Map<ObjectId, HeapObject> objects,
     Map<String, Value.Reference> roots,
     Map<Integer, Value.Reference> handles,
-    Map<WrapperId, HeapReference> wrappers) {
+    Map<WrapperId, HeapReference> wrappers,
+    Map<String, HeapQueue> queues) {
   public Graph {
     objects = Map.copyOf(objects);
     roots = Map.copyOf(roots);
     handles = Map.copyOf(handles);
     wrappers = Map.copyOf(wrappers);
+    queues = Map.copyOf(queues);
+  }
+
+  /** Construction without named queue ownership, preserving the legacy graph contract. */
+  public Graph(
+      Map<ObjectId, HeapObject> objects,
+      Map<String, Value.Reference> roots,
+      Map<Integer, Value.Reference> handles,
+      Map<WrapperId, HeapReference> wrappers) {
+    this(objects, roots, handles, wrappers, Map.of());
   }
 
   public Graph(
@@ -47,6 +59,13 @@ public record Graph(
     var queue = new ArrayDeque<HeapId>();
     roots.values().forEach(value -> enqueue(value, queue));
     handles.values().forEach(value -> enqueue(value, queue));
+    queues
+        .values()
+        .forEach(
+            resource -> {
+              if (resource.members() != null)
+                resource.members().forEach(id -> queue.add(HeapId.wrapper(id)));
+            });
     var required = new HashMap<ObjectId, HeapObject>();
     var referenceObjects = new HashMap<WrapperId, HeapReference>();
     while (!queue.isEmpty()) {
@@ -74,7 +93,7 @@ public record Graph(
         } else enqueue(value, queue);
       }
     }
-    return new Graph(required, roots, handles, referenceObjects);
+    return new Graph(required, roots, handles, referenceObjects, queues);
   }
 
   private static void enqueue(Value.Reference value, ArrayDeque<HeapId> queue) {

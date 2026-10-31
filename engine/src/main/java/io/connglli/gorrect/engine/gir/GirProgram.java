@@ -25,7 +25,8 @@ public record GirProgram(
     List<Root> roots,
     List<Instruction> body,
     Map<Integer, String> labels,
-    Set<String> requirements) {
+    Set<String> requirements,
+    List<Queue> queues) {
   public GirProgram {
     shapes = List.copyOf(shapes);
     objects = List.copyOf(objects);
@@ -33,7 +34,23 @@ public record GirProgram(
     body = List.copyOf(body);
     labels = Map.copyOf(labels);
     requirements = Set.copyOf(requirements);
+    queues = List.copyOf(queues);
   }
+
+  /** Source-compatible construction of programs without named queues. */
+  public GirProgram(
+      int version,
+      List<Shape> shapes,
+      List<InitialObject> objects,
+      List<Root> roots,
+      List<Instruction> body,
+      Map<Integer, String> labels,
+      Set<String> requirements) {
+    this(version, shapes, objects, roots, body, labels, requirements, List.of());
+  }
+
+  /** A case-lifetime resource with one nominal accepted wrapper shape. */
+  public record Queue(String name, String shape) {}
 
   public GirProgram(
       int version,

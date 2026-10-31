@@ -2,6 +2,7 @@ package io.connglli.gorrect.engine.observe;
 
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import io.connglli.gorrect.protocol.QueuePlan;
 import java.util.List;
 import java.util.Map;
 
@@ -13,7 +14,8 @@ public record ObservationLayout(
     List<ReferenceType> references,
     List<LocalBinding> bindings,
     String bindingSelection,
-    String bindingMetadata) {
+    String bindingMetadata,
+    QueuePlan queuePlan) {
   public static final String REQUIRED = "required";
   public static final String LEXICAL_CANDIDATES = "lexical-candidates";
 
@@ -29,6 +31,18 @@ public record ObservationLayout(
         && !bindingSelection.equals(REQUIRED)
         && !bindingSelection.equals(LEXICAL_CANDIDATES))
       throw new IllegalArgumentException("Unknown binding-selection rule");
+  }
+
+  /** Legacy layouts carry no queue selection. */
+  public ObservationLayout(
+      List<ObjectType> objects,
+      List<Shape> arrays,
+      Roots roots,
+      List<ReferenceType> references,
+      List<LocalBinding> bindings,
+      String bindingSelection,
+      String bindingMetadata) {
+    this(objects, arrays, roots, references, bindings, bindingSelection, bindingMetadata, null);
   }
 
   /** Legacy layouts select VM tables; provider selection is explicit in new retained layouts. */

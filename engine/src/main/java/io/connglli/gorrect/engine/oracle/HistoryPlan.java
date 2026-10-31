@@ -153,7 +153,9 @@ public final class HistoryPlan {
             if (++objects > limits.objects() || ++slots > limits.slots())
               throw new OracleLimitException("Conditional wrapper allocation bound exhausted");
             scopes.peek().put(allocate.name(), allocate.id());
-          } else if (operation instanceof Instruction.ReadRoot read)
+          } else if (operation instanceof Instruction.PollQueue poll && poll.named())
+            scopes.peek().put(poll.name(), poll.id());
+          else if (operation instanceof Instruction.ReadRoot read)
             scopes.peek().put(read.name(), read.id());
           else if (operation instanceof Instruction.ReadReference read)
             scopes.peek().put(read.name(), read.id());

@@ -72,16 +72,18 @@ final class TargetRunner {
       manifest.addProperty("controlTransport", "unix");
       manifest.addProperty("controlSocket", control.address().toString());
 
-      RetainedMetadata.selection(
-          directory,
-          profile,
+      var layout =
           JsonFiles.GSON.fromJson(
-              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class));
+              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      RetainedMetadata.selection(directory, profile, layout);
+      QueueResources.selection(directory, layout);
+      boolean queues = layout.queuePlan() != null;
       ControlledLaunch.check(directory, profile, savedEnvironment);
       var resolution = VmProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
       if (resolution.failure() != null) return resolution.failure();
       profile = resolution.profile();
-      if (profile.retainedMetadata()) profile = profile.withJava(VmDriver.executable(profile));
+      if (QueueResources.controlled(profile, directory))
+        profile = profile.withJava(VmDriver.executable(profile, true));
       manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
 
       var command = new ArrayList<>(VmDriver.launchArguments(profile, directory, OBSERVER));
@@ -104,7 +106,8 @@ final class TargetRunner {
               .redirectOutput(directory.resolve("logs/stdout.log").toFile())
               .redirectError(directory.resolve("logs/stderr.log").toFile());
       if (savedEnvironment == null)
-        cleanEnvironment(builder, profile.environment(), profile.retainedMetadata());
+        cleanEnvironment(
+            builder, profile.environment(), QueueResources.controlled(profile, directory));
       else {
         builder.environment().clear();
         builder.environment().putAll(savedEnvironment);
@@ -126,13 +129,15 @@ final class TargetRunner {
           && first.sequence() == 0
           && first.operation() == 0
           && first.occurrence() == 0)
-        return startupFailure(profile.retainedMetadata(), first.detail());
+        return startupFailure(profile.retainedMetadata(), queues, first.detail());
       if (first.kind() != ControlMessage.Kind.HELLO || first.sequence() != 0)
         return RunReport.failure(RunReport.Outcome.PROTOCOL_ERROR, "Missing startup handshake");
 
       hello = true;
       var target =
-          profile.retainedMetadata() ? ControlledLaunch.targetFacts(directory) : target(directory);
+          QueueResources.controlled(profile, directory)
+              ? ControlledLaunch.targetFacts(directory)
+              : target(directory);
       List<String> unmet;
       try {
         unmet = VmDriver.requirements(profile, target);
@@ -141,9 +146,16 @@ final class TargetRunner {
             RunReport.Outcome.PROTOCOL_ERROR, "Invalid target capability report: " + exception);
       }
 
+      if (queues) {
+        try {
+          QueueResources.admission(profile, manifest, target);
+        } catch (IOException | RuntimeException failure) {
+          unmet.add("Named queue startup qualification failed: " + failure);
+        }
+      }
       if (profile.retainedMetadata()) {
         try {
-          ControlledLaunch.evidence(profile, manifest, target);
+          ControlledLaunch.evidence(profile, manifest, target, queues);
           RetainedMetadata.startup(directory, run);
         } catch (IOException | RuntimeException failure) {
           unmet.add("retained-class startup certification failed: " + failure);
@@ -261,7 +273,13 @@ final class TargetRunner {
 
   /** Only the explicit provider setup marker changes a startup failure into unsupported. */
   static RunReport startupFailure(boolean retained, String detail) {
-    boolean unsupported = retained && detail.startsWith(ControlMessage.RETAINED_UNSUPPORTED);
+    return startupFailure(retained, false, detail);
+  }
+
+  static RunReport startupFailure(boolean retained, boolean queues, String detail) {
+    boolean unsupported =
+        retained && detail.startsWith(ControlMessage.RETAINED_UNSUPPORTED)
+            || queues && detail.startsWith(ControlMessage.QUEUES_UNSUPPORTED);
     return RunReport.failure(
         unsupported ? RunReport.Outcome.UNSUPPORTED : RunReport.Outcome.STARTUP_FAILURE, detail);
   }

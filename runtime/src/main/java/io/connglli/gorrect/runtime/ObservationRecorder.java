@@ -39,6 +39,19 @@ public interface ObservationRecorder {
       int targetSite,
       long targetOccurrence);
 
+  /** Appends actual queue identity/outcome at the just-recorded main-thread scalar position. */
+  default void queue(
+      int operation,
+      int kind,
+      int queue,
+      int result,
+      int creator,
+      int site,
+      long occurrence,
+      int slot) {
+    throw new IllegalStateException("Named queue recording is unavailable");
+  }
+
   /** Primitive tagged-target observation; kind0 is an object, kind1 a complete wrapper identity. */
   default void referenceTyped(
       int operation,

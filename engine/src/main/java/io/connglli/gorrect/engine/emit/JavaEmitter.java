@@ -17,6 +17,7 @@ import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import io.connglli.gorrect.protocol.QueuePlan;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.Deque;
@@ -54,6 +55,7 @@ public final class JavaEmitter {
   private final boolean references;
   private final boolean typedReferences;
   private final boolean concurrent;
+  private final QueuePlan queuePlan;
 
   private JavaEmitter(GirProgram program, ObservationProfile observation, String bindingMetadata) {
     this.program = program;
@@ -62,6 +64,10 @@ public final class JavaEmitter {
     references = ReferenceProgram.usesReferences(program);
     typedReferences = ReferenceProgram.usesFirstClass(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
+    var resources = new ArrayList<QueuePlan.Resource>();
+    for (var queue : program.queues())
+      resources.add(new QueuePlan.Resource(resources.size() + 1, queue.name(), queue.shape()));
+    queuePlan = ReferenceProgram.usesQueues(program) ? new QueuePlan(resources) : null;
   }
 
   /**
@@ -141,11 +147,22 @@ public final class JavaEmitter {
                 + strength
                 + "Reference<Object> {");
         line("public final int idWorker, idSite, idSlot = -1; public final long idOccurrence;");
+        if (queuePlan != null) line("public final int idQueue;");
         line(
             "public "
                 + type
                 + "(int worker, int site, long occurrence, Object target) { super(target);"
-                + " idWorker=worker; idSite=site; idOccurrence=occurrence; }");
+                + " idWorker=worker; idSite=site; idOccurrence=occurrence;"
+                + (queuePlan == null ? "" : " idQueue=0;")
+                + " }");
+        if (queuePlan != null)
+          line(
+              "public "
+                  + type
+                  + "(int worker, int site, long occurrence, Object target,"
+                  + " java.lang.ref.ReferenceQueue<Object> queue) { super(target, queue);"
+                  + " idWorker=worker; idSite=site; idOccurrence=occurrence;"
+                  + " idQueue=queueId(queue); }");
         line("}");
         registrations.add(
             "new NativeObserver.Registration("
@@ -190,6 +207,7 @@ public final class JavaEmitter {
           "new NativeObserver.Registration(" + type + ".class, HeapSnapshot.ClassKind.OBJECT)");
     }
     if (typedReferences) typedReferenceHelper();
+    if (queuePlan != null) queueSupport();
     registrations.add(
         "new NativeObserver.Registration(Object[].class, HeapSnapshot.ClassKind.REFERENCE_ARRAY)");
     registrations.add(
@@ -205,9 +223,17 @@ public final class JavaEmitter {
     line("}");
     allocationCounters();
     line("public static void main(String[] args) throws Exception {");
-    line("try (TargetSession session = TargetSession.open(args, Case.class)) {");
+    line(
+        "try (TargetSession session = TargetSession.open(args, Case.class"
+            + (queuePlan == null
+                ? ""
+                : ", java.util.List.of("
+                    + String.join(",", registrations)
+                    + "), QueueRoots.class, Queue.class")
+            + ")) {");
     line("try {");
-    line("NativeObserver.configure(java.util.List.of(" + String.join(",", registrations) + "));");
+    if (queuePlan == null)
+      line("NativeObserver.configure(java.util.List.of(" + String.join(",", registrations) + "));");
     line("initialize(); execute(session); session.checkpoint(0); session.complete();");
     line(
         "} catch (Throwable failure) { failure.printStackTrace(); session.fail(failure); throw"
@@ -246,7 +272,42 @@ public final class JavaEmitter {
             observation.controlled()
                 ? ObservationLayout.REQUIRED
                 : ObservationLayout.LEXICAL_CANDIDATES,
-            bindingMetadata));
+            bindingMetadata,
+            queuePlan));
+  }
+
+  private QueuePlan.Resource queue(String name) {
+    return queuePlan.resources().stream()
+        .filter(resource -> resource.name().equals(name))
+        .findFirst()
+        .orElseThrow();
+  }
+
+  private void queueSupport() {
+    line(
+        "public static final class Queue extends java.lang.ref.ReferenceQueue<Object> { public"
+            + " final int idQueue; public Queue(int identity) { super(); idQueue=identity; } }");
+    line("public static final class QueueRoots {");
+    for (var resource : queuePlan.resources())
+      line("public static Queue " + resource.field() + ";");
+    line("}");
+    line("private static int queueId(java.lang.ref.ReferenceQueue<?> queue) {");
+    line("if (queue == null) return 0;");
+    line("if (queue instanceof Queue resource) return resource.idQueue;");
+    line("return -1; }");
+    line(
+        "private static void queue(ObservationRecorder session, int operation, int kind, "
+            + "long value, int queue, java.lang.ref.Reference<?> object) {");
+    for (var shape : program.shapes())
+      if (shape.wrapper())
+        line(
+            "if (object instanceof "
+                + types.get(shape.name())
+                + " r) { "
+                + "session.queue(operation, kind, queue < -1 ? r.idQueue : queue, (int)value, "
+                + "r.idWorker, r.idSite, r.idOccurrence, r.idSlot); return; }");
+    line("session.queue(operation, kind, queue < -1 ? -1 : queue, (int)value, 0, 0, 0L, 0);");
+    line("}");
   }
 
   private void referenceClasses() {
@@ -440,6 +501,9 @@ public final class JavaEmitter {
 
   private void initialize() {
     line("private static void initialize() {");
+    if (queuePlan != null)
+      for (var resource : queuePlan.resources())
+        line("QueueRoots." + resource.field() + " = new Queue(" + resource.id() + ");");
     var objects = new HashMap<Long, String>();
     for (var object : program.objects()) {
       var shape = shapes.get(object.shape());
@@ -633,6 +697,21 @@ public final class JavaEmitter {
     }
   }
 
+  private void queueEvent(int operation, String kind, String value, String wrapper) {
+    line(
+        "queue("
+            + recorder()
+            + ", "
+            + operation
+            + ", io.connglli.gorrect.protocol.QueueHistory.Kind."
+            + kind
+            + ".ordinal(), "
+            + value
+            + ", -2, "
+            + wrapper
+            + ");");
+  }
+
   private void emitOperation(Instruction.Operation instruction) {
     switch (instruction) {
       case Instruction.ClearReference op -> {
@@ -652,6 +731,20 @@ public final class JavaEmitter {
         return;
       }
 
+      case Instruction.EnqueueReference op -> {
+        var receiver = binding(op.owner());
+        String name = declare(op.name(), null, op.id());
+        line("long " + name + " = " + receiver.name() + ".enqueue() ? 1L : 0L;");
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.SCALAR_READ.ordinal(), "
+                + name
+                + ");");
+        queueEvent(op.id(), "ENQUEUE", name, receiver.name());
+        return;
+      }
       case Instruction.ReferenceState op -> {
         var owner = binding(op.owner());
         String ref = "reference" + op.id();
@@ -672,6 +765,48 @@ public final class JavaEmitter {
 
       case Instruction.PollQueue op -> {
         String ref = "reference" + op.id();
+        if (op.named()) {
+          var resource = queue(op.queue());
+          String argument = "polledQueue" + op.id();
+          line(
+              "java.lang.ref.ReferenceQueue<Object> "
+                  + argument
+                  + " = QueueRoots."
+                  + resource.field()
+                  + ";");
+          line("java.lang.ref.Reference<?> " + ref + " = " + argument + ".poll();");
+          line(
+              recorder()
+                  + ".record("
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.QUEUE_POLL.ordinal(), "
+                  + ref
+                  + " == null ? 0L : 1L);");
+          line(
+              "queue("
+                  + recorder()
+                  + ", "
+                  + op.id()
+                  + ", io.connglli.gorrect.protocol.QueueHistory.Kind.POLL.ordinal(), "
+                  + ref
+                  + " == null ? 0L : 1L, queueId("
+                  + argument
+                  + "), "
+                  + ref
+                  + ");");
+          String name = declare(op.name(), shapes.get(resource.shape()), op.id());
+          line(
+              types.get(resource.shape())
+                  + " "
+                  + name
+                  + " = ("
+                  + types.get(resource.shape())
+                  + ") "
+                  + ref
+                  + ";");
+          line(ref + " = null; " + argument + " = null;");
+          return;
+        }
         line("java.lang.ref.Reference<?> " + ref + " = referenceQueue.poll();");
         reference(op.id(), "QUEUE", ref + " == null ? 0L : 1L", ref, null);
         line(ref + " = null;");
@@ -702,10 +837,12 @@ public final class JavaEmitter {
                 + op.id()
                 + ", "
                 + operand(op.value())
+                + (op.queue() == null ? "" : ", QueueRoots." + queue(op.queue()).field())
                 + ");");
         String target =
             op.value() instanceof Operand.Name value ? binding(value.name()).name() : null;
         reference(op.id(), "CREATE", "0L", name, target);
+        if (queuePlan != null) queueEvent(op.id(), "CREATE", "0L", name);
         return;
       }
       case Instruction.Clone op -> {

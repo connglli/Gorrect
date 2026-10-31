@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.oracle;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.HeapQueue;
 import io.connglli.gorrect.engine.model.HeapReference;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Value;
@@ -296,7 +297,23 @@ final class ReferenceFrontier {
     for (int id : observed.handles().keySet())
       if (candidate.handles().containsKey(id)) handles.put(id, candidate.handles().get(id));
     // This graph is used only by comparison; expansion/acquisition always see the full model.
-    return new Graph(candidate.objects(), roots, handles, candidate.wrappers());
+    var queues = new HashMap<String, HeapQueue>();
+    for (String name : observed.queues().keySet())
+      if (candidate.queues().containsKey(name)) {
+        var wanted = candidate.queues().get(name);
+        var actual = observed.queues().get(name);
+        queues.put(
+            name,
+            new HeapQueue(
+                actual.identity() == null ? null : wanted.identity(),
+                actual.members() == null ? null : wanted.members()));
+      }
+    spend(
+        queues.size()
+            + queues.values().stream()
+                .mapToLong(queue -> queue.members() == null ? 0 : queue.members().size())
+                .sum());
+    return new Graph(candidate.objects(), roots, handles, candidate.wrappers(), queues);
   }
 
   private Graph view(Graph graph, State state) {
@@ -328,12 +345,26 @@ final class ReferenceFrontier {
                   new HeapReference(
                       object.shape(), state.cleared().get(index(id)) ? null : object.referent()));
             });
-    return new Graph(objects, graph.roots(), graph.handles(), wrappers);
+    return new Graph(objects, graph.roots(), graph.handles(), wrappers, graph.queues());
   }
 
   private Set<HeapId> reach(Graph graph, State state, Set<HeapId> additional, int strength) {
     var found = new HashSet<HeapId>();
     var queue = new ArrayDeque<HeapId>(additional);
+    graph
+        .queues()
+        .values()
+        .forEach(
+            resource -> {
+              if (!resource.complete())
+                throw new IllegalArgumentException("Partial queue facts are not semantic roots");
+              resource.members().forEach(id -> queue.add(HeapId.wrapper(id)));
+            });
+    spend(
+        graph.queues().size()
+            + graph.queues().values().stream()
+                .mapToLong(resource -> resource.members().size())
+                .sum());
     spend(1L + graph.roots().size() + graph.handles().size());
     graph
         .roots()

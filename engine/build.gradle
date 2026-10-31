@@ -114,7 +114,8 @@ tasks.named('processTestResources') {
         into 'docs'
     }
     from(rootProject.files('protocol/src/test/resources/snapshot-v1.hex',
-            'protocol/src/test/resources/code-v1.hex', 'protocol/src/test/resources/frame-v1.hex')) {
+            'protocol/src/test/resources/code-v1.hex', 'protocol/src/test/resources/frame-v1.hex',
+            'protocol/src/test/resources/queue-capture-v1.hex')) {
         into 'wire'
     }
 }

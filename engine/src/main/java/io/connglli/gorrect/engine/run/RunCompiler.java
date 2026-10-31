@@ -44,7 +44,7 @@ final class RunCompiler {
             .directory(directory.toFile())
             .redirectOutput(directory.resolve("logs/compiler.stdout").toFile())
             .redirectError(directory.resolve("logs/compiler.stderr").toFile());
-    cleanEnvironment(builder, Map.of(), profile.retainedMetadata());
+    cleanEnvironment(builder, Map.of(), QueueResources.controlled(profile, directory));
     long limit = profile.limits().compileSeconds() * 1000L;
     boolean campaignBound =
         campaignDeadline != null

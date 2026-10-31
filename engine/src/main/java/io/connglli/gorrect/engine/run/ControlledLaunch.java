@@ -57,13 +57,17 @@ final class ControlledLaunch {
 
   /** Rejects unsupported profile settings before compiler or target execution. */
   static List<String> configuration(TargetProfile profile) {
-    if (!profile.retainedMetadata()) return List.of();
+    return configuration(profile, false);
+  }
+
+  static List<String> configuration(TargetProfile profile, boolean queues) {
+    if (!profile.retainedMetadata() && !queues) return List.of();
     var problems = new ArrayList<String>();
     if (profile.support().whitebox() != null || profile.usesWhiteBox())
-      problems.add("retained-class does not admit external WhiteBox clients");
+      problems.add("Controlled observation does not admit external WhiteBox clients");
     for (String argument : profile.vmArgs())
       if (!reviewedArgument(argument))
-        problems.add("Unreviewed retained-class VM argument: " + argument);
+        problems.add("Unreviewed controlled VM argument: " + argument);
     for (String name : profile.environment().keySet())
       if (injection(name)) problems.add("Native injection environment is unsupported: " + name);
     return List.copyOf(problems);
@@ -75,8 +79,9 @@ final class ControlledLaunch {
    */
   static void check(Path directory, TargetProfile profile, Map<String, String> savedEnvironment)
       throws IOException {
-    if (!profile.retainedMetadata()) return;
-    var problems = configuration(profile);
+    boolean queues = QueueResources.selected(directory);
+    if (!profile.retainedMetadata() && !queues) return;
+    var problems = configuration(profile, queues);
     if (!problems.isEmpty()) throw new IllegalArgumentException(String.join("; ", problems));
     if (savedEnvironment != null)
       for (String name : savedEnvironment.keySet())
@@ -91,7 +96,7 @@ final class ControlledLaunch {
         || !executable.getFileName().toString().equals("java")
         || !Files.isRegularFile(home.resolve("release")))
       throw new IllegalArgumentException(
-          "retained-class requires the installation's direct bin/java executable");
+          "Controlled observation requires the installation's direct bin/java executable");
     byte[] header;
     try (var input = Files.newInputStream(executable)) {
       header = input.readNBytes(4);
@@ -103,7 +108,8 @@ final class ControlledLaunch {
         || header[1] != 'E'
         || header[2] != 'L'
         || header[3] != 'F')
-      throw new IllegalArgumentException("retained-class requires a direct ELF JVM launcher");
+      throw new IllegalArgumentException(
+          "Controlled observation requires a direct ELF JVM launcher");
 
     // OpenJ9 reads installation defaults before explicit arguments; only reviewed content is
     // admitted.
@@ -135,14 +141,19 @@ final class ControlledLaunch {
       if (expected == null
           || !expected.equals(Artifacts.hash(directory.resolve("support/" + name))))
         throw new IllegalArgumentException(
-            "retained-class requires reviewed project support: " + name);
+            "Controlled observation requires reviewed project support: " + name);
       if (name.endsWith(".jar")) inspectJar(directory.resolve("support/" + name));
     }
   }
 
   /** Checks selected-VM policy facts independently of the command retained in the manifest. */
   static void effective(TargetProfile profile, Properties facts, List<String> unmet) {
-    if (!profile.retainedMetadata()) return;
+    effective(profile, facts, unmet, false);
+  }
+
+  static void effective(
+      TargetProfile profile, Properties facts, List<String> unmet, boolean queues) {
+    if (!profile.retainedMetadata() && !queues) return;
     try {
       Path executable = Path.of(profile.java()).toAbsolutePath().normalize();
       if (!Path.of(facts.getProperty("java.home", ""))
@@ -159,12 +170,12 @@ final class ControlledLaunch {
     }
     if (profile.vm().equals("hotspot")) {
       if (!facts.getProperty("flag.DisableAttachMechanism", "").equals("true"))
-        unmet.add("retained-class requires disabled attachment");
+        unmet.add("Controlled observation requires disabled attachment");
     } else {
       if (!facts.getProperty("attach.disabled", "").equals("true"))
-        unmet.add("retained-class requires disabled attachment");
+        unmet.add("Controlled observation requires disabled attachment");
       if (!facts.getProperty("reuse.disabled", "").equals("true"))
-        unmet.add("retained-class requires disabled OpenJ9 shared-cache/AOT reuse");
+        unmet.add("Controlled observation requires disabled OpenJ9 shared-cache/AOT reuse");
     }
   }
 
@@ -200,9 +211,14 @@ final class ControlledLaunch {
    */
   static void evidence(TargetProfile profile, JsonObject manifest, Properties facts)
       throws IOException {
-    if (!profile.retainedMetadata()) return;
+    evidence(profile, manifest, facts, false);
+  }
+
+  static void evidence(TargetProfile profile, JsonObject manifest, Properties facts, boolean queues)
+      throws IOException {
+    if (!profile.retainedMetadata() && !queues) return;
     try {
-      var configured = configuration(profile);
+      var configured = configuration(profile, queues);
       if (!configured.isEmpty()) throw new IOException(String.join("; ", configured));
       var environment = JsonFiles.object(JsonFiles.required(manifest, "environment"));
       if (environment.size() > 2048)
@@ -260,7 +276,9 @@ final class ControlledLaunch {
           || !command.get(cp + 7).equals(Integer.toString(profile.limits().records()))
           || !command.get(cp + 8).equals(Integer.toString(profile.limits().traceEvents())))
         throw new IOException("Recorded command differs from controlled entry point");
-      var owned = new ArrayList<>(VmDriver.launchOptions(profile, launch, facts));
+      var owned =
+          new ArrayList<>(
+              VmDriver.launchOptions(profile, launch, facts, profile.retainedMetadata() || queues));
       owned.add("-Dgorrect.observation=" + profile.observation());
       if (!owned.equals(command.subList(1, cp)))
         throw new IOException("Unreviewed recorded VM options");
