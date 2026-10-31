@@ -4,6 +4,7 @@ import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Value;
@@ -55,6 +56,23 @@ public final class ConcurrentHistory {
       Object frontier,
       List<Task> tasks,
       Map<Integer, Position> cursors,
+      int checkpoint,
+      boolean incomplete) {}
+
+  private record ThreadKey(
+      Object context,
+      List<Task> tasks,
+      int captureOperation,
+      long captureVisit,
+      boolean blocked,
+      boolean ended) {}
+
+  private record PhaseKey(
+      Object machine,
+      Object frontier,
+      List<ThreadKey> threads,
+      Map<Integer, Position> cursors,
+      int group,
       int checkpoint,
       boolean incomplete) {}
 
@@ -203,6 +221,8 @@ public final class ConcurrentHistory {
     pending.push(new State(program));
     boolean completed = false;
     var joins = new HashSet<JoinKey>();
+    var phases = new HashSet<PhaseKey>();
+    boolean reusePhases = audit && supportsPhaseReuse(program);
     // A scheduler state can hold several clearing histories; memo storage retains those too.
     long pendingStates = 1, memoStates = 0;
 
@@ -242,6 +262,14 @@ public final class ConcurrentHistory {
             if (successor.joined) {
               if (!joins.add(successor.joinKey())) continue;
               memoStates += successor.frontier.size();
+            } else if (reusePhases
+                && successor.phaseBoundary
+                && successor.group.workers().size() > 1) {
+              // Reuse needs alternative worker prefixes to offset retained-key state costs.
+              // All incoming accesses were checked before synchronization reset the race clocks.
+              // Complete contexts distinguish equal heaps with different remaining behavior.
+              if (!phases.add(successor.phaseKey())) continue;
+              memoStates += successor.frontier.size();
             }
             pending.push(successor);
             pendingStates += successor.frontier.size();
@@ -256,6 +284,44 @@ public final class ConcurrentHistory {
     return null;
   }
 
+  private static boolean supportsPhaseReuse(GirProgram program) {
+    if (ReferenceProgram.usesReferences(program)) return false;
+    return program.shapes().stream()
+            .allMatch(
+                shape ->
+                    switch (shape.kind()) {
+                      case OBJECT, REFERENCE_ARRAY, DATA_ARRAY -> true;
+                      default -> false;
+                    })
+        && program.instructions().allMatch(ConcurrentHistory::supportsPhaseReuse);
+  }
+
+  /** New frame/completion operations need a key review before entering the optimized audit. */
+  private static boolean supportsPhaseReuse(Instruction instruction) {
+    return switch (instruction) {
+      case Instruction.Allocate ignored -> true;
+      case Instruction.ReadRoot ignored -> true;
+      case Instruction.WriteRoot ignored -> true;
+      case Instruction.ReadReference ignored -> true;
+      case Instruction.WriteReference ignored -> true;
+      case Instruction.ReadData ignored -> true;
+      case Instruction.SameObject ignored -> true;
+      case Instruction.WriteData ignored -> true;
+      case Instruction.CompareSet ignored -> true;
+      case Instruction.Exchange ignored -> true;
+      case Instruction.IfPresent ignored -> true;
+      case Instruction.IfNonzero ignored -> true;
+      case Instruction.Release ignored -> true;
+      case Instruction.Checkpoint ignored -> true;
+      case Instruction.Collect ignored -> true;
+      case Instruction.Barrier ignored -> true;
+      case Instruction.Parallel ignored -> true;
+      case Instruction.Scope ignored -> true;
+      case Instruction.Repeat ignored -> true;
+      default -> false;
+    };
+  }
+
   private final class State {
     final GraphMachine machine;
     final ReferenceFrontier frontier;
@@ -265,7 +331,7 @@ public final class ConcurrentHistory {
     PhaseRace races;
     Instruction.Parallel group;
     int checkpoint;
-    boolean finished, incomplete, joined;
+    boolean finished, incomplete, joined, phaseBoundary;
 
     State(GirProgram program) {
       machine = new GraphMachine(program, OracleLimits.DEFAULT);
@@ -305,7 +371,7 @@ public final class ConcurrentHistory {
       checkpoint = source.checkpoint;
       finished = source.finished;
       incomplete = source.incomplete;
-      // joined describes only the last transition; copying it would memoize later, non-join steps.
+      // Boundary flags describe only the last transition; copying them would reuse later steps.
     }
 
     Graph graph() {
@@ -322,6 +388,36 @@ public final class ConcurrentHistory {
           frontier.key(),
           List.copyOf(threads.get(0).tasks),
           Map.copyOf(positions),
+          checkpoint,
+          incomplete);
+    }
+
+    PhaseKey phaseKey() {
+      budget.spend(machine.sharedKeyCells() + cursors.size());
+      var contexts = new ArrayList<GraphMachine.Context>();
+      var workers = new ArrayList<ThreadKey>();
+      for (var thread : threads.values()) {
+        // Bindings are visited by both the combined graph and the immutable scope snapshot.
+        budget.spend(2L * GraphMachine.contextCells(thread.context) + thread.tasks.size() + 1L);
+        contexts.add(thread.context);
+        workers.add(
+            new ThreadKey(
+                GraphMachine.contextKey(thread.context, thread.phase),
+                List.copyOf(thread.tasks),
+                thread.captureOperation,
+                thread.captureVisit,
+                thread.blocked,
+                thread.ended));
+      }
+      var positions = new HashMap<Integer, Position>();
+      cursors.forEach(
+          (worker, cursor) -> positions.put(worker, new Position(cursor.scalar, cursor.reference)));
+      return new PhaseKey(
+          machine.key(contexts),
+          frontier.key(),
+          List.copyOf(workers),
+          Map.copyOf(positions),
+          group.id(),
           checkpoint,
           incomplete);
     }
@@ -680,6 +776,7 @@ public final class ConcurrentHistory {
           thread.captureVisit = 0;
         }
         races = new PhaseRace(budget);
+        phaseBoundary = true;
       }
     }
 

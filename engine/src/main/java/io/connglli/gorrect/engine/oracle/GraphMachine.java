@@ -109,14 +109,40 @@ final class GraphMachine {
 
   /** Quiescent search keys preserve budgets and bindings as well as the complete logical heap. */
   Object key() {
+    return key(graph(), scopes.stream().map(Map::copyOf).toList());
+  }
+
+  /**
+   * Shared state without the scheduler's incidental active context; contexts are keyed separately.
+   */
+  Object key(Iterable<Context> contexts) {
+    return key(graph(contexts), List.of());
+  }
+
+  private ModelKey key(Graph graph, List<Map<String, Binding>> scopes) {
     return new ModelKey(
-        graph(),
-        scopes.stream().map(Map::copyOf).toList(),
-        Map.copyOf(occurrences),
-        steps,
-        slots,
-        snapshotCells,
-        wrappers);
+        graph, scopes, Map.copyOf(occurrences), steps, slots, snapshotCells, wrappers);
+  }
+
+  private record ContextKey(
+      int worker, int group, long round, int phase, List<Map<String, Binding>> scopes) {}
+
+  /**
+   * Freezes values and released-name reservations without activating the context. Phase is the
+   * scheduler's current phase, not the context's creation-time phase.
+   */
+  static Object contextKey(Context context, int phase) {
+    return new ContextKey(
+        context.worker(),
+        context.group(),
+        context.round(),
+        phase,
+        context.scopes().stream().map(Map::copyOf).toList());
+  }
+
+  /** Shared key cells exclude contexts, which the caller charges for graph and scope snapshots. */
+  long sharedKeyCells() {
+    return 1L + objects.size() + roots.size() + occurrences.size() + slots;
   }
 
   long keyCells() {

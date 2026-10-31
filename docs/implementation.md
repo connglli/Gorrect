@@ -43,7 +43,7 @@ The frontend parses, formats, and statically validates [GIR](./gir.md). Its immu
 
 ### Oracle and verifier
 
-The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle checks conflict-free phases. Contended profiles explore bounded schedules and use vector clocks to prove race freedom before launch; offline verification repeats that proof before matching evidence. Search forks preserve private scopes, identities, and budgets. Equivalent quiescent states merge after joins; live worker states remain distinct.
+The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle checks conflict-free phases. Contended profiles explore bounded schedules and use vector clocks to prove race freedom before launch; offline verification repeats that proof before matching evidence. Search forks preserve private scopes, identities, and budgets. Matching and reference histories merge equivalent states after joins. Strong-reference safety audits also reuse equal full states at matched phase boundaries, including every live worker/caller context and semantic resource counter.
 
 Reference histories track cleared, pending, and delivered wrapper sets. Legal GC transitions expand the frontier; validated choices and snapshots filter it. Concurrent states include every worker's and suspended caller's handles. Detached wrappers may survive without creating strong referent roots. Search forks share cumulative work limits; graph traversal and retained search states count toward those limits.
 
