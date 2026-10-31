@@ -143,6 +143,8 @@ Complete when independently enumerated wrapper/queue histories match execution, 
 
 ## 16. Add collection and phase controls with evidence
 
+Status: in progress. [Young request/certification](./completed-2026-10-31-stage16a.md) implements the first slice; concurrent phase controls, placement and further VM certificates remain separate work.
+
 Goal: exercise young, full, and concurrent collector paths deliberately.
 
 Add capability-gated young collection, concurrent-cycle start/await, and phase rendezvous. Record actual allocation size, generation/region placement, and mutation/phase overlap where supported. Cover old-to-young publication, mark deletion/insertion, remembered sets, relocation, evacuation/promotion, and humongous pressure. HotSpot controls come first; OpenJ9 supplies equivalent certificates or explicit unsupported results.

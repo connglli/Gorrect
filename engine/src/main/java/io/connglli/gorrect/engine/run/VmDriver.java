@@ -84,13 +84,31 @@ final class VmDriver {
         directory.resolve("traces/workers.gstacks"), run, Artifacts.target(directory));
   }
 
+  /** Known policy combinations fail before target-side controls or graph construction run. */
+  static List<String> unsupported(TargetProfile profile) {
+    var problems = new ArrayList<String>();
+    boolean young = profile.gc().control().equals("whitebox-young");
+    if (young && !supportsYoung(profile))
+      problems.add("whitebox-young is unsupported for " + profile.collector());
+    if (young && profile.requirements().contains("gc-completion"))
+      problems.add("gc-completion requires a whole/major collection policy");
+    if (!young && profile.requirements().contains("young-gc"))
+      problems.add("young-gc requires gc.control whitebox-young");
+    return List.copyOf(problems);
+  }
+
+  private static boolean supportsYoung(TargetProfile profile) {
+    return profile.vm().equals("hotspot")
+        && Set.of("serial", "parallel", "g1").contains(profile.collector());
+  }
+
   /**
    * Returns a mutable list of preflight gaps from the actual target report, including identity,
    * control policy, and requested capabilities. Empty means the run can be attempted; it does not
    * satisfy execution-dependent stress requirements. Malformed required facts raise runtime errors.
    */
   static List<String> requirements(TargetProfile profile, Properties target) {
-    var unmet = new ArrayList<String>();
+    var unmet = new ArrayList<>(unsupported(profile));
     if (Integer.parseInt(target.getProperty("java.feature")) < 17)
       unmet.add("Target JDK is older than 17");
 
@@ -101,6 +119,9 @@ final class VmDriver {
         || !target.getProperty("gc.problem", "").isEmpty())
       unmet.add(
           "GC control unavailable: " + target.getProperty("gc.problem", "missing control report"));
+
+    boolean youngPolicy = profile.gc().control().equals("whitebox-young");
+    boolean youngCollector = supportsYoung(profile);
 
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
     if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
@@ -114,7 +135,12 @@ final class VmDriver {
             case "local-bindings" ->
                 ObservationProfile.parse(profile.observation()).bindings()
                     && (bits & HeapSnapshot.LOCAL_VARIABLES) != 0;
-            case "gc-completion" -> target.getProperty("gc.evidence", "false").equals("true");
+            case "gc-completion" ->
+                !youngPolicy && target.getProperty("gc.evidence", "false").equals("true");
+            case "young-gc" ->
+                youngPolicy
+                    && youngCollector
+                    && target.getProperty("gc.evidence", "false").equals("true");
             case "gc-events" -> (bits & HeapSnapshot.GC_EVENTS) != 0;
             case "compilation-events" ->
                 (bits & HeapSnapshot.COMPILATION_EVENTS) != 0

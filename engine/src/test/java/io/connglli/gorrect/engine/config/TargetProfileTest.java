@@ -137,6 +137,38 @@ class TargetProfileTest {
   }
 
   @Test
+  void youngRequestsNeedWhiteBoxButNotJitAndCaptureHasItsOwnRequirement() throws IOException {
+    Path path = directory.resolve("young.json");
+    Files.writeString(path, PROFILE);
+    var raw = JsonFiles.read(path);
+    var gc = new JsonObject();
+    gc.addProperty("control", "whitebox-young");
+    raw.add("gc", gc);
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+
+    raw.getAsJsonObject("support").addProperty("whitebox", "client.jar");
+    JsonFiles.write(path, raw);
+    var profile = TargetProfile.read(path);
+    assertTrue(profile.usesWhiteBox());
+    assertNull(profile.jit());
+    assertFalse(profile.collectionEvidence());
+
+    raw.add("requirements", JsonFiles.GSON.toJsonTree(List.of("young-gc")));
+    JsonFiles.write(path, raw);
+    profile = TargetProfile.read(path);
+    assertTrue(profile.collectionEvidence());
+    assertEquals("whitebox-young", profile.gc().control());
+    assertEquals(
+        profile,
+        TargetProfile.parse(JsonFiles.GSON.toJsonTree(profile).getAsJsonObject(), directory));
+
+    raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-XX:-UnlockDiagnosticVMOptions")));
+    JsonFiles.write(path, raw);
+    assertThrows(IOException.class, () -> TargetProfile.read(path));
+  }
+
+  @Test
   void resolvesPathsWithoutTouchingInstallations() throws IOException {
     var path = directory.resolve("profile.json");
     Files.writeString(path, PROFILE);

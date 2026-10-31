@@ -74,7 +74,8 @@ final class RunVerifier {
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
       var observation = ObservationProfile.parse(profile.observation());
-      var unsupported = ObservationCapabilities.unsupported(program, observation);
+      var unsupported = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
+      unsupported.addAll(VmDriver.unsupported(profile));
       if (!unsupported.isEmpty())
         throw new UnsupportedHistoryException(String.join("; ", unsupported));
       boolean references = ReferenceProgram.usesReferences(program);
@@ -149,19 +150,18 @@ final class RunVerifier {
 
         problems.addAll(result.problems());
         captures.merge(exercised, unmet, problems);
-        if (result.execution() != null && !workerEvidenceFailed) {
-          var coverage =
-              StressVerifier.verify(directory, run, program, result.execution(), profile);
-          for (String requirement : coverage.unmet())
-            if (!unmet.contains(requirement)) unmet.add(requirement);
-          problems.addAll(coverage.problems());
-          var completion =
-              CollectionVerifier.verify(
-                  directory, run, program, result.execution(), profile, target(directory));
-          for (String requirement : completion.unmet())
-            if (!unmet.contains(requirement)) unmet.add(requirement);
-          problems.addAll(completion.problems());
-        }
+        if (result.execution() != null && !workerEvidenceFailed)
+          workerEvidenceFailed =
+              !stressCoverage(
+                  directory, run, program, result.execution(), profile, unmet, problems);
+        var completion =
+            result.execution() != null && !workerEvidenceFailed
+                ? CollectionVerifier.verify(
+                    directory, run, program, result.execution(), profile, target(directory))
+                : CollectionVerifier.withoutExecution(directory, run, profile, target(directory));
+        for (String requirement : completion.unmet())
+          if (!unmet.contains(requirement)) unmet.add(requirement);
+        problems.addAll(completion.problems());
 
         report =
             new RunReport(
@@ -192,17 +192,17 @@ final class RunVerifier {
         return report;
       }
 
-      if (!workerEvidenceFailed) {
-        var stress = StressVerifier.verify(directory, run, program, oracle, profile);
-        for (String requirement : stress.unmet())
-          if (!unmet.contains(requirement)) unmet.add(requirement);
-        problems.addAll(stress.problems());
-        var completion =
-            CollectionVerifier.verify(directory, run, program, oracle, profile, target(directory));
-        for (String requirement : completion.unmet())
-          if (!unmet.contains(requirement)) unmet.add(requirement);
-        problems.addAll(completion.problems());
-      }
+      if (!workerEvidenceFailed)
+        workerEvidenceFailed =
+            !stressCoverage(directory, run, program, oracle, profile, unmet, problems);
+      var completion =
+          workerEvidenceFailed
+              ? CollectionVerifier.withoutExecution(directory, run, profile, target(directory))
+              : CollectionVerifier.verify(
+                  directory, run, program, oracle, profile, target(directory));
+      for (String requirement : completion.unmet())
+        if (!unmet.contains(requirement)) unmet.add(requirement);
+      problems.addAll(completion.problems());
 
       boolean violated =
           !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
@@ -260,6 +260,27 @@ final class RunVerifier {
     }
     JsonFiles.write(directory.resolve("result.json"), report);
     return report;
+  }
+
+  /** Keeps malformed worker structure from bypassing independent graph comparisons. */
+  private static boolean stressCoverage(
+      Path directory,
+      long run,
+      GirProgram program,
+      OracleResult oracle,
+      TargetProfile profile,
+      List<String> unmet,
+      List<String> problems) {
+    try {
+      var coverage = StressVerifier.verify(directory, run, program, oracle, profile);
+      for (String requirement : coverage.unmet())
+        if (!unmet.contains(requirement)) unmet.add(requirement);
+      problems.addAll(coverage.problems());
+      return true;
+    } catch (IOException | RuntimeException failure) {
+      problems.add("Worker synchronization evidence extraction failed: " + failure);
+      return false;
+    }
   }
 
   /** Loads independent captures without letting a later gap erase an earlier refutation. */

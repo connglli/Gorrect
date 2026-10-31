@@ -53,12 +53,15 @@ public record TargetProfile(
 
   /** Whether launching this parsed profile requires the bundled HotSpot WhiteBox API. */
   public boolean usesWhiteBox() {
-    return vm.equals("hotspot") && (jit != null || gc.control().equals("whitebox-full"));
+    return vm.equals("hotspot") && (jit != null || whiteBoxControl(gc.control()));
   }
 
   /** Whether the host requests HotSpot cycle capture, including capture used by JIT stress. */
   public boolean collectionEvidence() {
-    return vm.equals("hotspot") && (jit != null || requirements.contains("gc-completion"));
+    return vm.equals("hotspot")
+        && (jit != null
+            || requirements.contains("gc-completion")
+            || requirements.contains("young-gc"));
   }
 
   /** Copies settings with a target-confirmed mode for replay; it performs no validation or I/O. */
@@ -278,6 +281,7 @@ public record TargetProfile(
                   "alias-checks",
                   "compiled-execution",
                   "gc-completion",
+                  "young-gc",
                   "contended-histories",
                   "reference-histories",
                   "reference-queues",
@@ -299,17 +303,20 @@ public record TargetProfile(
         gcSettings.has("control")
             ? text(gcSettings, "control")
             : jit == null || !vm.equals("hotspot") ? "system" : "whitebox-full";
-    if (!Set.of("system", "whitebox-full").contains(gcControl))
+    if (!Set.of("system", "whitebox-full", "whitebox-young").contains(gcControl))
       throw new IllegalArgumentException("Unknown GC control " + gcControl);
-    if (gcControl.equals("whitebox-full")
-        && (!vm.equals("hotspot") || artifacts.whitebox() == null))
+    if (whiteBoxControl(gcControl) && (!vm.equals("hotspot") || artifacts.whitebox() == null))
       throw new IllegalArgumentException(
           "WhiteBox GC control requires HotSpot and support.whitebox");
     if (vm.equals("hotspot")
-        && (jit != null || gcControl.equals("whitebox-full"))
+        && (jit != null || whiteBoxControl(gcControl))
         && args.contains("-XX:-UnlockDiagnosticVMOptions"))
       throw new IllegalArgumentException("WhiteBox control requires diagnostic VM options");
     return new Gc(gcControl);
+  }
+
+  private static boolean whiteBoxControl(String control) {
+    return Set.of("whitebox-full", "whitebox-young").contains(control);
   }
 
   private static Limits parseLimits(JsonObject object) {

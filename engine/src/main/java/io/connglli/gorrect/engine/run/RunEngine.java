@@ -155,7 +155,8 @@ public final class RunEngine {
         text = GirFormatter.format(probe);
       }
       // A combined capability probe still needs an unconditional, quiescent request.
-      if (profile.requirements().contains("gc-completion")) {
+      if (profile.requirements().contains("gc-completion")
+          || profile.requirements().contains("young-gc")) {
         int end = text.lastIndexOf('}');
         text = text.substring(0, end) + "collect;\n" + text.substring(end);
       }
@@ -248,7 +249,8 @@ public final class RunEngine {
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var observation = ObservationProfile.parse(profile.observation());
 
-      var combination = ObservationCapabilities.unsupported(program, observation);
+      var combination = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
+      combination.addAll(VmDriver.unsupported(profile));
       if (!combination.isEmpty())
         return finish(
             directory,

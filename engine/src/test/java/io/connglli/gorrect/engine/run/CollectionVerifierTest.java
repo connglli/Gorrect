@@ -5,10 +5,17 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
+import com.google.gson.JsonObject;
+import io.connglli.gorrect.engine.config.JsonFiles;
+import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.protocol.CollectionEvidence;
+import java.nio.file.Path;
 import java.time.Instant;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Test;
+import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 
 class CollectionVerifierTest {
   @Test
@@ -98,5 +105,143 @@ class CollectionVerifierTest {
     assertTrue(CollectionVerifier.completedWithin(request("system", 10, 100), cycle, "zgc"));
     assertTrue(CollectionVerifier.completedWithin(request("system", 20, 80), cycle, "zgc"));
     assertFalse(CollectionVerifier.completedWithin(request("system", 40, 80), cycle, "zgc"));
+  }
+
+  @ParameterizedTest
+  @CsvSource({"serial,DefNew", "parallel,ParallelScavenge", "g1,G1New"})
+  void youngCertificatesRequireTheSelectedYoungKindCauseAndCompleteInterval(
+      String collector, String name) {
+    var request = request("whitebox-young", 10, 100);
+    assertTrue(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "WhiteBox Initiated Young GC", 10, 100), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "Allocation Failure", 20, 90), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "WhiteBox Initiated Full GC", 20, 90), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "WhiteBox Initiated Young GC", 9, 90), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "WhiteBox Initiated Young GC", 20, 101), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle(name, "WhiteBox Initiated Young GC", 20, 20), collector));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request("system", 10, 100),
+            cycle(name, "WhiteBox Initiated Young GC", 20, 90),
+            collector));
+    assertFalse(
+        CollectionVerifier.completedWithin(
+            request, cycle(name, "WhiteBox Initiated Young GC", 20, 90), collector));
+  }
+
+  @Test
+  void fullCyclesAndOtherCollectorsCannotSubstituteForAYoungCertificate() {
+    var request = request("whitebox-young", 10, 100);
+    for (String name :
+        List.of("SerialOld", "ParallelOld", "G1Full", "G1Old", "Z", "ZGC Minor", "Shenandoah"))
+      assertFalse(
+          CollectionVerifier.youngWithin(
+              request, cycle(name, "WhiteBox Initiated Young GC", 20, 90), "serial"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle("ZGC Minor", "WhiteBox Initiated Young GC", 20, 90), "zgc"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle("Shenandoah", "WhiteBox Initiated Young GC", 20, 90), "shenandoah"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            new CollectionEvidence.Request(
+                0, 1, 0, 0, 0, 1, 1, "whitebox-young", false, time(10), time(100)),
+            cycle("DefNew", "WhiteBox Initiated Young GC", 20, 90),
+            "serial"));
+  }
+
+  @Test
+  void youngCoverageChecksEveryRequestAgainstIndependentExpectedContext() {
+    var profile = youngProfile();
+    var key = new CollectionVerifier.Key(0, 0, 0, 1);
+    var expected = Map.of(key, new CollectionVerifier.Expected(1, 0, 1));
+    var valid = request("whitebox-young", 10, 100);
+    var event = cycle("DefNew", "WhiteBox Initiated Young GC", 20, 90);
+    assertTrue(
+        CollectionVerifier.compare(
+                expected, new CollectionEvidence(List.of(valid), List.of(event)), profile)
+            .unmet()
+            .isEmpty());
+
+    for (var requests :
+        List.of(
+            List.<CollectionEvidence.Request>of(),
+            List.of(valid, request("whitebox-young", 100, 200)),
+            List.of(request("system", 10, 100)),
+            List.of(
+                new CollectionEvidence.Request(
+                    0, 2, 0, 0, 0, 1, 1, "whitebox-young", true, time(10), time(100))),
+            List.of(
+                new CollectionEvidence.Request(
+                    0, 1, 0, 0, 1, 1, 1, "whitebox-young", true, time(10), time(100))),
+            List.of(
+                new CollectionEvidence.Request(
+                    0, 1, 0, 0, 0, 1, 2, "whitebox-young", true, time(10), time(100))),
+            List.of(
+                new CollectionEvidence.Request(
+                    0, 1, 0, 0, 0, 2, 1, "whitebox-young", true, time(10), time(100))),
+            List.of(
+                new CollectionEvidence.Request(
+                    0, 1, 0, 0, 0, 1, 1, "whitebox-young", false, time(10), time(100))))) {
+      var result =
+          CollectionVerifier.compare(
+              expected, new CollectionEvidence(requests, List.of(event)), profile);
+      assertEquals(List.of("young-gc"), result.unmet());
+      assertFalse(result.problems().isEmpty());
+    }
+    assertEquals(
+        List.of("young-gc"),
+        CollectionVerifier.compare(
+                expected, new CollectionEvidence(List.of(valid), List.of()), profile)
+            .unmet());
+    assertEquals(
+        List.of("young-gc"),
+        CollectionVerifier.compare(
+                Map.of(), new CollectionEvidence(List.of(), List.of(event)), profile)
+            .unmet());
+  }
+
+  @Test
+  void coalescedYoungRequestsRetainWorkerContextsWithoutUsingFileOrder() {
+    var first =
+        new CollectionEvidence.Request(
+            1, 11, 3, 2, 4, 1, 101, "whitebox-young", true, time(10), time(100));
+    var second =
+        new CollectionEvidence.Request(
+            2, 12, 3, 2, 4, 1, 102, "whitebox-young", true, time(20), time(90));
+    var expected =
+        Map.of(
+            new CollectionVerifier.Key(1, 3, 2, 1), new CollectionVerifier.Expected(11, 4, 101),
+            new CollectionVerifier.Key(2, 3, 2, 1), new CollectionVerifier.Expected(12, 4, 102));
+    var evidence =
+        new CollectionEvidence(
+            List.of(second, first),
+            List.of(cycle("DefNew", "WhiteBox Initiated Young GC", 30, 80)));
+    assertTrue(CollectionVerifier.compare(expected, evidence, youngProfile()).unmet().isEmpty());
+  }
+
+  private static TargetProfile youngProfile() {
+    var raw =
+        JsonFiles.GSON.fromJson(
+            """
+            {"version":1,"vm":"hotspot","java":"jdk/bin/java","collector":"serial",
+             "observation":"named-roots-diagnostic","requirements":["young-gc"],
+             "gc":{"control":"whitebox-young"},
+             "support":{"runtime":"runtime.jar","protocol":"protocol.jar","observer":"observer.so","whitebox":"client.jar"}}
+            """,
+            JsonObject.class);
+    return TargetProfile.parse(raw, Path.of("."));
   }
 }

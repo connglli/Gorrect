@@ -2,6 +2,7 @@ package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import java.io.IOException;
+import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -109,7 +110,12 @@ interface VmControl extends AutoCloseable {
       if (VmFacts.isOpenJ9()) return new OpenJ9Control(directory, run, jit, control);
       return new HotSpotControl(directory, run, jit, control, evidence);
     } catch (ReflectiveOperationException | LinkageError | RuntimeException failure) {
-      return disabled("VM control unavailable: " + failure, control, evidence);
+      // Reflection's wrapper otherwise hides an unregistered native or the control's own cause.
+      Throwable cause =
+          failure instanceof InvocationTargetException invoked && invoked.getCause() != null
+              ? invoked.getCause()
+              : failure;
+      return disabled("VM control unavailable: " + cause, control, evidence);
     }
   }
 

@@ -40,7 +40,7 @@ final class HotSpotControl implements VmControl {
   private final boolean jitConfigured;
   private final String gcControl;
   private final Object whitebox;
-  private final Method dontInline, enqueue, compilationLevel, fullGC;
+  private final Method dontInline, enqueue, compilationLevel, collectionMethod;
   private final int level, warmup, timeout;
   private final long run;
   private final Path output;
@@ -63,7 +63,7 @@ final class HotSpotControl implements VmControl {
     timeout = settings == null ? 0 : settings.deadlineMillis();
 
     Class<?> type = null;
-    if (jitConfigured || gcControl.equals("whitebox-full")) {
+    if (jitConfigured || !gcControl.equals("system")) {
       try {
         type = Class.forName("jdk.test.whitebox.WhiteBox", true, null);
       } catch (ClassNotFoundException missing) {
@@ -82,11 +82,17 @@ final class HotSpotControl implements VmControl {
             : null;
     compilationLevel =
         jitConfigured ? type.getMethod("getMethodCompilationLevel", Executable.class) : null;
-    fullGC = gcControl.equals("whitebox-full") ? type.getMethod("fullGC") : null;
+    collectionMethod =
+        switch (gcControl) {
+          case "system" -> null;
+          case "whitebox-full" -> type.getMethod("fullGC");
+          case "whitebox-young" -> type.getMethod("youngGC");
+          default -> throw new IllegalArgumentException("Unknown GC control " + gcControl);
+        };
 
     // A declared native method need not be registered by this client/VM pair. Probe before any
     // workload exists; its cycle is outside every modeled request and cannot satisfy coverage.
-    if (fullGC != null) fullGC.invoke(whitebox);
+    if (collectionMethod != null) collectionMethod.invoke(whitebox);
 
     // Request policy is usable independently of evidence collection and compiler control.
     if (!jitConfigured && !gcEvidence) {
@@ -218,8 +224,8 @@ final class HotSpotControl implements VmControl {
 
   private void requestCollection() {
     try {
-      if (fullGC == null) System.gc();
-      else fullGC.invoke(whitebox);
+      if (collectionMethod == null) System.gc();
+      else collectionMethod.invoke(whitebox);
     } catch (IllegalAccessException | InvocationTargetException failure) {
       throw new IllegalStateException("WhiteBox collection failed", failure);
     }

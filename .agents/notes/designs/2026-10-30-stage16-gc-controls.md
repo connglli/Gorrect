@@ -1,10 +1,10 @@
 # Stage 16 GC control proposal
 
-Status: proposal for review, not accepted behavior or a production implementation. This note scopes [stage 16](../implementations/2026-10-29-implementation-plan.md#16-add-collection-and-phase-controls-with-evidence) while scalar/frame/exception work continues independently. GIR and artifacts remain version 1.
+Status: accepted design basis for the [young-request implementation](../implementations/completed-2026-10-31-stage16a.md); later request-kind, phase and placement slices remain proposals. This note scopes [stage 16](../implementations/2026-10-29-implementation-plan.md#16-add-collection-and-phase-controls-with-evidence) while scalar/frame/exception work continues independently. GIR and artifacts remain version 1.
 
 ## First slice
 
-Add a profile-owned HotSpot young-collection policy using the existing `collect;` instruction. Draft names are `gc.control: "whitebox-young"` and requirement `young-gc`; the current parser accepts neither. Keep the first supported collector set to Serial, Parallel, and G1. This changes request selection and stress evidence, without changing portable graph/reference semantics, GIR syntax, or frame lifetimes.
+The first slice uses a profile-owned HotSpot young-collection policy through the existing `collect;` instruction. The [usage contract](../../../docs/usage.md#profiles) owns its `whitebox-young` policy and `young-gc` requirement. Keep the first supported collector set to Serial, Parallel, and G1. This changes request selection and stress evidence, without changing portable graph/reference semantics, GIR syntax, or frame lifetimes.
 
 A capability report says whether the configured method and event capture are usable. A returned request says only that the call returned. The `young-gc` requirement needs a completed qualifying young-event interval for every executed request; it certifies that the young path ran, without claiming a young-only run or successful promotion. These are separate facts. Do not substitute a full collection, allocation burst, or `System.gc()` when young control is unavailable.
 
