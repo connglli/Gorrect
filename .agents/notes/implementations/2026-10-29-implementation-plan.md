@@ -163,7 +163,7 @@ Complete when long allocate/release runs stay bounded by live state rather than 
 
 ## 18. Add layouts, bulk operations, and identity observations
 
-Status: in progress. [Array cloning](./completed-2026-10-31-stage18a.md), [range copying](./completed-2026-10-31-stage18b.md) and [opaque identity hashes](./completed-2026-10-31-stage18c.md) are implemented. Object cloning, exception effects, typed/dynamic arrays and further identity/layout mechanisms remain separate work.
+Status: in progress. [Array cloning](./completed-2026-10-31-stage18a.md), [range copying](./completed-2026-10-31-stage18b.md), [opaque identity hashes](./completed-2026-10-31-stage18c.md) and [mixed primitive object fields](./completed-2026-10-31-stage18d.md) are implemented. Object cloning, exception effects, typed/dynamic arrays and further identity/layout mechanisms remain separate work.
 
 Goal: reach VM copying/barrier paths and realistic layouts.
 

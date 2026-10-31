@@ -452,8 +452,23 @@ public final class SnapshotProjector {
                 && object.data().size() == object.shape().data(),
             "Logical slot count mismatch");
         var expected = new HashSet<String>();
-        var refs = fields(type, object.references(), true, expected);
-        var data = fields(type, object.data(), false, expected);
+        var refs = referenceFields(type, object.references(), expected);
+        var data = new ArrayList<HeapSnapshot.FieldInfo>();
+        for (int index = 0; index < object.data().size(); index++) {
+          var kind = object.shape().dataKinds().get(index);
+          var field = field(type, object.data().get(index), expected);
+          require(
+              !Modifier.isStatic(field.modifiers())
+                  && field
+                      .descriptor()
+                      .equals(
+                          switch (kind) {
+                            case INT -> "I";
+                            case LONG -> "J";
+                          }),
+              "Wrong payload field type or modifier: " + field.name());
+          data.add(field);
+        }
         var worker = identityField(type, object.worker(), "I", expected);
         var site = identityField(type, object.site(), "I", expected);
         var occurrence = identityField(type, object.occurrence(), "J", expected);
@@ -636,7 +651,19 @@ public final class SnapshotProjector {
           var resolved = objectTypes.get(type.id());
           shape = resolved.shape();
           for (var field : resolved.references()) refs.add(reference(tag, field.index(), FIELD));
-          for (var field : resolved.data()) data.add(primitive(tag, field, LONG));
+          for (int index = 0; index < resolved.data().size(); index++) {
+            var kind = shape.dataKinds().get(index);
+            long value =
+                primitive(
+                    tag,
+                    resolved.data().get(index),
+                    switch (kind) {
+                      case INT -> INT;
+                      case LONG -> LONG;
+                    });
+            require(kind.normalize(value) == value, "Noncanonical int payload");
+            data.add(value);
+          }
         } else {
           shape = arrays.get(arrayIds.get(tag).shape());
           if (shape.kind() == Shape.Kind.REFERENCE_ARRAY) {
@@ -744,14 +771,13 @@ public final class SnapshotProjector {
       }
     }
 
-    private List<HeapSnapshot.FieldInfo> fields(
-        HeapSnapshot.ClassInfo type, List<String> names, boolean reference, Set<String> expected) {
+    private List<HeapSnapshot.FieldInfo> referenceFields(
+        HeapSnapshot.ClassInfo type, List<String> names, Set<String> expected) {
       var result = new ArrayList<HeapSnapshot.FieldInfo>();
       for (String name : names) {
         var field = field(type, name, expected);
         require(
-            !Modifier.isStatic(field.modifiers())
-                && (reference ? isReference(field.descriptor()) : field.descriptor().equals("J")),
+            !Modifier.isStatic(field.modifiers()) && isReference(field.descriptor()),
             "Wrong field type or modifier: " + name);
         result.add(field);
       }

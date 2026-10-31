@@ -1,6 +1,8 @@
 package io.connglli.gorrect.engine.gir;
 
+import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
+import java.util.Locale;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -33,7 +35,17 @@ public final class GirFormatter {
     for (var shape : program.shapes()) {
       String dimensions =
           switch (shape.kind()) {
-            case OBJECT -> "object " + shape.references() + " " + shape.data();
+            case OBJECT ->
+                "object "
+                    + shape.references()
+                    + " "
+                    + (shape.dataKinds().contains(Shape.DataKind.INT)
+                        ? "["
+                            + shape.dataKinds().stream()
+                                .map(kind -> kind.name().toLowerCase(Locale.ROOT))
+                                .collect(Collectors.joining(", "))
+                            + "]"
+                        : shape.data());
             case REFERENCE_ARRAY -> "refs " + shape.references();
             case DATA_ARRAY -> "data " + shape.data();
             case SOFT_REFERENCE -> "soft";

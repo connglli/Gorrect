@@ -65,7 +65,7 @@ public final class GirParser {
           String kind = next().text();
           shapes.add(
               switch (kind) {
-                case "object" -> new Shape(name, Shape.Kind.OBJECT, integer(), integer());
+                case "object" -> objectShape(name);
                 case "refs" -> new Shape(name, Shape.Kind.REFERENCE_ARRAY, integer(), 0);
                 case "data" -> new Shape(name, Shape.Kind.DATA_ARRAY, 0, integer());
                 case "soft" -> new Shape(name, Shape.Kind.SOFT_REFERENCE, 0, 0);
@@ -268,6 +268,25 @@ public final class GirParser {
       return new Value.Reference(kind, target);
     }
     return take("null") ? Value.Reference.NULL : Value.Reference.strong(ObjectId.initial(number()));
+  }
+
+  private Shape objectShape(String name) {
+    int references = integer();
+    if (!take("[")) return new Shape(name, Shape.Kind.OBJECT, references, integer());
+
+    var kinds = new ArrayList<Shape.DataKind>();
+    if (!take("]")) {
+      do {
+        kinds.add(
+            switch (next().text()) {
+              case "int" -> Shape.DataKind.INT;
+              case "long" -> Shape.DataKind.LONG;
+              default -> throw error("Expected int or long payload kind");
+            });
+      } while (take(","));
+      expect("]");
+    }
+    return new Shape(name, Shape.Kind.OBJECT, references, kinds);
   }
 
   private Operand operand() {

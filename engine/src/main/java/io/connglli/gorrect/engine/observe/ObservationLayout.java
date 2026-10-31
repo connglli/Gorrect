@@ -120,8 +120,9 @@ public record ObservationLayout(
 
   /**
    * Maps a JVM class signature to logical slots. Reference and data field names are in logical slot
-   * order; worker, site, and occurrence name the final {@code int}, {@code int}, and {@code long}
-   * identity fields. Field indices come from captured VM metadata.
+   * order; the shape's data kinds require matching JVM field descriptors and primitive records.
+   * Worker, site, and occurrence name the final {@code int}, {@code int}, and {@code long} identity
+   * fields. Field indices come from captured VM metadata.
    */
   public record ObjectType(
       String signature,

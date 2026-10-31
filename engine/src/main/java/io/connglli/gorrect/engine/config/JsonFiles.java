@@ -7,10 +7,14 @@ import com.google.gson.JsonElement;
 import com.google.gson.JsonNull;
 import com.google.gson.JsonObject;
 import com.google.gson.JsonPrimitive;
+import com.google.gson.JsonSerializationContext;
+import com.google.gson.JsonSerializer;
 import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
+import io.connglli.gorrect.engine.model.Shape;
 import java.io.IOException;
+import java.lang.reflect.Type;
 import java.math.BigDecimal;
 import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
@@ -25,7 +29,20 @@ public final class JsonFiles {
           .setStrictness(Strictness.STRICT)
           .setPrettyPrinting()
           .serializeNulls()
+          .registerTypeAdapter(Shape.class, (JsonSerializer<Shape>) JsonFiles::shape)
           .create();
+
+  /** Omit implicit long kinds so array length does not inflate retained layout metadata. */
+  private static JsonElement shape(Shape shape, Type type, JsonSerializationContext context) {
+    var object = new JsonObject();
+    object.addProperty("name", shape.name());
+    object.add("kind", context.serialize(shape.kind()));
+    object.addProperty("references", shape.references());
+    object.addProperty("data", shape.data());
+    if (shape.dataKinds().contains(Shape.DataKind.INT))
+      object.add("dataKinds", context.serialize(shape.dataKinds()));
+    return object;
+  }
 
   private JsonFiles() {}
 

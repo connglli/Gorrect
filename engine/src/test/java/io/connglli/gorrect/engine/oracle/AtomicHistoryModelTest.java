@@ -170,7 +170,7 @@ class AtomicHistoryModelTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"object 0 2", "data 2"})
+  @ValueSource(strings = {"object 0 2", "object 0 [int, int]", "object 0 [int, long]", "data 2"})
   void agreesWithExhaustiveVolatileStoreBufferingSchedules(String layout) {
     var allowed = new HashSet<List<Integer>>();
     for (var order : permutations(List.of(0, 1, 2, 3))) {
@@ -366,6 +366,63 @@ class AtomicHistoryModelTest {
           result.verdict(),
           result.toString());
     }
+  }
+
+  @Test
+  void contendedIntCasNormalizesExpectedAndUpdateWithoutSpuriousFailure() {
+    var program =
+        GirParser.parse(
+            """
+            gir 1; shape N object 0 [int, long, long]; object 1 N [] [0, 0, 0]; root r = 1;
+            program { parallel {
+              worker a { read-volatile-root n N r; compare-set-data won n 0 4294967296 4294967297; write-data n 1 won; }
+              worker b { read-volatile-root n N r; compare-set-data won n 0 4294967296 4294967298; write-data n 2 won; }
+            } }
+            """);
+    for (int left = 0; left <= 1; left++)
+      for (int right = 0; right <= 1; right++)
+        for (int winner = 0; winner <= 2; winner++) {
+          var events = main();
+          for (int worker = 1; worker <= 2; worker++) {
+            int read = worker == 1 ? 2 : 5;
+            events.add(event(worker, 1, ExecutionTrace.Kind.WORKER_START, 0));
+            events.add(event(worker, read, ExecutionTrace.Kind.REFERENCE_READ, 1));
+            events.add(
+                event(
+                    worker, read + 1, ExecutionTrace.Kind.COMPARE_SET, worker == 1 ? left : right));
+            events.add(event(worker, read + 2, ExecutionTrace.Kind.OPERATION, 0));
+            events.add(event(worker, 1, ExecutionTrace.Kind.WORKER_END, 0));
+          }
+          var graph =
+              new Graph(
+                  Map.of(
+                      ObjectId.initial(1),
+                      new HeapObject(
+                          program.shapes().getFirst(),
+                          List.of(),
+                          List.of((long) winner, (long) left, (long) right))),
+                  Map.of("r", ref(1)),
+                  Map.of());
+          var history =
+              new ReferenceHistory(
+                  1,
+                  true,
+                  List.of(
+                      identity(1, 2, ObjectId.initial(1)), identity(2, 2, ObjectId.initial(1))));
+          var result =
+              ConcurrentHistory.check(
+                  program,
+                  new ExecutionTrace(1, true, events),
+                  history,
+                  List.of(new HistoryOracle.Observation(Optional.of(graph), List.of())),
+                  LIMITS);
+          boolean allowed =
+              left == 1 && right == 0 && winner == 1 || left == 0 && right == 1 && winner == 2;
+          assertEquals(
+              allowed ? ExactVerifier.Verdict.SATISFIED : ExactVerifier.Verdict.VIOLATED,
+              result.verdict(),
+              left + "/" + right + "/" + winner + ": " + result);
+        }
   }
 
   private static Value.Reference ref(int id) {

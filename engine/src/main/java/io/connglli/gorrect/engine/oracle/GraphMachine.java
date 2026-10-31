@@ -25,6 +25,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.stream.IntStream;
 
 /**
  * Case-local state. Heap writes replace immutable records so retained checkpoints stay unchanged.
@@ -301,7 +302,14 @@ final class GraphMachine {
         references.add(value);
       }
       objects.put(
-          ObjectId.initial(initial.id()), new HeapObject(shape, references, initial.data()));
+          ObjectId.initial(initial.id()),
+          new HeapObject(
+              shape,
+              references,
+              IntStream.range(0, shape.data())
+                  .mapToObj(
+                      index -> shape.dataKinds().get(index).normalize(initial.data().get(index)))
+                  .toList()));
       slots += shape.slots();
     }
     program.roots().forEach(root -> roots.put(root.name(), root.value()));
@@ -483,7 +491,9 @@ final class GraphMachine {
         var value = scalar(op.value());
 
         var data = new ArrayList<>(target.object().data());
-        data.set(op.index(), value.value());
+        data.set(
+            op.index(),
+            target.object().shape().dataKinds().get(op.index()).normalize(value.value()));
         objects.put(
             target.id(),
             new HeapObject(target.object().shape(), target.object().references(), data));
@@ -493,8 +503,8 @@ final class GraphMachine {
       case Instruction.CompareSet op -> {
         requireDeclaration(op.name());
         var current = atomicValue(op.location());
-        var expected = operand(op.expected(), op.location().reference());
-        var update = operand(op.update(), op.location().reference());
+        var expected = normalize(op.location(), operand(op.expected(), op.location().reference()));
+        var update = normalize(op.location(), operand(op.update(), op.location().reference()));
         rejectWrapperAtomic(expected);
         rejectWrapperAtomic(update);
 
@@ -507,7 +517,7 @@ final class GraphMachine {
       case Instruction.Exchange op -> {
         requireDeclaration(op.name());
         var current = atomicValue(op.location());
-        var update = operand(op.update(), op.location().reference());
+        var update = normalize(op.location(), operand(op.update(), op.location().reference()));
         rejectWrapperAtomic(update);
         if (current instanceof Value.Reference reference) {
           requireShape(reference, shape(op.shape()));
@@ -635,6 +645,19 @@ final class GraphMachine {
     return reference ? reference(operand) : scalar(operand);
   }
 
+  /** Atomic comparison uses the same target-width conversion as its update. */
+  private Value normalize(Location location, Value value) {
+    if (location.reference()) return value;
+    var target = target(location.owner(), location.index(), false);
+    return new Value.Scalar(
+        target
+            .object()
+            .shape()
+            .dataKinds()
+            .get(location.index())
+            .normalize(((Value.Scalar) value).value()));
+  }
+
   private static void rejectWrapperAtomic(Value value) {
     if (value instanceof Value.Reference reference && reference.wrapperTarget() != null)
       throw new UnsupportedHistoryException("Wrapper-valued atomics are unsupported");
@@ -672,7 +695,13 @@ final class GraphMachine {
       objects.put(target.id(), new HeapObject(object.shape(), refs, object.data()));
     } else {
       var data = new ArrayList<>(object.data());
-      data.set(location.index(), ((Value.Scalar) value).value());
+      data.set(
+          location.index(),
+          object
+              .shape()
+              .dataKinds()
+              .get(location.index())
+              .normalize(((Value.Scalar) value).value()));
       objects.put(target.id(), new HeapObject(object.shape(), object.references(), data));
     }
   }

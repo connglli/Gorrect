@@ -212,9 +212,9 @@ public sealed interface Instruction {
   }
 
   /**
-   * Requires a valid data-slot access and a fresh destination name. Reads the signed 64-bit value
-   * once into a scalar binding. Later slot writes do not change the copied value. The scalar
-   * binding does not retain the owner object.
+   * Requires a valid data-slot access and a fresh destination name. Reads once into a signed 64-bit
+   * scalar binding, sign-extending int fields. Later slot writes do not change the copied value.
+   * The scalar binding does not retain the owner object.
    */
   record ReadData(int id, String name, String owner, int index, MemoryMode mode)
       implements Operation {
@@ -232,7 +232,7 @@ public sealed interface Instruction {
 
   /**
    * Requires a valid data slot and scalar operand. Replaces that slot with the operand's current
-   * signed 64-bit value.
+   * value, narrowed to int for an int field; long fields preserve all bits.
    */
   record WriteData(int id, String owner, int index, Operand value, MemoryMode mode)
       implements Operation {
@@ -244,15 +244,16 @@ public sealed interface Instruction {
   /**
    * Requires a fresh scalar name, a valid location, and matching operand types. Atomically compares
    * the current value with expected and writes update only on equality. References compare
-   * identity; longs compare bits. Binds 1 on success, 0 otherwise, without spurious failure. The
-   * read has volatile effects; a successful write does too. Reference locations must contain strong
-   * values.
+   * identity; data operands first convert to the target field width and compare bits. Binds 1 on
+   * success, 0 otherwise, without spurious failure. The read has volatile effects; a successful
+   * write does too. Reference locations must contain strong values.
    */
   record CompareSet(int id, String name, Location location, Operand expected, Operand update)
       implements Operation {}
 
   /**
-   * Atomically replaces a location and binds its old value, with volatile read/write effects.
+   * Atomically replaces a location and binds its old value, with volatile read/write effects. Data
+   * updates convert to the target width; an int old value is sign-extended into a scalar binding.
    * Requires a fresh name and matching update type. Reference locations require a declared result
    * shape, including for a null result, and must contain strong values; data locations use a null
    * shape. A returned reference is a strong handle through release/scope exit. Null and

@@ -91,7 +91,7 @@ final class RunTestSupport {
   static void assertPass(RunReport result) {
     assertEquals(RunReport.Outcome.COMPLETED, result.execution(), result.toString());
     assertEquals(ExactVerifier.Verdict.SATISFIED, result.verdict(), result.toString());
-    assertEquals(0, result.exitStatus());
+    assertEquals(0, result.exitStatus(), result.toString());
   }
 
   static void rewriteSnapshot(Path directory, boolean remove) throws IOException {

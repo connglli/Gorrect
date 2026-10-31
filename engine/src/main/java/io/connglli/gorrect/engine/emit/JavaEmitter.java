@@ -35,8 +35,7 @@ public final class JavaEmitter {
 
   private record Binding(String name, Shape shape, int id) {}
 
-  private record Variable(
-      String owner, String field, boolean reference, boolean root, boolean array) {}
+  private record Variable(String owner, String field, String type, boolean root, boolean array) {}
 
   private final Map<String, Variable> variables = new LinkedHashMap<>();
 
@@ -187,7 +186,8 @@ public final class JavaEmitter {
       line("public final int idWorker, idSite;");
       line("public final long idOccurrence;");
       for (String field : names("f", shape.references())) line("public Object " + field + ";");
-      for (String field : names("d", shape.data())) line("public long " + field + ";");
+      for (int slot = 0; slot < shape.data(); slot++)
+        line("public " + dataType(shape, slot) + " d" + slot + ";");
       line(
           "public "
               + type
@@ -406,11 +406,25 @@ public final class JavaEmitter {
               + ".class, \""
               + variable.field()
               + "\", "
-              + (variable.reference() ? "Object" : "long")
+              + variable.type()
               + ".class, "
               + variable.root()
               + ");");
     }
+  }
+
+  private static String dataType(Shape shape, int index) {
+    return switch (shape.dataKinds().get(index)) {
+      case INT -> "int";
+      case LONG -> "long";
+    };
+  }
+
+  /** Exact VarHandle call-site types are required; widening an int result is a separate step. */
+  private String locationType(Location location) {
+    return location.reference()
+        ? "Object"
+        : dataType(binding(location.owner()).shape(), location.index());
   }
 
   private String handle(Location location) {
@@ -429,7 +443,7 @@ public final class JavaEmitter {
         array
             ? "v_" + (location.reference() ? "references" : "data") + "_element"
             : "v_" + owner + "_" + field;
-    variables.putIfAbsent(name, new Variable(owner, field, location.reference(), root, array));
+    variables.putIfAbsent(name, new Variable(owner, field, locationType(location), root, array));
     return name;
   }
 
@@ -453,20 +467,19 @@ public final class JavaEmitter {
     return slot(owner.name(), owner.shape(), location.index(), location.reference());
   }
 
-  // Use the field's Object type at signature-polymorphic call sites, including null operands.
+  // Signature-polymorphic calls require the field's exact argument type, including null.
   private String argument(Location location, Operand value) {
-    return (location.reference() ? "(Object) " : "") + operand(value);
+    return location.reference() ? "(Object) " + operand(value) : narrow(location, operand(value));
+  }
+
+  private String narrow(Location location, String value) {
+    return locationType(location).equals("int") ? "(int) " + value : value;
   }
 
   private void write(Location location, MemoryMode mode, String value) {
+    value = narrow(location, value);
     if (mode == MemoryMode.VOLATILE)
-      line(
-          handle(location)
-              + ".setVolatile("
-              + coordinates(location)
-              + (location.reference() ? "(Object) " : "")
-              + value
-              + ");");
+      line(handle(location) + ".setVolatile(" + coordinates(location) + value + ");");
     else if (location.kind() == Location.Kind.ROOT)
       line("Roots." + roots.get(location.owner()) + " = " + value + ";");
     else {
@@ -543,7 +556,12 @@ public final class JavaEmitter {
         line(slot(name, shape, i, true) + " = " + target + ";");
       }
       for (int i = 0; i < object.data().size(); i++)
-        line(slot(name, shape, i, false) + " = " + object.data().get(i) + "L;");
+        line(
+            slot(name, shape, i, false)
+                + " = "
+                + (shape.dataKinds().get(i) == Shape.DataKind.INT ? "(int) " : "")
+                + object.data().get(i)
+                + "L;");
     }
     for (var root : program.roots())
       line("Roots." + roots.get(root.name()) + " = " + initial(root.value(), objects) + ";");
@@ -988,7 +1006,7 @@ public final class JavaEmitter {
                 + " "
                 + name
                 + " = ("
-                + type
+                + (op.location().reference() ? type : locationType(op.location()))
                 + ") "
                 + handle(op.location())
                 + ".getAndSet("
@@ -1039,7 +1057,11 @@ public final class JavaEmitter {
             "long "
                 + name
                 + " = "
-                + (op.mode() == MemoryMode.VOLATILE ? "(long) " : "")
+                + (op.mode() == MemoryMode.VOLATILE
+                    ? "("
+                        + locationType(new Location(Location.Kind.DATA, op.owner(), op.index()))
+                        + ") "
+                    : "")
                 + read(new Location(Location.Kind.DATA, op.owner(), op.index()), op.mode())
                 + ";");
         line(

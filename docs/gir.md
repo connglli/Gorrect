@@ -32,11 +32,11 @@ Object 2 changes from 9 to 42; a fresh object stores its original 9. All three o
 
 A file starts with `gir 1;`, followed by declarations and one `program { ... }` block. `//` introduces a line comment. Names use ASCII letters, digits and underscores, start with a letter/underscore, and cannot be `null`.
 
-Objects have stable logical identities, declared shapes, indexed references and signed 64-bit data. Data equal to an object ID creates no edge. Shapes describe fields or array elements; identity metadata, JVM headers and addresses are separate from payload.
+Objects have stable logical identities, declared shapes and indexed reference/data slots. Object data fields use `int`/`long`; scalars/data arrays stay signed 64-bit. Int initializers/stores/atomic operands narrow; reads/old results sign-extend. Data creates no edges. Shapes specify fields/array elements; identity metadata, JVM headers and addresses are separate.
 
 | Declaration | Meaning |
 | --- | --- |
-| `shape N object 2 1;` | Object layout with reference slots 0/1 and data slot 0; no instance is created. |
+| `shape N object 2 1;` / `shape N object 2 [int, long];` | Two reference slots; long-field count or kind list; allocates nothing. |
 | `shape Links refs 4;` | Reference-array layout with four elements. |
 | `shape Payload data 8;` | Long-array layout with eight elements. |
 | `shape W weak;` / `shape S soft;` | Nominal wrapper type without indexed payload slots. |
@@ -44,7 +44,7 @@ Objects have stable logical identities, declared shapes, indexed references and 
 | `root main = 1;` / `root saved = null;` | Named strong root slots with the stated initial targets. |
 | `queue ready W;` | Named reference queue admitting only wrapper type `W`. |
 
-Initial references use IDs or `null`, with `soft(2)` / `weak(2)` for wrapped targets and `soft(null)` / `weak(null)` for cleared wrappers. Lists must match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
+Initial references are IDs, `null`, wrapped `soft(2)`/`weak(2)` or cleared `soft(null)`/`weak(null)`. Lists match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
 
 ## Identities and access
 
@@ -77,18 +77,18 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 | `is-cleared value owner index;` / `is-cleared value r;` | Observe cleared state as 0/1 without acquiring the referent. |
 | `clear-ref owner index;` / `clear-ref r;` | Explicitly clear without enqueueing. |
 | `poll-queue;` / `poll-queue delivered ready;` | Implicit delivery, or consume any named member into a strong handle; null only if empty. |
-| `read-data value owner index;` | Copy a long slot into a scalar. |
-| `read-volatile-data value owner index;` | Volatile long-slot read. |
-| `write-data owner index value;` | Replace a long slot. |
-| `write-volatile-data owner index value;` | Volatile long-slot write. |
+| `read-data value owner index;` | Copy a data slot into a scalar. |
+| `read-volatile-data value owner index;` | Volatile data-slot read. |
+| `write-data owner index value;` | Replace a data slot. |
+| `write-volatile-data owner index value;` | Volatile data-slot write. |
 | `same-object equal left right;` | Bind 1 for identical targets, including two nulls; otherwise 0. |
 | `identity-hash owner;` | Observe an opaque hash without binding a value; strong sequential controlled only. |
 | `compare-set-root won root expected update;` | Strong CAS on a root, returning 0/1. |
 | `compare-set-ref won owner index expected update;` | Strong CAS on a strong reference slot. |
-| `compare-set-data won owner index expected update;` | Strong CAS on a long slot. |
+| `compare-set-data won owner index expected update;` | Strong CAS on a data slot. |
 | `exchange-root old N root update;` | Replace a root and bind its old target. |
 | `exchange-ref old N owner index update;` | Replace a strong slot and bind its old target. |
-| `exchange-data old owner index update;` | Replace a long slot and bind its old value. |
+| `exchange-data old owner index update;` | Replace a data slot and bind its old value. |
 | `if-present h { ... }` | Child scope when a strong handle is non-null. |
 | `if-nonzero value { ... } else { ... }` | Scalar-selected child scope; else is optional. |
 | `release name;` | End a current-scope binding. |
