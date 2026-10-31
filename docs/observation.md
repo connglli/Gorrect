@@ -1,96 +1,53 @@
 # Heap observation
 
-The observer captures physical heap evidence for projection into [GIR](./gir.md) objects. Layout descriptions supply class/field names, shapes, and identity roles, with no expected targets or payloads.
+The observer records physical heap evidence and projects it into [GIR](./gir.md) objects. Layouts identify classes, fields and identity roles; they contain no expected targets or payloads.
 
 ## Capture contract
 
-Register classes before constructing the workload. Supported layouts are direct `Object` subclasses without interfaces, `Object[]`, `long[]`, static root holders, and generated direct `SoftReference`/`WeakReference` subclasses. Names must be ASCII. JVMTI metadata supplies field indices, including inheritance, modifiers, and signatures; unsupported layouts fail explicitly.
+Register classes before workload construction. Supported layouts are direct `Object` subclasses without interfaces, `Object[]`, `long[]`, static root holders and generated direct soft/weak subclasses. Names are ASCII; JVMTI supplies actual field indices, modifiers and signatures. Unknown layouts fail explicitly.
 
-Capture walks VM roots without requesting GC. Callbacks record relevant objects, incoming/outgoing edges, primitives, and root origins in preallocated storage, without JNI, locks, or allocation. Native metadata holds no workload references. Tags remain stable across captures; raw records preserve duplicates and unknown origins.
-
-Projection combines only identical repeated primitive/element records. Conflicts, missing primitives, unknown fields or non-null targets, duplicate identities, and unvisited root classes make it unavailable. Absent edges establish null only after a complete walk with valid metadata; an observed `[J` array of length zero establishes empty contents without a values callback. Record limits and JVMTI errors produce partial captures that cannot pass.
+A capture walks VM roots without requesting GC. Callbacks use preallocated storage without JNI, allocation or locks; metadata retains no strong workload references. Conflicting records, missing values/owners, unknown non-null targets, duplicate identities or unvisited root classes prevent complete projection. Missing edges mean null only with valid metadata and a complete recording policy/walk. An observed `[J` owner of length zero proves empty contents without a values callback. Limits and JVMTI errors cannot become a pass.
 
 ## Identity
 
-Logical [object identity](./gir.md#identities-and-access) identifies one modeled allocation throughout its lifetime. Ordinary objects carry immutable `int` worker/site and `long` occurrence fields read during capture. Arrays use diagnostic bindings through weak JVMTI tags. History identity reads retrieve the published worker/site/occurrence cells through JNI without a Java registry or result allocation. A physical tag identifies an observed allocation within one target VM; it is neither an address nor a portable identity. Movement or materialization does not create a new logical allocation, and distinct observed allocations cannot share a logical identity. Copied diagnostic fields do not establish a new identity. Array clones receive fresh weak-tag bindings; object cloning remains unsupported.
+Ordinary objects carry primitive logical worker/site/occurrence fields; arrays use diagnostic weak-tag bindings. A physical tag identifies one observed allocation within that JVM, not an address. Movement/materialization preserves logical identity, and distinct allocations cannot share it. Array clones receive fresh bindings; copied metadata cannot create identity.
 
-Captured class IDs describe registered classes; signatures select their layout mappings. The current registry permits one definition per signature, so same-named classes from distinct loaders are unsupported. Class identity, object identity, and identity hashes are separate; hash collisions would not establish aliases.
-
-Wrappers carry primitive [incarnation fields](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). JVMTI reads inherited `Reference.referent` without `get()` or a strong root. Projection indexes ordinary and first-class wrapper identities before linking referents, preserving nominal wrapper types and shared alias state. Registered legacy slot wrappers retain their opaque slot projection; first-class no-queue wrappers are canonical graph vertices. Queue links stay raw evidence; there is no separate wrapper registry.
+Class IDs describe registered definitions. Same-named classes from distinct loaders and object cloning are unsupported. Reference wrappers use [incarnation identities](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java); the observer reads inherited referents without `get()`. First-class wrappers are canonical typed vertices, while legacy slot wrappers remain opaque. No wrapper registry retains referents.
 
 ## Coverage and observer effects
 
-All profiles capture named static roots at quiescent checkpoints. Additional binding obligations depend on the profile:
+All profiles capture named static roots at quiescent checkpoints:
 
-| Profile | Binding obligations | Lifetime fences |
+| Profile | Local obligations | Lifetime fences |
 | --- | --- | --- |
-| `named-roots-diagnostic` | Unsupported; release handles before capture. | Yes. |
-| `roots-diagnostic` | Every live reference binding in the caller and participating workers. | Yes. |
-| `roots-natural` | Main-frame bindings with future uses before release or scope exit. | No. |
+| `named-roots-diagnostic` | None; release handles before capture. | Yes |
+| `roots-diagnostic` | Every live caller/participating-worker reference binding. | Yes |
+| `roots-natural` | Main bindings with future uses before release/scope exit. | No |
 
-Lifetime fences enforce [GIR minimum lifetimes](./gir.md#instructions). Natural analysis follows independently validated exact control paths and bounded literal loops, distinguishing successive definitions and actual checkpoint visits; unused lexical locals carry no heap-presence obligation. Natural mode excludes reference/contended histories, worker cuts, and arrays requiring diagnostic identity binding. Diagnostic array binding and identity reads pass arrays through JNI and can affect escape, materialization, and timing. The observer keeps no hidden strong registry of workload objects.
+Natural analysis follows validated exact branches and bounded loops, distinguishing definitions and actual visits. It excludes reference/contended histories, worker cuts and diagnostically bound arrays. Controlled capture supports those histories and matched worker cuts under [GIR restrictions](./gir.md#parallel-workers).
 
-Controlled binding capture supports reference/contended histories, conditional main-thread checkpoints, and coordinated worker checkpoints. Coverage uses the lexical declarations for the actual executed site, including acquired bindings or all paused participants. Skipped bodies do not shift a capture onto another site's declarations. History-plan graph values are placeholders; target evidence supplies binding presence and targets.
+A required non-null local needs a unique actual root match by thread, activation, method, depth, slot and bytecode scope. Null requires primitive presence without contradictory roots. Missing origins/debug scopes make local coverage incomplete; they are never guessed from expected targets. Covered graph/scalar contradictions remain usable beside such gaps.
 
-Binding capture records primitive presence and matches emitted method/local metadata, including acquired bindings, against actual JVMTI method, slot, bytecode scope, thread, and activation evidence. Every required non-null binding needs a unique physical root mapping; required null bindings need explicit presence without a contradictory root. Missing declarations, root origins, or debug metadata make the affected local coverage inconclusive. Covered named roots and other mapped locals can still refute the oracle; missing local coverage cannot establish a pass. Worker data/alias uses have independent scalar traces; heap checkpoints remain subject to the [worker restrictions](./gir.md#parallel-workers).
-
-Heap walking freezes the mutator heap view and can affect optimization. HotSpot's escape barrier may materialize objects and deoptimize compiled frames. The default binding metadata provider enables JVMTI local-variable access; retained metadata uses class-load and bounded stack inspection instead. Natural mode describes semantic-use lifetimes, without promising transparent allocation or unchanged compiled frames. Calibration compares no-agent, tagging, primitive-witness, and capture modes; retention fixtures check released nodes and arrays with and without local-variable access.
-
-Compilation events measure installation; GC counters measure pauses. Compiled invocation needs frame evidence; OpenJ9 witnesses inspect the current stack through a JVMTI extension, copying method metadata without workload references. Stack inspection and recording affect timing and may affect optimization. [Cycle completion](./usage.md#profiles) needs VM GC events matched to requests. The [JVMTI specification](https://docs.oracle.com/en/java/javase/21/docs/specs/jvmti.html#FollowReferences) defines traversal and callback rules.
+Heap walking can materialize objects or deoptimize frames. Array binding/identity reads pass arrays through JNI and can affect escape and timing. Local access, stack inspection and recording also perturb execution. Natural lifetimes do not promise transparent allocation or unchanged compilation. Installation events and pause counters alone prove neither compiled invocation nor cycle completion; [stress](./gir.md#stress-requirements) and [collection](./usage.md#profiles) requirements need independent evidence.
 
 ## Binding metadata
 
-The profile selects `jvmti` by default or explicitly requests `retained-class`; its hashed plan and layout must agree. Coordinate conformance covers HotSpot JDK 17/21 on Linux amd64 and OpenJ9 JDK 21 revision `6e16eb1a4f` with gencon on Linux amd64; other versions require qualification. Retained mode requires `roots-diagnostic`, direct Linux ELF launchers, support built with the engine, reviewed VM arguments and disabled attachment. Bounded live/offline admission rejects unreviewed effective arguments or resolved-environment injection; OpenJ9 shared-cache/AOT reuse is disabled. External WhiteBox clients, natural lifetimes, custom loaders and frame reconstruction are unsupported. Startup certification precedes graph construction; missing evidence never selects another provider.
+The profile selects `jvmti` (default) or explicit `retained-class`, with agreement between its hashed plan/layout and evidence. Retained mode supports `roots-diagnostic` on qualified Linux amd64 HotSpot JDK 17/21 and OpenJ9 JDK 21 revision `6e16eb1a4f` gencon. Other builds need coordinate qualification. Live/offline admission checks direct ELF launch, reviewed support, effective arguments/environment and disabled attachment to establish the controlled-launch premise; OpenJ9 shared-cache/AOT reuse is disabled. External WhiteBox clients, natural capture, custom loaders and frame reconstruction are unsupported.
 
-A nontransforming hook copies `Case` bytes and pairs the prepared class, defining loader and methods using weak mirrors. Before acknowledging startup, the host compares all copied bytes with retained `Case.class` and reads its scopes. Controlled launch supplies the no-later-transformer premise; this is a harness trust boundary.
+Before graph construction, a nontransforming hook binds the intended class/loader/methods through weak mirrors, and the host compares copied bytes with retained `Case.class`. This trusts controlled launch to exclude later transformation. Retained metadata enables no local-access capability and cannot substitute for missing physical roots.
 
-Bounded stack samples bracket every capture, including empty participants. Main sites and suspended callers use `execute`; workers use their declared method. Terminal `main` must have no active workload role or GIR bindings. Each parked role needs equal thread, method, depth and valid BCI before/after. Actual roots must still supply method, depth and JVM slot; only missing BCI can use the certified sample. Scope matching must be unique, and null presence must have no contradictory root.
-
-Version 1 [CodeEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CodeEvidence.java) and [FrameEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/FrameEvidence.java) retain code/method identity, ordered samples and certificate epochs. Final code status must confirm successful completion at the startup epoch. Later gaps prevent a pass while preserving earlier refutations. The selected OpenJ9 can omit optimized local origins or report a caller depth inconsistent with stack samples; those captures remain inconclusive. Raw snapshots and native capability bits stay unchanged; retained metadata grants no local access or compiled-execution proof.
+Stack samples bracket every participant, even empty ones. Caller sites use `execute`, workers their declared methods, and final capture uses `main` after workload frames/bindings end. Matching requires the same thread/method/depth and valid equal BCI before/after; actual roots still supply method/depth/slot. Only missing BCI may use the certified sample. Final code status must confirm the startup epoch. Gaps or inconsistent OpenJ9 origins/depths stay inconclusive while earlier refutations remain visible. [CodeEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CodeEvidence.java) and [FrameEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/FrameEvidence.java) define the certificates.
 
 ## Snapshot format
 
-`SnapshotCodec` and the native writer share a versioned big-endian format. Integers are 32 bits and record cells are 64 bits. Strings have a 32-bit byte length followed by UTF-8 bytes. Reader limits bound bytes, record counts, metadata counts, and string lengths.
-
-The envelope contains, in order:
-
-1. Magic `0x47525331`, version, positive run and checkpoint tokens, status, JVMTI error, capability flags, and GC start/finish counters before and after the walk.
-2. Class metadata: class ID, kind, signature, and fields with actual JVMTI index, modifiers, name, and descriptor.
-3. Diagnostic array identities: physical tag, logical shape name, worker, site, and occurrence.
-4. Method descriptions keyed by opaque method tokens.
-5. Raw records, each containing a kind followed by seven cells `a` through `g`.
-6. Footer `0x454e44534e415031`. Truncation, trailing data, incompatible versions, and mismatched run/checkpoint tokens are extraction errors.
-
-Capability `LOCAL_VARIABLES` (32) adds a 32-bit local count after each method description, followed by entries containing 64-bit start location, 32-bit scope length and slot, and name/descriptor strings. Locations must use JVM bytecode indices. Captures without the bit retain the original version 1 method entries.
-
-Class kinds are object, reference array, data array, root holder, soft wrapper, and weak wrapper, numbered from zero. Ordinary physical object tags are positive; a registered class object uses the negative of its class ID. Zero is reserved. Method tokens and tags belong to their target JVM, not another run.
-
-| Record kind | Cells |
-| --- | --- |
-| `OBJECT` (0) | `a` tag, `b` class ID (zero if unregistered), `c` size in bytes, `d` length or -1. |
-| `REFERENCE` (1) | `a` referrer tag, `b` target tag, `c` JVMTI reference kind, `d` field/element index or -1, `e` referrer class tag. |
-| `PRIMITIVE_FIELD` (2) | `a` owner tag, `b` field index, `c` JVMTI primitive type, `d` value bits, `e` owner class tag. |
-| `ROOT` (3) | `a` target tag, `b` root kind, `c` thread ID, `d` frame depth, `e` slot, `f` method token, `g` location. Unavailable frame values use zero or -1. |
-| `ARRAY_VALUES` (4) | `a` tag, `b` count, `c` primitive element type. Records actual callback delivery, including empty arrays when supplied. |
-| `ARRAY_ELEMENT` (5) | `a` tag, `b` index, `c` primitive type, `d` value, `e` class tag. The prototype records long elements. |
-| `CLASS_VISIT` (6) | `a` registered class ID. Establishes that the class was visited before null static roots can be inferred. |
-
-Unlisted cells are zero. Reference and root kind values and primitive type codes are JVMTI values. Capability bits are tagging (1), GC events (2), compilation events (4), compilation-evidence overflow (8), non-strengthening reference-field capture (16), and local-variable metadata (32). Status values are complete (0), record limit (1), and JVMTI error (2); complete describes traversal, not full GIR binding coverage.
-
-The shared [golden fixture](../protocol/src/test/resources/snapshot-v1.hex) checks Java/C++ byte compatibility. Integration checks preserve native bytes and compare decoded graphs against independently specified fixtures, including deliberately damaged evidence.
+Version 1 snapshots contain run/checkpoint identity, traversal status, VM capabilities, GC counters, class/field/method metadata, diagnostic array identities and raw records. `COMPLETE` means the bounded walk finished, not that every GIR binding was observed. The big-endian [SnapshotCodec](../protocol/src/main/java/io/connglli/gorrect/protocol/SnapshotCodec.java), [record contract](../protocol/src/main/java/io/connglli/gorrect/protocol/HeapSnapshot.java) and [native writer](../native/src/snapshot_wire.hpp) define exact encoding; a [shared fixture](../protocol/src/test/resources/snapshot-v1.hex) checks byte compatibility. Truncation, trailing data, version/identity mismatch and conflicting records are extraction errors. Raw evidence is preserved.
 
 ## Binding evidence
 
-Binding profiles write `snapshots/<sequence>.gbind` before each main-thread capture. Its big-endian envelope contains 32-bit magic `0x47424e31` and version 1; 64-bit run, checkpoint, and thread IDs; 32-bit worker; 64-bit activation; 32-bit binding count; pairs of 32-bit declaration ID and presence (0/1); and footer `0x454e4442494e4431`. Run, checkpoint, thread, activation, and declaration IDs are positive; declarations are unique, and the count is bounded by [BindingEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/BindingEvidence.java). Capture context must match the snapshot and control transcript. Main-frame capture uses worker 0 and activation 1; recursive frames remain unsupported.
+[BindingEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/BindingEvidence.java) stores primitive presence for main captures. The layout selects required bindings or all lexical candidates; natural capture verifies complete candidate/nullness evidence before selecting physical obligations from the validated path. Unknown selection rules or incomplete correspondence cannot supply inferred nulls or a pass.
 
-The hashed layout declares `bindingSelection`: `required` records only required bindings, while `lexical-candidates` records every live lexical reference declaration. Absence denotes the original required-binding rule for legacy unconditional bundles; unknown rules and conditional natural captures without lexical selection are rejected. New natural runs check complete candidate coverage and modeled nullness, then select required physical roots from the validated exact execution path. Ignored candidates supply no inferred null or target identity. Incomplete scalar correspondence leaves local coverage incomplete; independently checked named-root and scalar contradictions remain visible.
-
-Coordinated worker captures instead require `snapshots/<sequence>.gcut`, selected from the program and recorded worker arrivals rather than file presence. [CaptureEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CaptureEvidence.java) owns its version 1 codec and bounds. Its big-endian envelope contains 32-bit magic `0x47435531` and version; 64-bit run and checkpoint; 32-bit group; 64-bit round; 32-bit cut ordinal, ending phase, and participant count; participant records; and 64-bit footer `0x454e444355543031`. Each participant records 32-bit worker and operation; 64-bit occurrence, thread, and activation; then a 32-bit count and the same declaration/presence pairs as binding evidence.
-
-The caller is first, followed by every worker in declaration order, including participants with no bindings. Caller operation/occurrence identify the group/round, with worker 0 and activation 1. Worker records identify their checkpoint site, global per-site visit, actual Java thread, and group round as activation. Cut ordinals restart at one per group visit; phases count both barriers and captures from zero. Worker/thread identities and declaration IDs must be unique and agree with the scalar trace, execution windows, and emitted layout. Presence requires the same physical-root mapping as main captures. A missing worker envelope cannot fall back to single-frame evidence; an unexpected worker envelope on a main capture is an extraction error.
+Worker cuts use [CaptureEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CaptureEvidence.java), with the caller first and every worker included even without bindings. Run/capture, site/visit, group/round, phase, thread, activation and declaration identities must agree with layout and executed traces. A missing worker envelope cannot fall back to main-frame evidence; unexpected or contradictory envelopes are extraction errors. The codecs own version 1 framing and bounds.
 
 ## Tagged reference targets
 
-Programs declaring first-class wrapper types select `traces/references.gtyped`, a separate bounded version 1 envelope owned by [ReferenceHistory](../protocol/src/main/java/io/connglli/gorrect/protocol/ReferenceHistory.java). It retains per-worker scalar positions and subject incarnations, and tags each non-null target as an ordinary ObjectId or full WrapperId. Null has a zero target tuple. Constructor observations use the CREATE kind; existing acquisition/state/clear/strong-read/queue meanings remain. A missing required typed stream cannot fall back to legacy history. Legacy object-only programs keep `references.ghistory` and its original bytes.
-
-Generated first-class wrapper subclasses hold only primitive identity fields beyond inherited reference state. They use no queue and no strong construction-target field or runtime wrapper registry. The hashed reference layout supplies an optional nominal shape; physical class metadata establishes that type. Root/local mapping still requires actual origins, and no expected identity is substituted for missing evidence.
+First-class wrapper programs explicitly select `references.gtyped`; legacy object-only histories use `references.ghistory`. [ReferenceHistory](../protocol/src/main/java/io/connglli/gorrect/protocol/ReferenceHistory.java) defines typed ordinary/wrapper identities and scalar-position linkage. Missing typed evidence cannot fall back to legacy bytes. Generated wrappers add only primitive identity fields and no strong construction-target field.

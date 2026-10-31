@@ -68,7 +68,7 @@ struct MethodInfo {
   std::vector<LocalVariable> locals{};
 };
 
-// Numeric kind and cell meanings are defined in docs/observation.md.
+// Cell meanings follow HeapSnapshot.Record in the protocol module; kind values are fixed above.
 struct Record {
   RecordKind kind;
   std::int64_t a, b, c, d, e, f, g;

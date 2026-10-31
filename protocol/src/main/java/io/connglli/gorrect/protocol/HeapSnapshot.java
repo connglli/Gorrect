@@ -81,8 +81,30 @@ public record HeapSnapshot(
   public record LocalVariable(long start, int length, int slot, String name, String descriptor) {}
 
   /**
-   * Fixed-width native records. Unknown origins retain their raw tags and indices. The wire
-   * contract is documented in {@code docs/observation.md}.
+   * Fixed-width native record: kind followed by seven 64-bit cells. Unlisted cells are zero;
+   * reference/root kinds and primitive type codes retain their JVMTI values.
+   *
+   * <ul>
+   *   <li>{@link Kind#OBJECT}: a = tag, b = class ID (zero if unregistered), c = byte size, d =
+   *       array length or -1.
+   *   <li>{@link Kind#REFERENCE}: a = referrer tag, b = target tag, c = reference kind, d =
+   *       field/element index or -1, e = referrer class tag.
+   *   <li>{@link Kind#PRIMITIVE_FIELD}: a = owner tag, b = field index, c = primitive type, d =
+   *       value bits, e = owner class tag.
+   *   <li>{@link Kind#ROOT}: a = target tag, b = root kind, c = Java thread ID, d = frame depth, e
+   *       = slot, f = opaque method token, g = raw VM method location (BCI when qualified).
+   *       Unavailable thread/method values use zero; depth/slot/location use -1.
+   *   <li>{@link Kind#ARRAY_VALUES}: a = tag, b = count, c = primitive element type. This records
+   *       callback delivery, including empty arrays when supplied.
+   *   <li>{@link Kind#ARRAY_ELEMENT}: a = tag, b = index, c = primitive type, d = value bits, e =
+   *       class tag. The current producer records long elements.
+   *   <li>{@link Kind#CLASS_VISIT}: a = registered class ID. The class must have been visited
+   *       before absent static reference edges can establish null roots.
+   * </ul>
+   *
+   * <p>Ordinary object tags are positive; registered class mirrors use the negative class ID. Tags
+   * and method tokens identify entities only within their target JVM. Unknown origins retain their
+   * raw values; missing fields do not supply a logical identity or binding.
    */
   public record Record(Kind kind, long a, long b, long c, long d, long e, long f, long g) {}
 

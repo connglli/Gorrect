@@ -1,10 +1,10 @@
 # Running Gorrect
 
-The CLI supports exact and bounded concurrent [GIR](./gir.md) on JDK 17+ targets. HotSpot collectors are Serial, Parallel, G1, ZGC, and Shenandoah; OpenJ9 policies are gencon, balanced, optavgpause, optthruput, and metronome. Availability depends on the selected build.
+Gorrect runs [GIR](./gir.md) on JDK 17+ targets. HotSpot supports Serial, Parallel, G1, ZGC and Shenandoah; OpenJ9 supports gencon, balanced, optavgpause, optthruput and metronome where the selected build provides them.
 
 ## Build and configure
 
-Build the distribution with JDK 21, CMake, and a C++17 compiler:
+Build with JDK 21, CMake and a C++17 compiler:
 
 ```bash
 ./gradlew :engine:installDist
@@ -12,96 +12,91 @@ mkdir -p profiles/local
 cp profiles/hotspot-serial.example.json profiles/local/hotspot-serial.json
 ```
 
-Set `java` in the copied profile to the target executable. Paths are absolute or relative to the profile. The example assumes that copy location and a Linux build; adjust the native library for another OS. Local profiles and runs are ignored by Git. The engine uses its own JDK and compiler; the target needs no compiler.
+Set `java` in the copied profile to the target executable. Paths are absolute or relative to the profile. The example assumes that copy location and a Linux native build; adjust the library for another OS. Local profiles/runs are ignored. The engine supplies its own compiler; the target needs none.
 
 ## Commands
 
-`gorrect --help` explains the workflow; `gorrect <command> --help` describes that command's inputs, options, and examples without starting a target JVM. From the repository root, use:
+From the repository root:
 
 ```bash
-engine/build/install/gorrect/bin/gorrect probe --profile profiles/local/hotspot-serial.json
-engine/build/install/gorrect/bin/gorrect run examples/cycle.gir --profile profiles/local/hotspot-serial.json --out runs/cycle
+engine/build/install/gorrect/bin/gorrect probe \
+  --profile profiles/local/hotspot-serial.json
+engine/build/install/gorrect/bin/gorrect run examples/cycle.gir \
+  --profile profiles/local/hotspot-serial.json --out runs/cycle
 engine/build/install/gorrect/bin/gorrect verify runs/cycle
-engine/build/install/gorrect/bin/gorrect replay runs/cycle --repeat 3 --out runs/replays
-engine/build/install/gorrect/bin/gorrect fuzz --profile profiles/local/hotspot-serial.json --workload concurrent --workers 4 --duration 1m --seed 42
+engine/build/install/gorrect/bin/gorrect replay runs/cycle \
+  --repeat 3 --out runs/replays
 ```
 
 | Command | Purpose |
 | --- | --- |
-| `probe` | Run a built-in check and report the actual VM, collectors, and capabilities. Reference requirements select a reference case; concurrent/JIT requirements select a worker case. Collection requirements add an unconditional request. |
-| `run` | Generate Java from a GIR case, compile it, execute it on the target, and verify the observations. |
-| `verify` | Check saved GIR, executable identities, and evidence without the original profile file or target installation. |
-| `replay` | Reuse saved classes and bundled support without recompiling. Restore recorded settings/environment, report changed installation artifacts, and create a fresh run per repetition. |
-| `fuzz` | Generate seeded cases and execute one target JVM at a time. |
+| `probe` | Check the actual target/collector with a case exercising the requested capabilities. |
+| `run` | Generate, compile, execute and verify a GIR case. |
+| `verify` | Recheck a saved bundle offline without the original profile/installation. |
+| `replay` | Rerun saved classes/support without recompiling, using recorded settings/environment and fresh evidence. |
+| `fuzz` | Generate seeded cases and run one target JVM at a time. |
 
-Output directories must not exist. Without `--out`, execution commands create a fresh directory under `runs/`. Profile fields have no CLI overrides.
+`gorrect <command> --help` gives inputs/options/examples without starting a JVM. Execution output directories must be new; the default is under `runs/`. Settings belong to the profile and have no CLI overrides. Replay reports changed installation artifacts.
 
-For `fuzz`, `--workers` selects threads per case; `--workload` selects `concurrent` or `concurrent-jit`. The latter requires profile JIT controls and compiled-frame evidence. A campaign freezes profile settings, saves seeds, generator versions, and run bundles under `cases/`, and records outcomes in `campaign.json`.
+A campaign can be started with:
 
-`--duration` bounds active compilation and target execution; preparation and artifact retention can finish later. A partial final case has outcome `CAMPAIGN_LIMIT`. Campaigns stop on violations, execution failures, or unsupported cases. Success requires at least one completed case; every completed case must satisfy the oracle and its requirements.
+```bash
+engine/build/install/gorrect/bin/gorrect fuzz \
+  --profile profiles/local/hotspot-serial.json \
+  --workload concurrent --workers 4 --duration 1m --seed 42
+```
+
+`--workers` is threads per case. Workloads are `concurrent` and `concurrent-jit`; the latter needs configured JIT controls and compiled-frame evidence. Campaigns freeze the profile, retain cases/seeds and summarize outcomes in `campaign.json`. Duration bounds active compilation/execution; final retention may finish later. A partial final case is `CAMPAIGN_LIMIT`. Campaigns stop on violations, execution failures or unsupported cases; success needs at least one completed case and satisfaction of every completed case's graph and requirements.
 
 ## Profiles
 
-Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid types, conflicting options, and invalid limits are rejected.
+Version 1 JSON profiles reject unknown/duplicate fields, invalid types/limits and conflicting options. [Example profiles](../profiles/) provide portable starting points; [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java) owns defaults and bounds.
 
 | Field | Meaning |
 | --- | --- |
-| `version` | Profile format version, currently 1. |
-| `vm`, `collector` | Requested integration and collector. The implementation checks the collector reported by the running VM. |
-| `collectorMode` | Optional `default`, resolved on the target and frozen for replay. ZGC accepts `generational` / `non-generational`; Shenandoah accepts `satb`, `iu`, or `passive`. Other collectors use `default`. Unavailable selections return unsupported. |
-| `java` | Target executable path. |
-| `observation` | `named-roots-diagnostic`, `roots-diagnostic`, or `roots-natural`; the [observation contract](./observation.md#coverage-and-observer-effects) defines binding coverage and permitted effects. |
-| `bindingMetadata` | Optional `jvmti` (default) or `retained-class`; see the [metadata contract](./observation.md#binding-metadata). |
-| `support` | Paths named `runtime`, `protocol`, and `observer`, plus optional `whitebox`. Copies enter the run bundle. |
-| `vmArgs` | Optional VM argument array. Collector selection, agents, classpath, entry point, and crash destination belong to the driver. Use one array element per argument. |
-| `environment` | Optional environment additions. Ambient Java option and classpath variables are removed; profiles cannot restore them. Retained mode also removes native-library injection variables and rejects their restoration. The resolved launch environment is retained. |
-| `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `young-gc`, `compilation-events`, `local-bindings`, `semantic-reads`, `alias-checks`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `semantic-reads`, and `alias-checks` must be exercised, not merely available. `reference-reclamation` remains unsupported. |
-| `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
-| `jit` | Optional `level`, `warmupRounds`, and `deadlineMillis`. HotSpot levels 1–4 require `support.whitebox`. OpenJ9 accepts only level 1, meaning installed code without an optimization-tier claim; it needs no WhiteBox client. |
-| `gc` | Optional `control`: `system` requests `System.gc()`; HotSpot `whitebox-full` and `whitebox-young` require a matching `support.whitebox` client. The young policy supports Serial, Parallel, G1, and ZGC with explicit `collectorMode: "generational"` on JDK 21+. The default is `whitebox-full` for HotSpot JIT profiles, `system` otherwise. GC controls work independently of JIT. |
+| `version` | `1`. |
+| `vm`, `collector`, `java` | Integration, collector and target executable. Selection is checked on the running VM. |
+| `collectorMode` | Optional `default`, resolved/frozen on the target. ZGC: `generational` / `non-generational`; Shenandoah: `satb`, `iu`, `passive`; others: `default`. |
+| `observation` | One of the [observation profiles](./observation.md#coverage-and-observer-effects). |
+| `bindingMetadata` | Optional `jvmti` or `retained-class`; see [metadata qualification](./observation.md#binding-metadata). |
+| `support` | `runtime`, `protocol`, `observer` paths, and optional `whitebox`; copies enter the bundle. |
+| `vmArgs` | One VM argument per array element; the driver owns agents, collector flags, classpath, main and crash destination. |
+| `environment` | Additions to a cleaned environment. Java-option/classpath injection cannot be restored; retained mode also blocks native injection. |
+| `requirements` | Requested capabilities/coverage, including [GIR stress requirements](./gir.md#stress-requirements). |
+| `limits` | Positive `compileSeconds`, `startupSeconds`, `runSeconds`, `records`, `traceEvents`, `historyStates`, `historyTransitions`. History bounds cover states/cumulative work; startup fits within the run deadline. |
+| `jit` | Optional `level`, `warmupRounds`, `deadlineMillis`. HotSpot levels 1–4 need WhiteBox; OpenJ9 level 1 denotes installed code, not an optimization tier. |
+| `gc` | Optional `control`: `system`, or HotSpot `whitebox-full` / `whitebox-young` with a matching WhiteBox client. Default: full for HotSpot JIT profiles, system otherwise. |
 
-Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
+Requirements include `tagging`, `named-roots`, `local-bindings`, `semantic-reads`, `alias-checks`, `reference-histories`, `reference-queues`, `contended-histories`, `gc-events`, `compilation-events`, `gc-completion` and `young-gc`. Read/binding/alias capabilities must be exercised, not merely available. `reference-reclamation` is unsupported.
 
-Collector/mode flags belong to the driver, including ZGC generations and Shenandoah modes. HotSpot collection requirements need at least one executed `collect` and a completed qualifying VM event wholly inside every request. `gc-completion` requires whole-heap/major cycles; [hotspot-g1.example.json](../profiles/hotspot-g1.example.json) shows that profile. `young-gc` requires `whitebox-young` and collector-specific young events with the matching WhiteBox cause; [hotspot-young.example.json](../profiles/hotspot-young.example.json) shows that profile. The young policy applies to every request and cannot combine with `gc-completion`; it proves neither young-only execution nor successful promotion.
+HotSpot collection certification requires at least one executed `collect` and a complete VM event with matching collector-specific kind/cause wholly inside every request. `gc-completion` checks whole-heap/major cycles. `young-gc` needs `whitebox-young`: Serial, Parallel, G1, or explicit generational ZGC on JDK 21+. The young policy applies to all requests and cannot combine with `gc-completion`. Startup exercise, return alone or pause counters cannot supply a certificate. No request forces clearing/reclamation or proves promotion; OpenJ9 collection certification is unsupported. Use `collect; checkpoint;` to observe after a request.
 
-Startup probes, ignored calls, wrong causes/kinds, partial cycles, pause counters, and missing JFR evidence cannot satisfy those requirements. Write `collect; checkpoint;` to observe after a request. Coverage forces no reference clearing, queue delivery, or reclamation. OpenJ9 collection certification and young controls for other HotSpot collectors remain unsupported.
-
-Checkpoints with live reference handles need a binding observation profile. Exact strong-graph main paths, including conditionals, support `roots-natural`; reference-history and worker binding captures use `roots-diagnostic`. Conditional captures with only named roots and scalars can use `named-roots-diagnostic`. Contended histories support objects and arrays and require a complete [race-freedom audit](./gir.md#contended-histories). Failed preflight proofs retain the case with an unsupported, invalid-workload, or checking-limit outcome. The [observation contract](./observation.md#coverage-and-observer-effects) defines capture effects and natural-profile restrictions.
-
-[reference-objects.gir](../examples/reference-objects.gir) uses first-class no-queue wrappers with `roots-diagnostic`. Their sequential controlled profile preserves wrapper aliases and nominal types; natural and atomic/concurrent first-class combinations remain unsupported.
-
-[locals.gir](../examples/locals.gir) keeps an object in a caller local across collection, checks its alias and data, then publishes it through a named root. [natural-conditional.gir](../examples/natural-conditional.gir) captures the selected branch across changing data. Both run with `roots-diagnostic` or `roots-natural`.
-
-For HotSpot JIT stress, copy [hotspot-serial-jit.example.json](../profiles/hotspot-serial-jit.example.json) to `profiles/local/` and supply an API-compatible WhiteBox client. OpenJ9 users can copy [openj9-gencon.example.json](../profiles/openj9-gencon.example.json) and add `"jit": {}`. The OpenJ9 driver requests compilation on the first modeled worker calls and disables shared-cache/AOT reuse. `warmupRounds` counts modeled visits to each parallel block before checking installation; warm-up adds no unmodeled mutations. Actual execution needs the [compiled-frame evidence](./gir.md#stress-requirements).
-
-For the JDK 21 test-library layout, set `JDK_TEST_LIB` to the target source tree's `test/lib` directory and build a client with the engine JDK:
+HotSpot JIT profiles need a matching WhiteBox client; OpenJ9 can use `"jit": {}` and disables shared-cache/AOT reuse. Warm-up counts modeled visits and adds no unmodeled mutations. For the JDK 21 test-library layout, set `JDK_TEST_LIB` to the target source's `test/lib` and build with the engine JDK:
 
 ```bash
 mkdir -p build/whitebox-classes
-javac --release 17 -d build/whitebox-classes "$JDK_TEST_LIB/jdk/test/whitebox/WhiteBox.java" "$JDK_TEST_LIB/jdk/test/whitebox/parser/DiagnosticCommand.java"
+javac --release 17 -d build/whitebox-classes \
+  "$JDK_TEST_LIB/jdk/test/whitebox/WhiteBox.java" \
+  "$JDK_TEST_LIB/jdk/test/whitebox/parser/DiagnosticCommand.java"
 jar --create --file build/whitebox.jar -C build/whitebox-classes .
 ```
 
-Set `support.whitebox` to the JAR path. Each bundle records its checksum and the target identity.
+Set `support.whitebox` to that JAR. The bundle records its hash/target identity. Start with [locals.gir](../examples/locals.gir), [natural-conditional.gir](../examples/natural-conditional.gir) or [reference-objects.gir](../examples/reference-objects.gir), using their compatible [capture profiles](./observation.md#coverage-and-observer-effects).
 
 ## Artifacts and results
 
-Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements.
+[Run bundles](./implementation.md#artifacts-and-results) retain inputs, executable identities, raw evidence and diagnostics, including partial failures. Results separate execution outcome, graph verdict and unmet requirements. A confirmed graph/scalar/reference violation survives independent extraction gaps; incomplete proof is inconclusive. Altered executables or malformed control/evidence are extraction errors offline, while live control violations are protocol failures.
 
-`observation-capabilities.json` records supported combinations, effects, required evidence, and separate availability, exercise, and verification facts. Unusable target capability facts produce an empty capability list; the result retains the extraction diagnostic and unverified requirements. This derived report is never an input to verification.
+`observation-capabilities.json` is a derived availability/exercise/verification report, never verification input. Unusable target facts produce an empty capability list, with extraction diagnostics and unverified requirements retained in the result. A runtime conditional-precondition failure is invalid workload only if its legal prefix and every preceding observation are fully established.
 
-A conflicting graph, scalar read, or impossible reference choice is a violation. A confirmed violation remains visible alongside later incomplete coverage or extraction errors. Incomplete coverage or exhausted search is inconclusive.
-
-Inconsistent control/trace markers, malformed evidence, or altered executables cause an extraction error during offline verification; live control violations are protocol failures.
-
-A rejected conditional precondition is an invalid workload only when its recorded prefix establishes a legal path and every preceding graph observation is present, usable, and fully matched. Missing, inconclusive, impossible, or unconsumed checkpoint evidence preserves the runtime failure.
-
-| Exit status | Meaning |
+| Exit | Meaning |
 | --- | --- |
-| 0 | Completed, checked invariants satisfied, requirements met. |
-| 1 | Semantic violation. |
-| 2 | Invalid command, profile, input path, or workload. |
-| 3 | Unsupported integration, coverage, or capability requirement. |
-| 4 | Compilation, startup, runtime, crash, protocol, or deadline failure. |
-| 5 | Extraction error, checking limit, inconclusive verification, or no completed campaign case. |
-| 130 | Engine interrupted while waiting on a process or control message. |
+| 0 | Completed, satisfied and all requirements met. |
+| 1 | Confirmed semantic violation; takes precedence over other outcomes. |
+| 2 | Invalid command, profile, path or workload. |
+| 3 | Unsupported capability/coverage or unmet requirement. |
+| 4 | Compilation, startup, runtime, crash, protocol or deadline failure. |
+| 5 | Extraction/checking-limit/inconclusive result or no completed campaign case. |
+| 130 | Engine interrupted while waiting on process/control. |
+
+[RunReport](../engine/src/main/java/io/connglli/gorrect/engine/run/RunReport.java) defines exact status precedence.

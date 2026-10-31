@@ -1,32 +1,22 @@
 # Object Graph Verification
 
-Object Graph Verification checks observed objects, references, and data against an independent model of program behavior. Gorrect applies it to garbage collector validation through generated Java programs.
-
-A test combines an initial graph with a program in GIR (Gorrect Intermediate Representation). Workloads include sequential mutations, concurrent workers, and hot methods and loops for JIT stress.
+Object Graph Verification checks objects, references and data against an independent model of program behavior. Gorrect uses it to validate garbage collectors by generating and running Java programs.
 
 ## Approach
 
-1. Build an initial object graph with explicit roots, references, and object contents.
-2. Generate a GIR program that manipulates the graph, including loops, worker threads, synchronization, and observation points.
-3. Translate the initial graph and GIR program into Java code.
-4. Run the Java program on the selected JVM and garbage collector.
-5. Record relevant execution choices, collection and compilation activity, and graph observations.
-6. Interpret the GIR program with the oracle and check whether the observations describe a legal execution.
-7. Save failing cases and simplify them into smaller reproducers.
+1. Describe an initial object graph and a workload in GIR (Gorrect Intermediate Representation).
+2. Translate the case into Java and run it on a selected JVM and collector.
+3. Record graph observations and the execution choices needed to interpret them.
+4. Independently interpret GIR and check whether the observations describe a legal execution.
+5. Retain the case, settings and evidence for investigation and replay.
 
-A deterministic program can have one expected final graph. Reference processing and concurrent execution can permit several outcomes. The oracle checks the conditions that each outcome must satisfy.
+A deterministic case can have one expected graph. Reference processing and concurrent execution can permit several outcomes; the oracle checks their constraints rather than predicting one collector policy or schedule.
 
 ## Object graph
 
-The graph contains objects, reference slots, and roots.
+Objects have stable logical identities, shapes and data. Shapes describe fields or array elements. Reference slots hold a target or null, with strong, soft or weak strength. Named roots and live thread-local handles keep objects reachable.
 
-* An object has a stable identity, a shape, and data. Its shape describes fields or array elements; its data lets the test exercise allocation sizes and check for corruption.
-* A reference slot belongs to an object or array position. It holds a target or null, and has a reference kind such as strong, soft, or weak.
-* A root is a named strong reference held by the program. Roots include shared references and temporary references held by individual threads.
-
-A slot's identity is independent of its target: changing `a.left` from `b` to `c` changes its contents, not the slot. References can share targets, form cycles, or point to their owner.
-
-For example, this graph has two references from `a` to `b`:
+References can share targets, form cycles or point to their owner:
 
 ```text
 root -> a
@@ -34,82 +24,38 @@ root -> a
         a.right --weak----> b
 ```
 
-Objects become eligible for collection as references and roots are released. There is no operation that directly frees a Java object.
+Changing a slot's target preserves the slot and object identities. Releasing roots makes objects eligible for collection; no operation directly frees a Java object. Headers, addresses and collector bookkeeping are outside the portable graph model.
 
 ## Graph program language (GIR)
 
-GIR describes allocation, reference/data access, root lifetimes, conditionals, bounded loops, workers, and synchronization. Larger operations compose these primitives. JVM-specific APIs and flags belong to the JVM integration.
+[GIR](./gir.md) expresses allocation, graph/data access, handle lifetimes, conditionals, bounded loops, worker threads, synchronization and checkpoints. The oracle interprets these operations; the Java emitter implements them independently through real Java allocations and accesses.
 
-The oracle interprets the graph and GIR program to derive permitted behavior; independently, the Java generator translates them into executable code. The checker compares that execution with the oracle.
-
-Temporary references have explicit lifetimes across threads. The oracle accounts for objects held in locals, and generated code preserves and ends those lifetimes at the intended points.
-
-Checkpoints are observation points with required worker and processing conditions. Observation and collection requests are separate actions.
+Checkpoints observe the graph under a declared [coverage contract](./observation.md). A collection request is a separate operation and does not determine which references clear or which objects are reclaimed.
 
 ## Soft and weak references
 
-A program reads a soft/weak reference once and holds a successful result strongly while manipulating it.
+An acquisition reads a referent once. A successful result is held strongly while its scope executes; a null result skips that body. For example, a first acquisition may create a child and a later acquisition may publish it through a strong root. If both succeed, the published identity and contents must agree. Once strongly published, the child must survive even if the original soft/weak reference clears.
 
-Consider the initial graph:
-
-```text
-root -> a
-        a.cache --soft--> b
-```
-
-This pseudocode gives `b` a child, then tries to save it through `a`. Each scope releases its temporary references on exit.
-
-```text
-with acquire(a.cache) as b, if present:
-    c = allocate(Node)
-    b.child = strong(c)
-
-with acquire(a.cache) as b, if present:
-    a.saved = strong(b.child)
-
-checkpoint()
-```
-
-If both acquisitions succeed, `a.saved` must point to the created `c`. Clearing the soft reference between scopes skips the second body. Once saved strongly, `c` must survive even if the soft reference to `b` clears.
-
-The oracle validates recorded acquisition choices and their consequences, allowing legal clearing policies. A cleared wrapper cannot return its former target again; replacement creates a new wrapper.
+The oracle validates recorded choices, including related-reference clearing rules. Clearing is permanent for one wrapper; replacement creates a new wrapper. Clearing, queue notification and reclamation are distinct, and retained garbage alone is not a failure.
 
 ## Oracle
 
-The oracle derives expectations from the initial graph, GIR, and permitted choices. It validates a recorded choice before using it to determine later expectations.
+At each observation, required roots and accessible objects must retain their expected identities, shapes, references and data, allowing only program effects and legal reference processing. Choices used to derive later expectations must first satisfy the model.
 
-The checks cover both objects and their contents:
-
-* Required roots and accessible objects retain exact identities, fields, and data.
-* Slots retain their expected kind and targets except for program writes or legal clearing, including clearing rules for connected objects.
-* Concurrent reads and updates obey synchronization and operation contracts.
-
-Clearing, queue notification, and reclamation are distinct. Reclamation checks need processing-completion evidence; retained garbage alone is not a failure.
-
-Verdicts are satisfied, violated, or inconclusive. A mismatch warrants investigation of the JVM, generated code, observer, and oracle. Execution failures remain separate.
+A result is satisfied, violated or inconclusive. Missing evidence and exhausted checking budgets cannot establish satisfaction. A mismatch is evidence to investigate in the JVM, generated code, observer and oracle; execution failures remain separate.
 
 ## Concurrency and JIT compilation
 
-Workers allocate and mutate concurrently. Explicit synchronization lets the oracle reason about publication, ownership transfer, and shared updates.
+Workers mutate concurrently under explicit synchronization. Conflict-free phases can have exact results; competing atomic operations admit several legal schedules. Arbitrary data races need a separate memory-model contract.
 
-Independent updates, such as writes to distinct fields, can have an exact synchronized result. Competing atomic updates admit several results; deliberately racy programs need a separate memory-model contract.
-
-Reusable Java methods and loops access fields and arrays directly, making repeated execution eligible for JIT compilation. Workloads retain locals across calls, allocations, and compilation transitions.
-
-Warm-up forms part of the modeled program. Required compilation and collection conditions need execution evidence independently of the graph verdict.
-
-Recorders must not retain workload objects or serialize ordinary mutations. Heap capture and program checks complement each other when optimization eliminates physical allocations.
+Generated methods and loops exercise ordinary Java accesses and JIT compilation. Warm-up belongs to the modeled workload. Compilation, overlap and collection requirements need their own execution evidence, independently of the graph verdict. Recorders retain no workload objects or global mutation lock; observation can still affect timing and optimization.
 
 ## JVM integration and stress generation
 
-JVM integrations supply launch settings, capability detection, VM controls, measurements, and observation. They share graph semantics and the oracle.
+A [JVM integration](./implementation.md#jvm-integration) supplies launch settings, capability checks, controls and evidence interpretation while preserving graph semantics. Unsupported capabilities remain explicit.
 
-Each run explicitly selects a JVM and collector; missing capabilities remain visible without substitution or weaker checks.
-
-Generation combines chains, cycles, sharing, shapes, arrays, allocation bursts, and references across object lifetimes. Target measurements and collector heuristics guide stress without determining correctness.
+Generation combines graph structures and lifetime patterns. Measurements and collector heuristics can guide stress, but do not determine correctness.
 
 ## Reproduction
 
-A saved case retains the graph, GIR, seed, JVM settings, traces, snapshots, VM evidence, and diagnostics.
-
-Reduction removes operations, objects, iterations, workers, and settings while preserving the failure and any required concurrency or compilation conditions. Timing-sensitive cases may need repeated execution.
+A saved run contains GIR, executable classes, settings, observations and diagnostics. Replay obtains fresh execution evidence. Reduction seeks a smaller case while preserving the failure and any required concurrency or compilation conditions.

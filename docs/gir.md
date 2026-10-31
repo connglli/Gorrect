@@ -1,6 +1,6 @@
 # GIR
 
-GIR (Gorrect Intermediate Representation) describes the graph and workload independently of a JVM. Version 1 supports exact strong graphs, soft/weak references, and bounded concurrent histories with volatile and atomic operations. Unsupported versions and operations are rejected.
+GIR (Gorrect Intermediate Representation) describes an object graph and workload independently of a JVM. Version 1 supports strong graphs, soft/weak references and bounded concurrent histories. Unsupported versions and combinations are rejected.
 
 ## Example
 
@@ -26,165 +26,117 @@ program {
 }
 ```
 
-`parent` reads object 1 from `main`; `child` follows slot 0 to object 2. `saved` copies 9 before that data becomes 42. The new object receives the saved 9 and is linked through the parent's slot 1. All three objects remain reachable through `main` after scope exit.
+`main` initially reaches objects 1 and 2. The scope reads object 2's data into `saved`, changes it to 42, then creates an object containing the saved 9 and links it through the parent's second reference. Scope exit releases the three handles; all three objects remain reachable from `main`.
 
 ## Objects and declarations
 
-A file starts with `gir 1;`, followed by declarations and one `program { ... }` block. `//` starts a line comment. Names contain ASCII letters, digits, and underscores, start with a letter or underscore, and cannot be `null`.
+A file starts with `gir 1;`, followed by declarations and one `program { ... }` block. `//` introduces a line comment. Names use ASCII letters, digits and underscores, start with a letter/underscore, and cannot be `null`.
 
-Each logical object has:
-
-| Part | Information |
-| --- | --- |
-| Identity | A logical identity local to the case, separate from the payload. |
-| Shape | A declared name, layout kind, and reference/data slot counts. |
-| Reference slots | A kind (strong, soft, weak) and target identity or `null` at each index. Soft/weak values also identify their wrapper incarnation. |
-| Data slots | Signed 64-bit payload values. A value equal to an object ID still forms no graph edge. |
-
-Shapes are reusable layouts: `object` selects fields, `refs` reference arrays, `data` long arrays, and `soft` / `weak` first-class reference objects. Counts specify fields or elements. Identity is separate metadata; JVM headers, addresses, alignment, and collector bookkeeping are outside this model.
+Objects have stable logical identities, declared shapes, indexed references and signed 64-bit data. Data equal to an object ID creates no edge. Shapes describe fields or array elements; identity metadata, JVM headers and addresses are separate from payload.
 
 | Declaration | Meaning |
 | --- | --- |
-| `shape N object 2 1;` | Declares layout `N` with reference slots 0 and 1, and data slot 0. Creates no instance. |
-| `shape Links refs 4;` | Declares a reference-array layout with element indices 0 through 3. |
-| `shape Payload data 8;` | Declares a long-array layout with element indices 0 through 7. |
-| `shape W weak;` / `shape S soft;` | Declares a nominal no-queue wrapper type with no ordinary indexed slots. |
-| `object 1 N [2, null] [7];` | Creates initial object ID `1` using `N`: reference slot 0 targets object `2`, reference slot 1 is null, and data slot 0 contains `7`. |
-| `root main = 1;` | Declares named strong root slot `main`, initially targeting the object declared with ID `1`. |
-| `root saved = null;` | Declares a root slot whose initial target is null. |
+| `shape N object 2 1;` | Object layout with reference slots 0/1 and data slot 0; no instance is created. |
+| `shape Links refs 4;` | Reference-array layout with four elements. |
+| `shape Payload data 8;` | Long-array layout with eight elements. |
+| `shape W weak;` / `shape S soft;` | Nominal no-queue wrapper type without indexed payload slots. |
+| `object 1 N [2, null] [7];` | Initial object ID 1: first reference targets ID 2, second is null, data is 7. |
+| `root main = 1;` / `root saved = null;` | Named strong root slots with the stated initial targets. |
 
-The first list supplies reference values; the second supplies data. References use an ID or `null` for strong slots, `soft(2)` / `weak(2)` for wrapped targets, and `soft(null)` / `weak(null)` for cleared wrappers. Roots are strong.
-
-List lengths must match the shape, and non-null targets must be declared. Forward references, aliases, cycles, and self-references are allowed. Shape names, initial IDs, and root names are unique in their namespaces. Initial IDs are positive signed 64-bit integers; counts and lengths are nonnegative signed 32-bit integers.
+Initial references use IDs or `null`, with `soft(2)` / `weak(2)` for wrapped targets and `soft(null)` / `weak(null)` for cleared wrappers. Lists must match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
 
 ## Identities and access
 
-Initial IDs are chosen by the author or generator: `object 1 ...` declares ID `1`, and `root main = 1;` selects that object. IDs need not be consecutive or follow declaration order. Mutation preserves object identity.
+Initial IDs are chosen by the author, need not be sequential, and select targets only in declarations. Programs obtain handles through roots, slots or allocation; there is no ID lookup operation. Mutation preserves identity, and several handles can share a target.
 
-Programs access objects through handles from roots, reference slots, or allocation. Operands accept handles or `null`; ID literals select targets only in declarations. IDs provide no lookup operation or liveness guarantee. Multiple roots and handles can share a target.
-
-Labels identify instructions, not objects: `created` names the allocation above; `fresh` holds its result. Access requires no internal instruction number.
-
-Diagnostic identities are `(worker, allocation site, occurrence)`: initial object `1` uses `(0, 0, 1)`; main allocations use `(0, s, occurrence)`. Workers are numbered in declaration order. Sites are internal instruction IDs; occurrences start at one per site and advance across repeated worker visits. Handles require no identity arithmetic.
+Labels name instructions, not objects: `created` names the allocation above, while `fresh` holds its result. Labels are optional and unique; internal instruction IDs are automatic. Diagnostic identities use `(worker, site, occurrence)`, with initial ID 1 represented as `(0, 0, 1)`. Programs need no identity arithmetic.
 
 ## Instructions
 
-Instructions accept optional labels such as `updated: checkpoint;`. Labels follow the naming rules above and are unique across the program. Formatting preserves labels and execution order; internal instruction IDs are assigned automatically.
+The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) define exact preconditions, effects, step costs and rejection behavior. Reference operands are live handles or `null`; scalar operands are scalar bindings or signed 64-bit literals. Reference/data indices are separate zero-based signed 32-bit literals. Access requires a live non-null owner and an in-range slot; non-null reads must match their declared shape. Validation checks every block, including skipped arms and zero-iteration loops.
 
-The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) define each operation's preconditions, effects, and failure behavior. Slot indices are signed 32-bit integer literals. Reference and data indices start at zero in separate namespaces; a slot's identity is its owning object, namespace, and index.
-
-| Instruction | Effect |
+| Form | Purpose |
 | --- | --- |
-| `allocate h N;` | Allocate a zero-filled object and bind handle `h`. |
-| `clone copy original;` | Bind a fresh shallow array copy, inferring its nominal shape from `original`. |
-| `allocate-ref r W value;` | Construct a fresh no-queue wrapper of type `W` around the current reference operand. |
-| `read-root h N root;` | Read a root into a handle declared with shape `N`. |
-| `write-root root h;` | Set an existing root to a handle's target. |
-| `read-ref h N owner index;` | Read a strong slot into a handle declared with shape `N`. |
-| `write-ref owner index h;` | Replace a slot with a strong reference. |
-| `write-soft owner index h;` / `write-weak owner index h;` | Install a fresh soft/weak wrapper, including for `null`. |
-| `acquire h N owner index { ... }` / `acquire h N r { ... }` | Read a slot wrapper or receiver referent once; execute the body with strong handle `h` if non-null. |
-| `is-cleared value owner index;` / `is-cleared value r;` | Bind scalar 1 for a cleared slot wrapper or receiver, otherwise 0, without acquiring the referent. |
-| `clear-ref owner index;` / `clear-ref r;` | Clear the slot wrapper or first-class receiver, without enqueueing it. |
-| `poll-queue;` | Record one wrapper incarnation from the case's reference queue, or an empty result. |
-| `read-data value owner index;` | Bind a scalar to a data slot's contents. |
-| `same-object equal left right;` | Bind scalar 1 for identical reference operands, including two nulls; otherwise 0. |
-| `write-data owner index value;` | Write a scalar or integer literal. |
-| `compare-set-root won root expected update;` | Compare root identity and conditionally update; bind scalar 1 on success, otherwise 0. |
-| `compare-set-ref won owner index expected update;` | Compare and conditionally update a strong slot by identity. |
-| `compare-set-data won owner index expected update;` | Compare and conditionally update a long slot by value. |
-| `exchange-root old N root update;` | Atomically replace a root and bind its old strong target. |
-| `exchange-ref old N owner index update;` | Atomically replace a strong slot and bind its old target. |
-| `exchange-data old owner index update;` | Atomically replace a long slot and bind its old value. |
-| `if-present h { ... }` | Execute a child scope when the existing strong handle is non-null. |
-| `if-nonzero value { ... } else { ... }` | Execute the first child scope for a nonzero scalar, otherwise the optional else scope. |
-| `release name;` | End the lifetime of a binding in the current scope. |
-| `scope { ... }` | Execute a block with its own bindings. |
-| `repeat count { ... }` | Execute a block a nonnegative, literal number of times. |
-| `checkpoint;` | Capture graph obligations at a main-thread point or a coordinated worker cut. |
-| `collect;` | Request collection without changing the logical strong graph. Actual progress is recorded separately. |
-| `parallel { worker name { ... } ... }` | Start workers together and join all before continuing. |
-| `barrier;` | Finish a worker phase and wait for every peer before the next phase. |
+| `allocate h N;` | Fresh zero-filled instance and strong handle. |
+| `clone copy original;` | Fresh shallow array copy with the source's nominal shape. |
+| `allocate-ref r W value;` | Fresh no-queue soft/weak wrapper. |
+| `read-root h N root;` | Copy a named root into a strong handle. |
+| `read-volatile-root h N root;` | Volatile root read into a strong handle. |
+| `write-root root h;` | Replace a named root's target. |
+| `write-volatile-root root h;` | Volatile root write. |
+| `read-ref h N owner index;` | Copy a strong slot into a handle. |
+| `read-volatile-ref h N owner index;` | Volatile strong-slot read. |
+| `write-ref owner index h;` | Replace any slot with a strong value. |
+| `write-volatile-ref owner index h;` | Volatile strong-value write. |
+| `write-soft owner index h;` | Install a fresh soft wrapper, including for null. |
+| `write-weak owner index h;` | Install a fresh weak wrapper, including for null. |
+| `acquire h N owner index { ... }` / `acquire h N r { ... }` | Acquire once; run the child scope if non-null. |
+| `is-cleared value owner index;` / `is-cleared value r;` | Observe cleared state as 0/1 without acquiring the referent. |
+| `clear-ref owner index;` / `clear-ref r;` | Explicitly clear without enqueueing. |
+| `poll-queue;` | Observe one implicit-queue delivery, or empty. |
+| `read-data value owner index;` | Copy a long slot into a scalar. |
+| `read-volatile-data value owner index;` | Volatile long-slot read. |
+| `write-data owner index value;` | Replace a long slot. |
+| `write-volatile-data owner index value;` | Volatile long-slot write. |
+| `same-object equal left right;` | Bind 1 for identical targets, including two nulls; otherwise 0. |
+| `compare-set-root won root expected update;` | Strong CAS on a root, returning 0/1. |
+| `compare-set-ref won owner index expected update;` | Strong CAS on a strong reference slot. |
+| `compare-set-data won owner index expected update;` | Strong CAS on a long slot. |
+| `exchange-root old N root update;` | Replace a root and bind its old target. |
+| `exchange-ref old N owner index update;` | Replace a strong slot and bind its old target. |
+| `exchange-data old owner index update;` | Replace a long slot and bind its old value. |
+| `if-present h { ... }` | Child scope when a strong handle is non-null. |
+| `if-nonzero value { ... } else { ... }` | Scalar-selected child scope; else is optional. |
+| `release name;` | End a current-scope binding. |
+| `scope { ... }` | Introduce a scope. |
+| `repeat count { ... }` | Literal nonnegative repetitions, each with a fresh scope. |
+| `checkpoint;` | Capture graph obligations. |
+| `collect;` | Request collection. |
+| `parallel { worker name { ... } ... }` | Start workers together and join all. |
+| `barrier;` | Complete a worker phase and wait for peers. |
 
-Reference operands are live handles or `null`; scalar operands are live scalar bindings or signed 64-bit literals. Reference slots and named roots can hold any target shape. A non-null reference read asserts the declared destination shape exactly. Field and array access requires a live, non-null owner and an index within the corresponding reference or data count. Static validation checks all blocks, including zero-iteration loops, for names, types, slot bounds, and labels.
+Ordinary root, strong-reference and data reads/writes are plain; the listed volatile spellings select that mode per access. CAS and exchange have volatile effects; failed CAS has read effects and no spurious failure. `if-nonzero` evaluates once: zero selects else, every nonzero value selects then. Branch scopes export no bindings, while heap/root writes persist.
 
-`clone` uses real Java array cloning in strong sequential programs under controlled observation. Object cloning, reference/contended histories, parallel workers, and natural observation remain unsupported.
+Reference bindings are strong until release or scope exit; acquired handles last through their whole acquisition body. Scalars retain no objects. Names cannot shadow active bindings or be reused after release in the same scope. Release applies only to the current scope. Releasing a handle removes its obligation without requiring immediate reclamation. The outer scope ends before the final capture. Checkpoints in selected branches count only executed visits; [observation profiles](./observation.md#coverage-and-observer-effects) determine physical local obligations.
 
-Root, strong-reference, and data reads/writes are plain unless their instruction selects volatile access: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Each instruction selects its access mode independently, including when modes share a location. Compare-set and exchange have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
-
-`if-nonzero` evaluates a numeric binding or signed 64-bit literal once: zero selects `else`, and every nonzero value, including a negative value, selects the first arm. Each arm has a child scope and exports no bindings; heap and root writes persist. Both arms require static validation. For example, a CAS result can guard mutation:
-
-```text
-compare-set-root won shared candidate null;
-if-nonzero won {
-  write-data candidate 0 7;
-}
-```
-
-Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Ending a binding removes its reachability obligation, without requiring reclamation or immediate disappearance of physical references. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
-
-Main-thread checkpoints inside `acquire`, `if-present`, or `if-nonzero` execute only on the selected path. A skipped arm contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. The [observation profile](./observation.md#coverage-and-observer-effects) determines local obligations. Exact strong-graph main paths support natural capture; acquisitions and reference/contended histories require controlled observation.
+Array cloning uses real Java `clone()` in strong sequential controlled programs. Object cloning, reference/contended histories, parallel cloning and natural capture are unsupported.
 
 ## Reference histories
 
-First-class wrappers use `allocate-ref`, with an ordinary or older no-queue wrapper referent. Ordinary `allocate` and initial `object` declarations do not construct wrapper types. Existing typed root/strong-slot loads and stores move the same wrapper pointer; clearing through any alias changes its shared state. A wrapper handle keeps the wrapper alive, while an acquired handle keeps the referent alive. Null wrappers and cleared non-null wrappers are distinct. [reference-objects.gir](../examples/reference-objects.gir) shows aliases and a detached container.
+First-class wrappers are constructed only by `allocate-ref`. Root/strong-slot operations move the same wrapper pointer, so aliases share clear state. A wrapper handle protects the wrapper; an acquired handle protects its referent. A null wrapper differs from a cleared wrapper. Referents may be ordinary objects or older no-queue wrappers; see [reference-objects.gir](../examples/reference-objects.gir).
 
-First-class wrappers require sequential controlled observation. Natural observation and atomic/concurrent first-class combinations are unsupported. Registered legacy wrappers cannot become first-class values, and legacy soft/weak store operands remain ordinary objects or null. A conservative all-syntax type/location proof rejects potentially registered loads even when a saved path avoids them; ordinary legacy-only programs retain their existing rules. Named queues, phantom references, Cleaner actors and initial wrapper construction remain unsupported.
+First-class wrappers require sequential controlled observation. Atomic/concurrent or natural first-class cases, initial wrapper declarations, named queues, phantom references and Cleaner actors are unsupported. Legacy slot wrappers remain opaque and their store operands are ordinary objects/null; they cannot be exposed as first-class values, including through paths avoided by one execution.
 
-Reference histories support object fields and array elements, and can include parallel workers under the [contended-history rules](#contended-histories). [references.gir](../examples/references.gir) shows a complete example.
+Legacy reference histories cover fields and arrays, including supported parallel cases. The checker validates acquisition/state/clear choices and Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html)/[weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) clearing rules before deriving later expectations. Clearing is permanent per wrapper; replacing a slot creates a fresh [incarnation](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact contents. [references.gir](../examples/references.gir) is a complete example.
 
-The checker validates recorded choices before using them. GC follows Java's [soft](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/SoftReference.html) and [weak](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/ref/WeakReference.html) reference rules, including atomic clearing of related references. Clearing is permanent for each wrapper; stores create fresh [incarnations](../engine/src/main/java/io/connglli/gorrect/engine/model/WrapperId.java). Accessible referents retain exact fields and data.
-
-Clearing, queue delivery, and reclamation are separate. Empty queue polls prove no processing progress, and collection requests force neither clearing nor reclamation. Unreachable nodes and detached wrappers may remain. Impossible histories violate the oracle; missing coverage or exhausted search is inconclusive. Reclamation, finalization, and resurrection checks are unsupported.
+Clearing, notification and reclamation are distinct. Initially null or explicitly cleared wrappers are not enqueued by those actions; an empty poll proves no processing progress. Collection requests force none of these outcomes. Retained garbage is allowed; reclamation, finalization and resurrection checks remain unsupported.
 
 ## Parallel workers
 
-Workers have independent scopes and access shared state through named roots; their code cannot read caller bindings. Names are unique within each block; numeric IDs are internal. Limits are 16 workers per block and 64 declarations per program. Nested parallel blocks are unsupported.
+Workers have private scopes and reach shared state through named roots, not caller bindings. Blocks allow up to 16 workers and 64 worker declarations per program, with unique names per block and no nested parallelism. Ordinary exact phases must be conflict-free: a slot written by one worker cannot be accessed by another. Shared reads and distinct-slot writes are allowed; aliases count as the same slot.
 
-The exact profile requires conflict-free phases: a slot written by one worker cannot be read or written by another, even with the same value. This covers roots and reference/data fields or elements, including aliases. Shared reads and distinct-slot writes are allowed. The oracle rejects concrete conflicts before launch, making graph contents and per-worker reads independent of interleaving.
+Barriers and worker checkpoints appear directly in every worker body with the same ordered sequence of kinds. They preserve bindings and publish preceding writes before the next phase. A worker checkpoint pauses all workers and the caller for one capture; the first declared worker's site/visit identifies it. See [concurrent.gir](../examples/concurrent.gir) and [worker-capture.gir](../examples/worker-capture.gir).
 
-For example, both workers can mutate separate data fields of one object:
-
-```text
-gir 1;
-shape N object 0 2;
-object 1 N [] [0, 0];
-root shared = 1;
-program {
-  parallel {
-    worker left { read-root n N shared; write-data n 0 11; }
-    worker right { read-root n N shared; write-data n 1 22; }
-  }
-  checkpoint;
-}
-```
-
-Barriers and worker checkpoints appear directly in worker bodies. Every worker must have the same ordered sequence of barrier/checkpoint kinds. Both preserve bindings and make preceding phase writes visible before any following phase starts. A worker checkpoint pauses every worker and the caller for one combined capture, then begins the next phase. The first declared worker's checkpoint site and actual visit identify that capture. [concurrent.gir](../examples/concurrent.gir) exercises ordinary barriers; [worker-capture.gir](../examples/worker-capture.gir) captures caller and worker bindings.
-
-Worker checkpoints require `roots-diagnostic`. A capture-bearing parallel block may appear within a literal repeat or ordinary scope, but not under `if-present`, `if-nonzero`, or `acquire`. Checkpoints inside worker-local repeats, scopes, or conditional bodies are unsupported. Missing participant or physical-root evidence is inconclusive; it cannot establish that a binding was lost.
+Worker capture requires `roots-diagnostic`. A capture-bearing parallel block can be inside a literal repeat/scope, but not under acquisition or a conditional. Worker checkpoints cannot be nested inside worker-local control blocks. Missing participants or physical roots leave coverage inconclusive.
 
 ## Contended histories
 
-Volatile/atomic operations, parallel reference processing, or worker checkpoints select bounded history checking. Before launch, exhaustive exploration must establish that every sequentially consistent schedule satisfies preconditions and has no ordinary data race. Any possible ordinary race is unsupported; a rejected precondition is invalid input. Exhausting the proof budget is inconclusive.
+Volatile/atomic operations, parallel reference processing or worker checkpoints select bounded history checking. Before launch and again offline, every sequentially consistent schedule must satisfy preconditions and be free of ordinary data races. Any possible ordinary race is unsupported; a rejected precondition is invalid input; proof-budget exhaustion is inconclusive.
 
-The checker matches worker order, returned identities/values, branches, barriers, and snapshots to a legal schedule. File order and timestamps impose no extra cross-worker order. All live worker and caller handles protect referents. [contended.gir](../examples/contended.gir) transfers ownership using exchange-to-null.
-
-Caller captures follow the [observation contract](./observation.md#coverage-and-observer-effects). [Java's memory model](https://docs.oracle.com/javase/specs/jls/se17/html/jls-17.html#jls-17.4.5) and [VarHandle](https://docs.oracle.com/en/java/javase/17/docs/api/java.base/java/lang/invoke/VarHandle.html) define the ordering guarantees; acquire/release-only modes and arbitrary data races are outside this profile.
+The checker matches per-worker order, values/identities, choices, synchronization and snapshots to a legal schedule. File order/timestamps impose no extra cross-worker order, and all live caller/worker handles protect referents. [contended.gir](../examples/contended.gir) demonstrates ownership transfer. Weaker ordering and arbitrary data races need separate contracts.
 
 ## Stress requirements
 
-Declare `require concurrent-overlap;`, `require compiled-execution;`, and `require gc-during-workers;` before `program` to constrain execution coverage independently of the expected graph. Profile requirements also apply.
+Declare these before `program`; profile requirements also apply:
 
-| Requirement | Evidence |
+| Declaration | Required evidence |
 | --- | --- |
-| `concurrent-overlap` | At least two workers, with all workers' measured active intervals overlapping in one phase. This does not claim simultaneous CPU instruction execution. |
-| `compiled-execution` | Successful installation requests and VM-reported compiled generated-method frames at worker entry and exit, after the configured modeled warm-up visits. |
-| `gc-during-workers` | Reported GC pause progress during a retained worker collection request. This does not establish concurrent collector completion. |
+| `require concurrent-overlap;` | All workers' active intervals overlap in one phase, with at least two workers. |
+| `require compiled-execution;` | Installation requests and actual compiled generated-method frames at worker entry/exit after modeled warm-up. |
+| `require gc-during-workers;` | GC pause progress during a recorded worker collection request. |
 
-Required conditions must hold in one parallel-block visit. Overlap plus GC requires collection in an overlapping phase; compiled execution plus GC requires compiled-frame witnesses immediately before and after that call. Missing evidence leaves requirements unmet regardless of graph verdict. Witnesses cannot prove continuously compiled execution or the requested tier.
+Required conditions must hold in one parallel-block visit. Overlap plus GC needs collection in the overlapping phase; compiled execution plus GC needs frame witnesses immediately before/after that call. Evidence proves neither simultaneous CPU execution, continuously compiled code, the requested tier, nor collector-cycle completion.
 
 ## Oracle obligations
 
-Checkpoint visits are distinguished by internal instruction ID and visit number; the program maps IDs to labels. The model retains every named root and live reference binding. The [observation profile](./observation.md#coverage-and-observer-effects) selects physical binding obligations; their reachable graph has exact shapes, reference kinds, targets, and data. Retained garbage is allowed. Changed required roots, handles, slots, or contents violate the expectations; incomplete coverage is inconclusive.
-
-Model budgets bound steps, allocated objects (including wrappers), slots, and cumulative snapshot cells. [OracleLimits](../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleLimits.java) defines cell accounting; [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) define step costs and rejection behavior. These bounds are independent of target heap capacity. Exhaustion produces a checking limit or inconclusive history check.
+At each internal site/visit, required roots and accessible objects must have the expected identities, shapes, reference kinds, targets and data. Partial evidence may refute an obligation but cannot establish satisfaction. Budgets bound steps, allocations including wrappers, slots and retained snapshot cells independently of target heap capacity; [OracleLimits](../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleLimits.java) defines their accounting.

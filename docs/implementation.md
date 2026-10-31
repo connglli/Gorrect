@@ -2,111 +2,81 @@
 
 ## Architecture
 
-The Java 21 engine derives expectations from GIR and launches a separate JDK 17+ target. Generated Java executes the workload; target helpers return observations for verification.
+The Java 21 engine generates and compiles a workload for a separate JDK 17+ target. Its oracle derives expectations independently; the target returns observations and execution evidence.
 
 ```text
-+----------------------------------------+                  +----------------------------------------------+
-| engine JVM (Java 21)                   |                  | target JVM (JDK 17+)                         |
-|                                        |                  |                                              |
-| GIR -> Java emitter -> javac           |--- classes ----> | Generated Java methods and workers           |
-|  |                                     |                  |                  |                           |
-|  v                                     |                  |                  v                           |
-| Oracle                                 |                  | Runtime helpers (Java 17)                    |
-|  |                                     |                  |        |                    |                |
-|  v                                     |                  |        v                    v                |
-| Verifier <--- run artifacts            |<---- files ----- | VM control bridge     Native observer        |
-|                                        |                  |                       (C++17, JNI/JVMTI)     |
-| JVM driver -> Runner                   |<-- protocol ---> | Runtime control endpoint                     |
-+----------------------------------------+                  +----------------------------------------------+
-```
+Engine JVM (Java 21)                    Target JVM (JDK 17+)
 
-The protocol is a shared library and file format. `RunEngine` coordinates preparation; `RunCompiler`, `TargetRunner`, and `RunVerifier` own compilation, target process/control, and offline verification. Artifact decoding and provenance belong to `Artifacts`.
+GIR -> Java emitter -> javac --classes-> Generated methods/workers
+ |                                             |
+ v                                             v
+Oracle -> Verifier <------- artifacts -- Runtime + VM control bridge
+             ^                                 |
+             +------------------------- JNI/JVMTI observer (C++17)
+
+Driver -> Runner <------ Unix socket --> Runtime control endpoint
+```
 
 ## Languages and build units
 
 | Unit | Language | Responsibility |
 | --- | --- | --- |
-| `engine` | Java 21 | GIR, oracle, generation, Java emission, JVM drivers, runner, and CLI |
-| `runtime` | Java 17 | Workers, recording, checkpoints, and VM controls |
-| `protocol` | Java 17 | Commands, records, and Java codecs |
+| `engine` | Java 21 | GIR, model/oracle, generation, emission, drivers, execution and CLI |
+| `runtime` | Java 17 | Worker coordination, recording, checkpoints and VM controls |
+| `protocol` | Java 17 | Shared records and codecs |
 | `native` | C++17 | JNI entry points and JVMTI observation |
 
-Gradle builds Java and invokes CMake for native code. The wrapper and dependencies are pinned; compiler warnings fail the build. Runtime, protocol, and generated programs use `--release 17`. The engine supplies the compiler independently of the target installation.
-
-Engine and runtime depend on protocol; runtime has no engine or oracle dependency. The native library implements the protocol's snapshot encoding and must match the target OS and architecture. External VM support libraries must match the target's APIs.
+Gradle builds Java and invokes CMake. Runtime, protocol and generated programs use `--release 17`; the engine supplies the compiler independently of the target. Engine/runtime depend on protocol, and runtime has no oracle dependency. The native library must match the target OS/architecture; external VM clients must match its APIs.
 
 ## Engine
 
-### GIR frontend and model
+The frontend parses and validates [GIR](./gir.md). The model uses immutable heap records and explicit binding lifetimes so later writes cannot alter retained expectations. Dynamic checks reject invalid owners, shapes and accesses before their effects.
 
-The frontend parses, formats, and statically validates [GIR](./gir.md). Its immutable syntax describes declarations, bindings, and structured control flow. Shared structural traversal visits every instruction once in declaration order; execution and history search retain their own control flow. A case-local host model stores logical objects, roots, and handles; heap writes replace immutable records so retained checkpoints remain unchanged. Execution checks dynamic preconditions such as null owners and target shapes.
+The exact oracle handles deterministic phases. History checking explores bounded schedules and reference-processing choices, proves race freedom before launch, and repeats that proof offline. Only equivalent complete states may be merged; all live worker/caller contexts and semantic resources remain part of the state.
 
-### Oracle and verifier
+The emitter generates real node classes, arrays and reusable worker methods. Plain operations use plain storage/accesses; volatile and atomic operations use field or array-element VarHandles. It retains compiled classes and layout metadata, without maintaining a second Java heap model.
 
-The oracle interprets GIR independently of generated layouts and runtime bookkeeping. The exact oracle checks conflict-free phases. Contended profiles explore bounded schedules and use vector clocks to prove race freedom before launch; offline verification repeats that proof before matching evidence. Search forks preserve private scopes, identities, and budgets. Matching and reference histories merge equivalent states after joins. Strong-reference safety audits also reuse equal full states at matched phase boundaries, including every live worker/caller context and semantic resource counter.
-
-Reference histories track cleared, pending, and delivered wrapper sets. Legal GC transitions expand the frontier; validated choices and snapshots filter it. Concurrent states include every worker's and suspended caller's handles. Detached wrappers may survive without creating strong referent roots. Search forks share cumulative work limits; graph traversal and retained search states count toward those limits.
-
-### Generation and emission
-
-The seeded generator constructs valid GIR. The emitter generates node classes, reusable worker methods, and layout metadata without a second simulated heap. Named roots and payload fields use plain storage and direct plain accesses. Volatile and atomic instructions use field or array-element VarHandles; array handles take the receiver and index explicitly. Only used locations receive handles. The engine compiles against the target runtime and retains the exact classes.
-
-The planned reducer will simplify GIR and execution settings while preserving the failure and any required stress conditions.
+[RunEngine](../engine/src/main/java/io/connglli/gorrect/engine/run/RunEngine.java) coordinates compilation, execution and verification through separate components. The seeded generator produces valid cases; reduction remains planned work.
 
 ## Target runtime
 
-The runtime coordinates workers, barriers, checkpoints, recording, and VM controls. Generated methods perform ordinary allocations and mutations in Java; native calls occur at observation and control points. Java locals represent handles; the observation profile selects lifetime fences and primitive checkpoint-presence recording.
+Generated Java performs graph mutations. Helpers coordinate workers, VM controls and checkpoints, recording scalar/identity facts in bounded per-worker primitive buffers. Recording does not retain workload objects or serialize ordinary mutations. Capacity plans cover either branch without predicting observed values.
 
-Each worker has private primitive buffers for scalar and sparse identity observations, keyed by worker-local trace positions. Syntax bounds reserve capacity for either conditional outcome without predicting payloads. Only actual appends are serialized, and exhaustion stops execution. Strong reads record presence separately from identity. Recorders retain no workload objects.
-
-Start, barrier, checkpoint, phase-start, end, and join markers establish worker control flow without a global sequence counter or a shared recorder lock. Per-worker order is meaningful; cross-worker file order is not. A main-owned two-phase rendezvous first publishes worker arrivals, then keeps them paused through capture and acknowledgement. Primitive caller presence stays fixed while it waits for the group. Failure cancels waiters and joins workers before propagation; the initiating worker failure is published before cancellation.
+A two-phase rendezvous publishes worker arrivals, then keeps the caller and every worker paused through capture and acknowledgement. Failure cancels waiters and joins workers before propagation. Per-worker order matters; cross-worker file order supplies no synchronization.
 
 ## Native observer
 
-JNI exposes capture requests; JVMTI heap callbacks fill bounded native buffers using VM field metadata and emitted layout roles. They receive no expected graph, perform no JNI calls, allocation, or locking, and retain no persistent strong references to workload objects. C++ exceptions are contained at JNI boundaries.
+JNI requests a JVMTI heap walk. Callbacks fill preallocated storage without JNI calls, allocation or locks; native metadata retains no strong workload references. Encoding and metadata queries happen outside callbacks, and JNI boundaries contain C++ exceptions.
 
-The native metadata provider copies requested VM debug tables after heap callbacks. The retained provider certifies loaded class bytes and brackets captures with stack samples, then the engine reads scopes from those exact bytes. Neither provider acquires local objects; the [metadata contract](./observation.md#binding-metadata) defines their proof boundaries. The engine projects captures and primitive binding evidence under the [observation contract](./observation.md), preserving raw bytes and reporting unsupported or incomplete coverage.
+The engine projects physical records using the [observation contract](./observation.md). Layouts identify fields and identity roles; they contain no expected graph values. Local metadata comes from VM tables or certified retained class bytes.
 
 ## JVM integration
 
-An integration has a host driver and target-side control bridge. A bounded helper queries HotSpot options/beans or OpenJ9's reported GC policy/beans; the workload handshake rechecks selection before execution. Resolved modes are frozen for replay. VM-specific controls and evidence interpretation stay behind this boundary; another integration must provide equivalent evidence or report unmet requirements.
+Each integration has a host driver and target control bridge. A bounded probe resolves the actual collector/mode, and the workload handshake rechecks it before graph construction. Replay freezes the resolved selection. New JVM support belongs here, with equivalent evidence or explicit unsupported results.
 
-The VM bridge separates optional JIT settings from GC request policy. HotSpot uses WhiteBox controls and JFR frame witnesses. OpenJ9 uses launch-time compilation policy, code-load callbacks, and `com.ibm.GetStackTraceExtended` witnesses. Raw stacks retain declaring class, method, descriptor, and interpreted/compiled/inlined kind in bounded `StackEvidence` version 1 records, with VM/run/thread/context identities. Both integrations match actual worker frames independently of installation reports. Pause-counter summaries retain one request per phase; missing evidence cannot satisfy [stress requirements](./gir.md#stress-requirements).
-
-HotSpot collection certification decodes JFR request spans and VM GC events. It matches VM/run identity and the validated operation, worker, phase, ordinal and thread for every request. Separate classifiers require a complete whole-heap/major cycle or a collector-specific young event with the selected cause, wholly inside the call. Request policy is independent of JIT; its startup method exercise precedes workload construction and cannot satisfy coverage. Missing evidence leaves requirements unmet beside any independent graph violation. OpenJ9 certification remains unsupported; these facts establish no reclamation or promotion outcome.
-
-Commands select `--profile`; its fields have no CLI overrides. An integration can replace the observer while preserving GIR semantics and the common protocol.
+HotSpot uses WhiteBox controls and JFR; OpenJ9 uses launch policy, code-load callbacks and extended-stack witnesses. Installation events and pause counters do not prove compiled invocation or cycle completion. The verifier matches actual frames and collection events to validated execution contexts under the [stress](./gir.md#stress-requirements) and [profile](./usage.md#profiles) contracts.
 
 ## Runner and protocol
 
-The runner enforces startup, compilation, and run deadlines, captures output, terminates processes, and retains partial artifacts. The engine and target exchange versioned control frames over a Unix domain socket. Its short temporary path is independent of the run directory and is removed on success or failure. Bulk traces and snapshots are files.
+The runner enforces compiler/startup/run deadlines, captures output and terminates surviving processes. Versioned control frames travel over a temporary Unix domain socket; bulk evidence travels as files. Socket cleanup and partial artifact retention apply on failure too.
 
-Frames identify the run, capture sequence, and checkpoint operation/visit. The target writes a snapshot and waits for acknowledgement at each executed checkpoint. `HistoryPlan` treats conditional bodies as taken to reserve maximum storage and per-site visit counts; its event payloads and graph targets are placeholders. For histories, the runner accepts actual visits within those bounds, with consecutive capture sequences and per-site visit numbers. Exact programs retain their known checkpoint order. Completion requires a final capture after outer-scope release, and no later capture is accepted. The [protocol module](../protocol/src/main/java/io/connglli/gorrect/protocol/) owns the codecs.
-
-For completed runs, offline verification cross-checks control identities against actual main checkpoint markers or coordinated worker arrivals in the scalar trace and requires the final capture. A worker cut is ordered within its actual group visit and identified by the first declared worker's site/visit. This establishes capture correspondence; the independent oracle/history checker still validates branch choices, graph states, and the complete trace. Inconsistent control evidence is an extraction error; the live runner reports protocol failures. Binding coverage follows the [observation contract](./observation.md#coverage-and-observer-effects).
+At each checkpoint the target writes evidence and waits for acknowledgement. The runner verifies run, sequence and executed site/visit identities against the program and trace. Plans reserve storage but supply no observed values. Completion requires a final capture after outer-scope release. The [protocol sources](../protocol/src/main/java/io/connglli/gorrect/protocol/) define framing and bounds.
 
 ## Artifacts and results
 
-Each run uses a separate directory:
+Each run has its own directory:
 
 ```text
 runs/<run-id>/
-    case.gir
-    manifest.json
-    generated/
-    support/
-    traces/
-    snapshots/
-    logs/
-    target.properties
-    execution.json
-    result.json
+    case.gir             manifest.json
+    generated/           support/
+    traces/              snapshots/
+    logs/                target.properties
+    execution.json       result.json
 ```
 
-The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. `collector.properties` retains preflight facts; `target.properties` records actual options and VM identity. Generated source, classes, layouts, and support libraries preserve the executable case. Replay reuses those bytes and settings; offline verification needs no target installation.
-
-`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for legacy reference cases or `references.gtyped` for first-class wrapper targets, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures and retained-provider frame samples. Retained code certificates and final status live in `traces/`. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
+The manifest retains input/resolved profiles, seeds, compiler/target identities, command, environment and provenance hashes. Generated classes and bundled support preserve the executable. Traces/snapshots retain raw observations and enabled VM witnesses. Execution outcome, semantic verdict and unmet requirements are separate [result dimensions](./usage.md#artifacts-and-results).
 
 ## Checks
 
-Gradle `check` includes strict Javadoc and Java tests for the frontend, model, oracle, emission, and codecs. JUnit tags select unit, observer, HotSpot, and configured OpenJ9 suites. Target suites run fresh because external JVM builds can change independently of Gradle inputs. A shared golden fixture checks Java/C++ wire compatibility. JDK 17/21 integration exercises generated execution, capture, offline verification, and replay. Set `GORRECT_OPENJ9_JAVA` to include `:engine:openj9Integration`. Independent exhaustive models check histories; damaged evidence, actual/interpreted frames, and injected failures test proof boundaries and diagnostics.
+`./gradlew check` covers strict compilation/Javadoc, frontend/model/oracle/emission tests, Java/C++ wire compatibility and JDK 17/21 execution/capture/replay. Target suites run fresh because external JVM builds can change. Set `GORRECT_OPENJ9_JAVA` to enable the OpenJ9 suite. Independent small models, damaged evidence and injected failures check validation boundaries.
