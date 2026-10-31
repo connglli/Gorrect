@@ -1,0 +1,37 @@
+# Structured monitors
+
+Status: proposed first slice of [stage 19](../implementations/2026-10-29-implementation-plan.md#19-add-monitors-and-targeted-jit-transitions), based on `a05425a`. This note proposes behavior; no monitor implementation or runtime-lock certificate exists.
+
+## Smallest useful block
+
+Add `monitor h { ... }`, where `h` is an existing reference handle. Lower the block directly to Java `synchronized (bH) { ... }`, using the emitted local for `h`. This permits real Java monitor regions around graph mutations, collection and the separately proposed observation-only `identity-hash`, without lock objects, scalar expressions, calls or exception syntax in GIR. Ordinary objects and supported arrays can be receivers.
+
+The first slice supports strong sequential programs under controlled observation. Permit sequential and nested blocks, including same-receiver reentrancy and distinct receivers, within the existing GIR nesting limit. Literal repeats, scopes and conditionals compose through ordinary child scopes and recursive cleanup; no ownership scheduler or lock-state map is needed. Reject reference histories, first-class wrappers, volatile/atomic histories, parallel programs and natural observation whenever any monitor occurs. Scan all syntax, including skipped arms and zero-iteration loops.
+
+## Execution contract
+
+The receiver must be a live reference binding with a non-null target when entry executes. A scalar, unavailable handle or literal `null` is invalid GIR. An executed null binding is invalid input until GIR has expected-exception semantics. Validate the receiver and entry step capacity before changing heap, bindings, occurrence counters, trace or step budget. Static validation checks every body; nullness follows the selected exact execution.
+
+Successful entry evaluates the handle once, consumes one step and records `(monitorSite, OPERATION, 0)` after Java acquisition. Execute the body in a child scope. The receiver belongs to an outer scope, so the body cannot release or shadow it; root/slot changes and alias releases do not change the receiver. On normal model completion, discard child bindings without budget, then check exit-step capacity. If available, consume one step and record `(monitorSite, OPERATION, 1)`; the target records it after Java release. An empty block costs two steps/events; body costs are unchanged. These control markers do not observe ownership.
+
+Exhausted entry or exit capacity raises `OracleLimitException` and reports `CHECKING_LIMIT`. Exit exhaustion preserves successful entry/body events and graph effects, with child bindings already discarded and no exit marker. A null receiver on entry reports `INVALID_WORKLOAD`; entry rejection opens no scope or marker. Body failure unwinds active child scopes in `finally` without budget, preserving prefix writes and omitting normal-exit markers for every unwound monitor. An unexpected target exception propagates after Java release, without normal-exit markers; it remains an execution failure. Java specifies release on normal and abrupt completion in [JLS 17 §14.19](https://docs.oracle.com/javase/specs/jls/se17/html/jls-14.html#jls-14.19).
+
+The block changes no graph edge, identity, payload or allocation count. Existing receiver lifetime supplies its strong graph obligation; no implicit GIR handle, monitor registry or additional object edge is needed.
+
+## Collection and capture
+
+Permit `collect` inside a monitor with the existing request/cycle evidence. It changes no logical lifetime. Identity-hash observations before, inside and after a block retain their independent stable-token constraints; neither hashing nor collection certifies a lock representation or a header transition.
+
+An interior checkpoint has a live receiver, so it requires `roots-diagnostic`; the named-root profile cannot cover it. Apply the existing [physical local contract](../../../docs/observation.md#coverage-and-observer-effects) to every live binding, including the receiver: primitive presence and a unique actual thread/activation/method/depth/slot/bytecode-scope match. Keep controlled fences through ordinary release/scope exit; acquiring or exiting the monitor does not replace them or end the receiver lifetime. Release after the block removes the obligation without requiring reclamation.
+
+Javac retains an unnamed receiver temporary for `monitorexit`; VM monitor roots can also retain the object. Neither establishes the declared receiver's stack-slot origin. Current [projection](../../../engine/src/main/java/io/connglli/gorrect/engine/observe/SnapshotProjector.java) accepts mapped `STACK_LOCAL` roots, while [native recording](../../../native/src/agent.cpp) retains a generic monitor root without an owning thread/activation/slot certificate. Extra roots are permitted retention; they cannot replace missing binding evidence, even when their target matches the expected receiver. Missing or ambiguous ordinary origins remain inconclusive and covered contradictions remain usable.
+
+## Evidence and compatibility
+
+Check retained class bytes for receiver evaluation, `monitorenter`, normal `monitorexit` and catch-all release/rethrow, as described by [JVMS 17 monitor instructions](https://docs.oracle.com/javase/specs/jvms/se17/html/jvms-6.html#jvms-6.5.monitorenter). This establishes translation fidelity. Matched control markers establish executed region boundaries. Neither proves a physical lock survived optimization: HotSpot can [eliminate synchronization](https://docs.oracle.com/en/java/javase/17/vm/java-hotspot-virtual-machine-performance-enhancements.html). Actual ownership, inflation/contention, lock/header transitions and compiled interior execution require separate target-specific witnesses. Installation or entry/exit frame evidence cannot supply them; absent witnesses leave those claims unmet.
+
+Use one immutable `Instruction.Monitor(id, owner, body)` and existing preorder, lexical scopes, bounded control planning and primitive recorder. Reuse the version 1 `OPERATION` encoding with the two site-specific values above; preserve existing kind ordinals, snapshot/layout/protocol formats and monitor-free behavior. Every structural consumer must traverse the body. Apply the same whole-program support gate in emission, direct exact/history interpretation and audits, launch and offline verification before evidence-dependent exits. Old readers need not understand the new syntax.
+
+## Implementation acceptance
+
+Before broadening support, require frontend round trips, skipped-block rejection and missing/reordered markers; transactional null/budget entry checks; empty/repeated/aliased blocks with exact costs; nested reentrant/distinct-receiver marker order, lowering and captures; entry/body/exit exhaustion, recursive cleanup and prefix preservation; strong objects/arrays with mutation, identity-hash and collection; and interior captures with both existing metadata providers. Damaged evidence must remove the owner local while retaining matching hidden/monitor roots and still prevent satisfaction; preserve earlier covered refutations. Check emitted exception cleanup with an injected failing body without adding GIR exception syntax. Run Java 17/21 and focused existing HotSpot/OpenJ9 execution, offline verification and exact-class replay; report unsupported or missing origins explicitly. Concurrent monitor synchronization, expected exceptions, caller/callee frames and targeted JIT transitions remain independent later contracts.
