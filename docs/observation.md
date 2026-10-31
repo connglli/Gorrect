@@ -8,11 +8,11 @@ Register classes before constructing the workload. Supported layouts are direct 
 
 Capture walks VM roots without requesting GC. Callbacks record relevant objects, incoming/outgoing edges, primitives, and root origins in preallocated storage, without JNI, locks, or allocation. Native metadata holds no workload references. Tags remain stable across captures; raw records preserve duplicates and unknown origins.
 
-Projection combines only identical repeated primitive/element records. Conflicts, missing primitives, unknown fields or non-null targets, duplicate identities, and unvisited root classes make it unavailable. Absent edges establish null only after a complete walk with valid metadata. Record limits and JVMTI errors produce partial captures that cannot pass.
+Projection combines only identical repeated primitive/element records. Conflicts, missing primitives, unknown fields or non-null targets, duplicate identities, and unvisited root classes make it unavailable. Absent edges establish null only after a complete walk with valid metadata; an observed `[J` array of length zero establishes empty contents without a values callback. Record limits and JVMTI errors produce partial captures that cannot pass.
 
 ## Identity
 
-Logical [object identity](./gir.md#identities-and-access) identifies one modeled allocation throughout its lifetime. Ordinary objects carry immutable `int` worker/site and `long` occurrence fields read during capture. Arrays use diagnostic bindings through weak JVMTI tags. History identity reads retrieve the published worker/site/occurrence cells through JNI without a Java registry or result allocation. A physical tag identifies an observed allocation within one target VM; it is neither an address nor a portable identity. Movement or materialization does not create a new logical allocation, and distinct observed allocations cannot share a logical identity. Copied diagnostic fields cannot establish the identity of a clone; clone is unsupported.
+Logical [object identity](./gir.md#identities-and-access) identifies one modeled allocation throughout its lifetime. Ordinary objects carry immutable `int` worker/site and `long` occurrence fields read during capture. Arrays use diagnostic bindings through weak JVMTI tags. History identity reads retrieve the published worker/site/occurrence cells through JNI without a Java registry or result allocation. A physical tag identifies an observed allocation within one target VM; it is neither an address nor a portable identity. Movement or materialization does not create a new logical allocation, and distinct observed allocations cannot share a logical identity. Copied diagnostic fields do not establish a new identity. Array clones receive fresh weak-tag bindings; object cloning remains unsupported.
 
 Captured class IDs describe registered classes; signatures select their layout mappings. The current registry permits one definition per signature, so same-named classes from distinct loaders are unsupported. Class identity, object identity, and identity hashes are separate; hash collisions would not establish aliases.
 
@@ -71,7 +71,7 @@ Class kinds are object, reference array, data array, root holder, soft wrapper, 
 | `REFERENCE` (1) | `a` referrer tag, `b` target tag, `c` JVMTI reference kind, `d` field/element index or -1, `e` referrer class tag. |
 | `PRIMITIVE_FIELD` (2) | `a` owner tag, `b` field index, `c` JVMTI primitive type, `d` value bits, `e` owner class tag. |
 | `ROOT` (3) | `a` target tag, `b` root kind, `c` thread ID, `d` frame depth, `e` slot, `f` method token, `g` location. Unavailable frame values use zero or -1. |
-| `ARRAY_VALUES` (4) | `a` tag, `b` count, `c` primitive element type. Records callback delivery even for an empty array. |
+| `ARRAY_VALUES` (4) | `a` tag, `b` count, `c` primitive element type. Records actual callback delivery, including empty arrays when supplied. |
 | `ARRAY_ELEMENT` (5) | `a` tag, `b` index, `c` primitive type, `d` value, `e` class tag. The prototype records long elements. |
 | `CLASS_VISIT` (6) | `a` registered class ID. Establishes that the class was visited before null static roots can be inferred. |
 

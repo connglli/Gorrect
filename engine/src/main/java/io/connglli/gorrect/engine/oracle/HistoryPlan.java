@@ -26,18 +26,20 @@ public final class HistoryPlan {
   private final Map<Integer, Long> visits = new HashMap<>();
   private ArrayDeque<Map<String, Integer>> scopes = new ArrayDeque<>();
   private long objects, slots;
+  private final Map<Integer, Shape> cloneShapes;
   private int worker, group, phase;
   private long round;
   private List<OracleResult.Checkpoint> workerCheckpoints;
 
-  private HistoryPlan(GirProgram program, OracleLimits limits) {
+  private HistoryPlan(GirProgram program, OracleLimits limits, Map<Integer, Shape> cloneShapes) {
     this.program = program;
     this.limits = limits;
+    this.cloneShapes = cloneShapes;
   }
 
   public static OracleResult plan(GirProgram program, OracleLimits limits) {
-    GirValidator.validate(program);
-    var plan = new HistoryPlan(program, limits);
+    var cloneShapes = GirValidator.arrayCloneShapes(program);
+    var plan = new HistoryPlan(program, limits, cloneShapes);
     new GraphMachine(program, limits); // Apply the same initial graph/wrapper bounds as execution.
     plan.objects =
         program.objects().size()
@@ -141,6 +143,12 @@ public final class HistoryPlan {
               throw new OracleLimitException("Conditional allocation bound exhausted");
             slots += shape(allocate.shape()).slots();
             scopes.peek().put(allocate.name(), allocate.id());
+          } else if (operation instanceof Instruction.Clone clone) {
+            var shape = cloneShapes.get(clone.id());
+            if (++objects > limits.objects() || shape.slots() > limits.slots() - slots)
+              throw new OracleLimitException("Conditional clone allocation bound exhausted");
+            slots += shape.slots();
+            scopes.peek().put(clone.name(), clone.id());
           } else if (operation instanceof Instruction.AllocateReference allocate) {
             if (++objects > limits.objects() || ++slots > limits.slots())
               throw new OracleLimitException("Conditional wrapper allocation bound exhausted");

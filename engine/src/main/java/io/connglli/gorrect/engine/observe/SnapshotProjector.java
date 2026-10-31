@@ -534,6 +534,8 @@ public final class SnapshotProjector {
                       : HeapSnapshot.ClassKind.DATA_ARRAY),
               "Array kind mismatch");
           require(
+              reference || type.signature().equals("[J"), "Long-array class signature mismatch");
+          require(
               record.d() == (reference ? shape.references() : shape.data()),
               "Array length mismatch");
           id = objectId(binding.worker(), binding.site(), binding.occurrence());
@@ -639,8 +641,12 @@ public final class SnapshotProjector {
                     "Reference-array index outside length");
           } else {
             var marker = arrayValues.get(tag);
+            // Some VMs omit the values callback for empty arrays. The observed [J owner and
+            // validated length already prove there are no elements; a present marker must agree.
             require(
-                marker != null && marker.b() == shape.data() && marker.c() == LONG,
+                marker == null
+                    ? shape.data() == 0
+                    : marker.b() == shape.data() && marker.c() == LONG,
                 "Missing or invalid primitive-array marker");
             for (int index = 0; index < shape.data(); index++) {
               var value = elements.get(new Slot(tag, index));

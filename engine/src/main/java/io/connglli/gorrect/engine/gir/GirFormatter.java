@@ -119,6 +119,7 @@ public final class GirFormatter {
   private static String operation(Instruction.Operation operation) {
     return switch (operation) {
       case Instruction.Allocate op -> "allocate " + op.name() + " " + op.shape();
+      case Instruction.Clone op -> "clone " + op.name() + " " + op.owner();
       case Instruction.AllocateReference op ->
           "allocate-ref " + op.name() + " " + op.shape() + " " + operand(op.value());
       case Instruction.ReadRoot op ->

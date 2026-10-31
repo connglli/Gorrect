@@ -33,6 +33,7 @@ public final class GirValidator {
   private boolean collectReferenceTypes;
   private final Map<Integer, Shape> referenceOwners = new HashMap<>();
   private final Map<Integer, Shape> referenceValues = new HashMap<>();
+  private final Map<Integer, Shape> cloneShapes = new HashMap<>();
 
   record ReferenceTypes(Map<Integer, Shape> owners, Map<Integer, Shape> values) {}
 
@@ -61,6 +62,16 @@ public final class GirValidator {
    */
   public static void validate(GirProgram program) {
     new GirValidator().validateProgram(program);
+  }
+
+  /**
+   * Validates every lexical block and returns each clone site's inferred array shape. Storage
+   * planning uses this immutable map without treating a source declaration as an executed clone.
+   */
+  public static Map<Integer, Shape> arrayCloneShapes(GirProgram program) {
+    var validator = new GirValidator();
+    validator.validateProgram(program);
+    return Map.copyOf(validator.cloneShapes);
   }
 
   static boolean isName(String name) {
@@ -224,6 +235,12 @@ public final class GirValidator {
       case Instruction.Allocate op -> {
         if (shape(op.shape()).wrapper()) fail("Wrapper types require allocate-ref");
         declare(op.name(), shape(op.shape()));
+      }
+      case Instruction.Clone op -> {
+        var source = binding(op.owner()).shape();
+        if (source == null || !source.array()) fail("clone requires an array handle");
+        declare(op.name(), source);
+        cloneShapes.put(op.id(), source);
       }
       case Instruction.AllocateReference op -> {
         var shape = shape(op.shape());

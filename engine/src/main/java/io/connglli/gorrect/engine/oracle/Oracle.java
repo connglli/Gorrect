@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
@@ -28,6 +29,9 @@ public final class Oracle {
    */
   public static OracleResult interpret(GirProgram program, OracleLimits limits) {
     GirValidator.validate(program);
+    var unsupported = CloneProgram.unsupported(program);
+    if (!unsupported.isEmpty())
+      throw new UnsupportedHistoryException(String.join("; ", unsupported));
     if (HistoryProgram.usesConcurrentHistory(program) || ReferenceProgram.usesReferences(program))
       throw new GirException("Conditional references require a recorded history");
     var machine = new GraphMachine(program, limits);

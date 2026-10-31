@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
@@ -133,6 +134,8 @@ public final class HistoryOracle {
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
   static void validateProgram(GirProgram program) {
     GirValidator.validate(program);
+    var clones = CloneProgram.unsupported(program);
+    if (!clones.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", clones));
     var support = ReferenceProgram.firstClassGaps(program);
     if (!support.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", support));
   }

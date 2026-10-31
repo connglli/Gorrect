@@ -76,6 +76,7 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | Instruction | Effect |
 | --- | --- |
 | `allocate h N;` | Allocate a zero-filled object and bind handle `h`. |
+| `clone copy original;` | Bind a fresh shallow array copy, inferring its nominal shape from `original`. |
 | `allocate-ref r W value;` | Construct a fresh no-queue wrapper of type `W` around the current reference operand. |
 | `read-root h N root;` | Read a root into a handle declared with shape `N`. |
 | `write-root root h;` | Set an existing root to a handle's target. |
@@ -106,6 +107,8 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | `barrier;` | Finish a worker phase and wait for every peer before the next phase. |
 
 Reference operands are live handles or `null`; scalar operands are live scalar bindings or signed 64-bit literals. Reference slots and named roots can hold any target shape. A non-null reference read asserts the declared destination shape exactly. Field and array access requires a live, non-null owner and an index within the corresponding reference or data count. Static validation checks all blocks, including zero-iteration loops, for names, types, slot bounds, and labels.
+
+`clone` uses real Java array cloning in strong sequential programs under controlled observation. Object cloning, reference/contended histories, parallel workers, and natural observation remain unsupported.
 
 Root, strong-reference, and data reads/writes are plain unless their instruction selects volatile access: for example, `read-volatile-root h N root;` and `write-volatile-data owner 0 value;`. Each instruction selects its access mode independently, including when modes share a location. Compare-set and exchange have volatile read/write effects; failed compare-set has read effects and never fails spuriously.
 

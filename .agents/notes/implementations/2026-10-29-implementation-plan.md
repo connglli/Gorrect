@@ -163,6 +163,8 @@ Complete when long allocate/release runs stay bounded by live state rather than 
 
 ## 18. Add layouts, bulk operations, and identity observations
 
+Status: in progress. [Strong sequential array cloning](./completed-2026-10-31-stage18a.md) implements the first slice. Object cloning, copying ranges, typed/dynamic arrays and further identity/layout mechanisms remain separate work.
+
 Goal: reach VM copying/barrier paths and realistic layouts.
 
 Add dynamically sized and typed arrays, mixed primitive payloads, inheritance/interfaces, declared final/volatile fields, range operations, real System.arraycopy with overlap, and real array/object clone. Separate logical allocation identity from copied diagnostic fields and class-definition identity. Add alias equality and stable opaque identity-hash observations; collisions remain legal.

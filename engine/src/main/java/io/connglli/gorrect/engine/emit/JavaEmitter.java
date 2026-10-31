@@ -425,6 +425,7 @@ public final class JavaEmitter {
             instruction -> {
               switch (instruction) {
                 case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
+                case Instruction.Clone op -> line("private static long a" + op.id() + ";");
                 case Instruction.AllocateReference op ->
                     line("private static long a" + op.id() + ";");
                 case Instruction.WriteReference op -> {
@@ -706,6 +707,14 @@ public final class JavaEmitter {
             op.value() instanceof Operand.Name value ? binding(value.name()).name() : null;
         reference(op.id(), "CREATE", "0L", name, target);
         return;
+      }
+      case Instruction.Clone op -> {
+        var original = binding(op.owner());
+        var shape = original.shape();
+        String name = declare(op.name(), shape, op.id());
+        line(types.get(shape.name()) + " " + name + " = " + original.name() + ".clone();");
+        line("++a" + op.id() + ";");
+        bindArray(name, shape, op.id(), "a" + op.id());
       }
       case Instruction.Allocate op -> {
         var shape = shapes.get(op.shape());
