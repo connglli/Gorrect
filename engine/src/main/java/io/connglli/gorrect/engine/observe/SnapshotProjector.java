@@ -30,28 +30,50 @@ public final class SnapshotProjector {
   private static final long INT = 73, LONG = 74;
 
   /**
-   * Capture projection and its coverage diagnostics. Empty graph means unusable coverage rather
-   * than an observed empty heap. Binding profiles additionally require validated physical origins
-   * for every non-null binding; named-root capture alone supplies no stack coverage.
+   * Capture projection and its coverage diagnostics. Graph is present only for complete requested
+   * coverage; covered retains independently usable named roots and mapped locals. Neither an empty
+   * optional nor a missing local is an observed null. Non-null required bindings need physical
+   * origins; named-root capture alone supplies no stack coverage.
    */
-  public record Projection(Optional<Graph> graph, List<String> problems) {
+  public record Projection(Optional<Graph> graph, List<String> problems, Optional<Graph> covered) {
     public Projection {
       problems = List.copyOf(problems);
     }
 
+    public Projection(Optional<Graph> graph, List<String> problems) {
+      this(graph, problems, graph);
+    }
+
     /**
-     * Compares deterministic strong-reference obligations when a usable graph is present. Missing
-     * projection or incomplete binding coverage yields INCONCLUSIVE; neither case is treated as a
-     * missing-object mismatch. Invalid expected strong graphs raise IllegalArgumentException.
+     * Compares covered deterministic obligations. Definite covered mismatches remain VIOLATED
+     * beside a coverage gap; otherwise incomplete coverage is INCONCLUSIVE and cannot pass. Invalid
+     * expected strong graphs raise IllegalArgumentException.
      */
     public ExactVerifier.Result verify(Graph expected) {
-      if (graph.isEmpty())
+      if (covered.isEmpty())
         return new ExactVerifier.Result(ExactVerifier.Verdict.INCONCLUSIVE, problems);
-      if (!graph.orElseThrow().handles().keySet().equals(expected.handles().keySet()))
-        return new ExactVerifier.Result(
-            ExactVerifier.Verdict.INCONCLUSIVE,
-            List.of("Stack roots are not mapped to GIR bindings by this profile"));
-      return ExactVerifier.verify(expected, graph.orElseThrow(), true);
+      var observed = covered.orElseThrow();
+      if (graph.isPresent() && observed.handles().keySet().equals(expected.handles().keySet()))
+        return ExactVerifier.verify(expected, observed, true);
+
+      // Covered roots can refute the model even when another local has no usable origin.
+      var handles = new HashMap<Integer, Value.Reference>();
+      for (var entry : expected.handles().entrySet())
+        if (observed.handles().containsKey(entry.getKey()))
+          handles.put(entry.getKey(), entry.getValue());
+      var partial = new Graph(expected.objects(), expected.roots(), handles);
+      var observedHandles = new HashMap<Integer, Value.Reference>();
+      for (int id : handles.keySet()) observedHandles.put(id, observed.handles().get(id));
+      var result =
+          ExactVerifier.verify(
+              partial, new Graph(observed.objects(), observed.roots(), observedHandles), true);
+      var diagnostics = new ArrayList<>(problems);
+      diagnostics.addAll(result.differences());
+      if (result.verdict() == ExactVerifier.Verdict.VIOLATED)
+        return new ExactVerifier.Result(ExactVerifier.Verdict.VIOLATED, diagnostics);
+      if (diagnostics.isEmpty())
+        diagnostics.add("Stack roots are not mapped to GIR bindings by this profile");
+      return new ExactVerifier.Result(ExactVerifier.Verdict.INCONCLUSIVE, diagnostics);
     }
   }
 
@@ -114,6 +136,38 @@ public final class SnapshotProjector {
     }
   }
 
+  /**
+   * Validates lexical presence declarations while projecting only required natural locals. A
+   * missing required origin leaves covered named roots and other mapped locals available to refute.
+   */
+  public static Projection projectCandidates(
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      BindingEvidence candidates,
+      Set<Integer> required) {
+    Graph graph;
+    var decoder = new Decoder(snapshot, layout);
+    try {
+      graph = decoder.decode();
+    } catch (IllegalArgumentException exception) {
+      return new Projection(Optional.empty(), List.of(exception.getMessage()));
+    }
+    try {
+      require(
+          candidates.worker() == 0 && candidates.activation() == 1,
+          "Unsupported natural binding activation");
+      var problems = new ArrayList<String>();
+      var handles = decoder.bindings(candidates, required, problems);
+      var covered = new Graph(graph.objects(), graph.roots(), handles);
+      return new Projection(
+          problems.isEmpty() ? Optional.of(covered) : Optional.empty(),
+          problems,
+          Optional.of(covered));
+    } catch (IllegalArgumentException exception) {
+      return new Projection(Optional.empty(), List.of(exception.getMessage()), Optional.of(graph));
+    }
+  }
+
   private static final class Decoder {
     private final HeapSnapshot snapshot;
     private final ObservationLayout layout;
@@ -145,18 +199,38 @@ public final class SnapshotProjector {
     }
 
     private Map<Integer, Value.Reference> bindings(BindingEvidence evidence) {
+      return bindings(evidence, null, null);
+    }
+
+    private Map<Integer, Value.Reference> bindings(
+        BindingEvidence evidence, Set<Integer> required, List<String> problems) {
       require(
           evidence.run() == snapshot.run() && evidence.checkpoint() == snapshot.checkpoint(),
           "Binding capture identity mismatch");
       require(
           evidence.worker() != 0 || evidence.activation() == 1,
           "Unsupported caller binding activation");
-      if (evidence.bindings().isEmpty()) return Map.of();
+      if (evidence.bindings().isEmpty()) {
+        require(required == null || required.isEmpty(), "Missing required binding declaration");
+        return Map.of();
+      }
       var declarations = new HashMap<Integer, ObservationLayout.LocalBinding>();
       for (var binding : layout.bindings())
         require(
             declarations.putIfAbsent(binding.declaration(), binding) == null,
             "Duplicate binding layout");
+      var available = new HashSet<Integer>();
+      for (var binding : evidence.bindings()) {
+        var declaration = declarations.get(binding.declaration());
+        require(
+            declaration != null && declaration.worker() == evidence.worker(),
+            "Unknown binding declaration");
+        require(available.add(binding.declaration()), "Duplicate binding declaration");
+      }
+      if (required != null) {
+        require(available.containsAll(required), "Missing required binding declaration");
+        if (required.isEmpty()) return Map.of();
+      }
       var methods = new HashMap<Long, HeapSnapshot.MethodInfo>();
       for (var method : snapshot.methods()) {
         require(methods.putIfAbsent(method.token(), method) == null, "Duplicate method token");
@@ -174,33 +248,42 @@ public final class SnapshotProjector {
       var origins = bindingOrigins(evidence, methods);
       var result = new HashMap<Integer, Value.Reference>();
       for (var binding : evidence.bindings()) {
+        if (required != null && !required.contains(binding.declaration())) continue;
         var declaration = declarations.get(binding.declaration());
-        require(
-            declaration != null && declaration.worker() == evidence.worker(),
-            "Unknown binding declaration");
-        var key =
-            new LocalName(
-                declaration.method(),
-                declaration.descriptor(),
-                declaration.variable(),
-                declaration.type());
-        var matches = origins.getOrDefault(key, Set.of());
-        if (!binding.present()) {
-          require(matches.isEmpty(), "Nullness conflicts with a physical binding root");
-          result.put(binding.declaration(), Value.Reference.NULL);
-          continue;
+        try {
+          result.put(binding.declaration(), binding(binding, declaration, origins));
+        } catch (IllegalArgumentException exception) {
+          if (problems == null) throw exception;
+          problems.add(exception.getMessage());
         }
-        require(
-            (snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0,
-            "Local-variable metadata is unavailable");
-        require(
-            matches.size() == 1,
-            "Missing or ambiguous physical root for binding " + binding.declaration());
-        ObjectId id = identities.get(matches.iterator().next().a());
-        require(id != null, "Unmapped binding target");
-        result.put(binding.declaration(), Value.Reference.strong(id));
       }
       return result;
+    }
+
+    private Value.Reference binding(
+        BindingEvidence.Binding binding,
+        ObservationLayout.LocalBinding declaration,
+        Map<LocalName, Set<HeapSnapshot.Record>> origins) {
+      var key =
+          new LocalName(
+              declaration.method(),
+              declaration.descriptor(),
+              declaration.variable(),
+              declaration.type());
+      var matches = origins.getOrDefault(key, Set.of());
+      if (!binding.present()) {
+        require(matches.isEmpty(), "Nullness conflicts with a physical binding root");
+        return Value.Reference.NULL;
+      }
+      require(
+          (snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0,
+          "Local-variable metadata is unavailable");
+      require(
+          matches.size() == 1,
+          "Missing or ambiguous physical root for binding " + binding.declaration());
+      ObjectId id = identities.get(matches.iterator().next().a());
+      require(id != null, "Unmapped binding target");
+      return Value.Reference.strong(id);
     }
 
     private Map<LocalName, Set<HeapSnapshot.Record>> bindingOrigins(

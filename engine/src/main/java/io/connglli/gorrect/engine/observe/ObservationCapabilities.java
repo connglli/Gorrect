@@ -59,14 +59,6 @@ public final class ObservationCapabilities {
                       instruction instanceof Instruction.Allocate allocation
                           && arrays.contains(allocation.shape())))
         reasons.add("Natural liveness excludes diagnostic array identity binding");
-      if (program
-          .instructions()
-          .anyMatch(
-              instruction ->
-                  instruction instanceof Instruction.IfPresent
-                      || instruction instanceof Instruction.IfNonzero
-                      || instruction instanceof Instruction.Acquire))
-        reasons.add("Natural liveness requires unconditional control flow");
     }
     return reasons;
   }

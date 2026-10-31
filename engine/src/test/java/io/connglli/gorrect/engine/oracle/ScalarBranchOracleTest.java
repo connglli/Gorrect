@@ -317,12 +317,12 @@ class ScalarBranchOracleTest {
   }
 
   @Test
-  void retainsTheNaturalConditionalGuard() {
+  void requiresAnExactRouteBeforeAnalyzingNaturalConditions() {
     var program = GirParser.parse("gir 1; program { if-nonzero 0 {} }");
     assertTrue(
-        ObservationCapabilities.unsupported(program, ObservationProfile.NATURAL_ROOTS)
-            .contains("Natural liveness requires unconditional control flow"));
+        ObservationCapabilities.unsupported(program, ObservationProfile.NATURAL_ROOTS).isEmpty());
     assertThrows(UnsupportedHistoryException.class, () -> NaturalLiveness.analyze(program));
+    assertEquals(Set.of(), NaturalLiveness.analyze(program, Oracle.interpret(program)).at(0, 1));
   }
 
   private static HistoryOracle.Observation observed(Graph graph) {

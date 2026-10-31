@@ -7,7 +7,9 @@ import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.oracle.OracleLimitException;
 import io.connglli.gorrect.engine.oracle.OracleLimits;
+import io.connglli.gorrect.engine.oracle.OracleResult;
 import io.connglli.gorrect.engine.oracle.UnsupportedHistoryException;
+import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -17,9 +19,9 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * Future semantic uses for deterministic main-thread checkpoints. Analysis reads syntax only; no
- * expected identity or payload enters emission. Conditional/reference histories need their own
- * path-sensitive reachability analysis and are rejected by the profile's capability checks.
+ * Future semantic uses for deterministic main-thread checkpoints. Exact-oracle branch markers
+ * select the route; they supply no physical roots. Reference histories need a separate protection
+ * proof and remain rejected by the profile's capability checks.
  */
 public final class NaturalLiveness {
   private record Point(int operation, long visit) {}
@@ -30,6 +32,8 @@ public final class NaturalLiveness {
   private final Map<Integer, Long> visits = new HashMap<>();
   private final ArrayDeque<Map<String, Integer>> scopes = new ArrayDeque<>();
   private final List<Step> steps = new ArrayList<>();
+  private final ArrayDeque<ExecutionTrace.Event> branches = new ArrayDeque<>();
+  private boolean exactPath;
   private long work;
 
   private NaturalLiveness() {}
@@ -38,21 +42,41 @@ public final class NaturalLiveness {
   public static NaturalLiveness analyze(GirProgram program) {
     var analysis = new NaturalLiveness();
     analysis.block(program.body());
+    return analysis.finish();
+  }
+
+  /**
+   * Follows the exact oracle's complete main route. Callers must validate actual scalar/control
+   * correspondence before using these requirements to omit local comparisons.
+   */
+  public static NaturalLiveness analyze(GirProgram program, OracleResult oracle) {
+    var analysis = new NaturalLiveness();
+    analysis.exactPath = true;
+    oracle.events().stream()
+        .filter(event -> event.worker() == 0 && event.kind() == ExecutionTrace.Kind.BRANCH)
+        .forEach(analysis.branches::addLast);
+    analysis.block(program.body());
+    if (!analysis.branches.isEmpty())
+      throw new IllegalArgumentException("Unused exact-oracle branch markers");
+    return analysis.finish();
+  }
+
+  private NaturalLiveness finish() {
     var used = new HashSet<Integer>();
     long cells = 0;
-    for (int i = analysis.steps.size() - 1; i >= 0; i--) {
-      var step = analysis.steps.get(i);
+    for (int i = steps.size() - 1; i >= 0; i--) {
+      var step = steps.get(i);
       if (step.checkpoint() != null) {
         cells += 1L + used.size();
         if (cells > OracleLimits.DEFAULT.snapshotCells())
           throw new OracleLimitException("Natural-liveness checkpoint storage exhausted");
-        analysis.live.put(step.checkpoint(), Set.copyOf(used));
+        live.put(step.checkpoint(), Set.copyOf(used));
       }
       used.remove(step.definition());
       used.addAll(step.uses());
     }
-    analysis.steps.clear();
-    return analysis;
+    steps.clear();
+    return this;
   }
 
   public Set<Integer> at(int operation, long visit) {
@@ -69,7 +93,7 @@ public final class NaturalLiveness {
     return new Graph(graph.objects(), graph.roots(), handles);
   }
 
-  /** Main-thread checkpoint visits requiring this binding; used to guard emitted presence reads. */
+  /** Main-thread visits requiring this binding under the legacy unconditional selection rule. */
   public List<Long> visits(int operation, int binding) {
     return live.entrySet().stream()
         .filter(
@@ -96,12 +120,26 @@ public final class NaturalLiveness {
         }
       } else if (instruction instanceof Instruction.Parallel) {
         // Workers cannot capture caller bindings; their semantic reads have independent traces.
+      } else if (instruction instanceof Instruction.IfPresent present && exactPath) {
+        var used = new HashSet<Integer>();
+        use(present.name(), used);
+        steps.add(new Step(0, used, null));
+        if (selected(present.id())) block(present.body());
+      } else if (instruction instanceof Instruction.IfNonzero branch && exactPath) {
+        block(selected(branch.id()) ? branch.thenBody() : branch.elseBody());
       } else if (instruction instanceof Instruction.Operation op) operation(op);
       else
         throw new UnsupportedHistoryException(
             "Natural liveness requires unconditional control flow");
     }
     scopes.pop();
+  }
+
+  private boolean selected(int operation) {
+    var event = branches.pollFirst();
+    if (event == null || event.operation() != operation || event.value() < 0 || event.value() > 1)
+      throw new IllegalArgumentException("Exact-oracle branch route is inconsistent");
+    return event.value() != 0;
   }
 
   private void operation(Instruction.Operation operation) {

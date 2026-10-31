@@ -1,0 +1,19 @@
+gir 1;
+shape N object 0 1;
+object 1 N [] [0];
+root main = 1;
+program {
+  repeat 2 {
+    read-root owner N main;
+    read-data flag owner 0;
+    if-nonzero flag {
+      collect;
+      nonzero: checkpoint;
+      write-data owner 0 0;
+    } else {
+      collect;
+      zero: checkpoint;
+      write-data owner 0 1;
+    }
+  }
+}

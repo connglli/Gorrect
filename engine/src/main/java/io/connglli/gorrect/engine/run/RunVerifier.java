@@ -13,6 +13,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
+import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.observe.NaturalLiveness;
 import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
@@ -41,6 +42,7 @@ import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.HashSet;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
 import java.util.stream.Collectors;
@@ -88,13 +90,35 @@ final class RunVerifier {
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      boolean lexicalNatural = !observation.controlled() && layout.lexicalCandidates();
+      if (observation.controlled() && layout.lexicalCandidates())
+        throw new IOException("Lexical candidate selection requires natural observation");
+      if (!observation.controlled()
+          && !layout.lexicalCandidates()
+          && program
+              .instructions()
+              .anyMatch(
+                  instruction ->
+                      instruction instanceof Instruction.IfPresent
+                          || instruction instanceof Instruction.IfNonzero))
+        throw new IOException("Conditional natural capture requires lexical candidate selection");
       var problems = new ArrayList<String>();
       var unmet = new ArrayList<String>();
       var captures = new CaptureReader(directory, run, profile, layout);
       unmet.addAll(VmDriver.requirements(profile, target(directory)));
 
-      var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
-      if (!trace.complete()) throw new IOException("Execution trace is incomplete");
+      ExecutionTrace trace;
+      try {
+        trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
+      } catch (IOException | RuntimeException failure) {
+        if (!lexicalNatural) throw failure;
+        captures.error("Scalar trace extraction failed: " + failure);
+        trace = new ExecutionTrace(run, false, List.of());
+      }
+      if (!trace.complete()) {
+        if (!lexicalNatural) throw new IOException("Execution trace is incomplete");
+        captures.error("Execution trace is incomplete");
+      }
       boolean workerEvidenceFailed = false;
       try {
         StressVerifier.checkEnvelope(directory, run, program, trace);
@@ -192,28 +216,42 @@ final class RunVerifier {
         return report;
       }
 
-      if (!workerEvidenceFailed)
+      var expectedTrace = new ExecutionTrace(run, true, oracle.events());
+      boolean violated = !prefixMatches(trace, expectedTrace);
+      boolean matchedPath = trace.complete() && !violated;
+      var controlCoverage = lexicalNatural ? naturalControls(directory, run, oracle) : null;
+      if (controlCoverage != null && !controlCoverage.complete()) {
+        captures.error(controlCoverage.problem());
+        matchedPath = false;
+      }
+      boolean trustedCoverage = trace.complete() && (!lexicalNatural || matchedPath);
+      if (trustedCoverage && !workerEvidenceFailed)
         workerEvidenceFailed =
             !stressCoverage(directory, run, program, oracle, profile, unmet, problems);
       var completion =
-          workerEvidenceFailed
-              ? CollectionVerifier.withoutExecution(directory, run, profile, target(directory))
-              : CollectionVerifier.verify(
-                  directory, run, program, oracle, profile, target(directory));
+          trustedCoverage && !workerEvidenceFailed
+              ? CollectionVerifier.verify(
+                  directory, run, program, oracle, profile, target(directory))
+              : CollectionVerifier.withoutExecution(directory, run, profile, target(directory));
       for (String requirement : completion.unmet())
         if (!unmet.contains(requirement)) unmet.add(requirement);
       problems.addAll(completion.problems());
 
-      boolean violated =
-          !trace.byWorker().equals(new ExecutionTrace(run, true, oracle.events()).byWorker());
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
       var verified = new HashSet<String>();
       if (!violated) verified.addAll(exercised);
 
-      controls(directory, run, oracle, program, trace, false);
-      boolean inconclusive = workerEvidenceFailed;
-      var natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
+      if (!lexicalNatural) controls(directory, run, oracle, program, trace, false);
+      boolean inconclusive = workerEvidenceFailed || !trace.complete();
+      if (controlCoverage != null && !controlCoverage.complete()) inconclusive = true;
+      var natural =
+          observation.controlled()
+              ? null
+              : lexicalNatural
+                  ? NaturalLiveness.analyze(program, oracle)
+                  : NaturalLiveness.analyze(program);
       for (int i = 0; i <= oracle.checkpoints().size(); i++) {
+        if (controlCoverage != null && i >= controlCoverage.captures()) break;
         var visit =
             i < oracle.checkpoints().size()
                 ? oracle.checkpoints().get(i)
@@ -221,9 +259,35 @@ final class RunVerifier {
         var expected =
             natural == null
                 ? visit.graph()
-                : natural.obligations(visit.graph(), visit.operation(), visit.occurrence());
-        var projection = captures.read(i + 1L, expected.handles().keySet());
-        if (projection.graph().isPresent()) exercised.add("named-roots");
+                : lexicalNatural && !matchedPath
+                    ? new Graph(visit.graph().objects(), visit.graph().roots(), Map.of())
+                    : natural.obligations(visit.graph(), visit.operation(), visit.occurrence());
+        if (lexicalNatural && !matchedPath && !visit.graph().handles().isEmpty()) {
+          inconclusive = true;
+          problems.add(
+              "Checkpoint "
+                  + (i + 1)
+                  + ": natural local obligations require complete scalar/control correspondence");
+        }
+        SnapshotProjector.Projection projection;
+        if (lexicalNatural) {
+          var capture =
+              captures.natural(
+                  i + 1L, visit.graph().handles().keySet(), expected.handles().keySet());
+          projection = capture.projection();
+          for (var presence : capture.presence().entrySet())
+            if (presence.getValue()
+                != (visit.graph().handles().get(presence.getKey()).target() != null)) {
+              violated = true;
+              problems.add(
+                  "Checkpoint "
+                      + (i + 1)
+                      + ": binding "
+                      + presence.getKey()
+                      + " nullness differs from the modeled value");
+            }
+        } else projection = captures.read(i + 1L, expected.handles().keySet());
+        if (projection.covered().isPresent()) exercised.add("named-roots");
         var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
         if (result.verdict() == ExactVerifier.Verdict.VIOLATED) violated = true;
@@ -283,6 +347,68 @@ final class RunVerifier {
     }
   }
 
+  private record NaturalCapture(
+      SnapshotProjector.Projection projection, Map<Integer, Boolean> presence) {}
+
+  private record ControlCoverage(int captures, boolean complete, String problem) {}
+
+  /** A bad suffix cannot revoke an earlier capture's independently checked site identity. */
+  private static ControlCoverage naturalControls(Path directory, long run, OracleResult oracle) {
+    int trusted = 0;
+    try {
+      var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
+      if (JsonFiles.number(JsonFiles.required(transcript, "version")) != 1
+          || JsonFiles.number(JsonFiles.required(transcript, "run")) != run)
+        throw new IOException("Control transcript identity mismatch");
+      var messages = JsonFiles.required(transcript, "messages").getAsJsonArray();
+      if (messages.isEmpty()) throw new IOException("Control transcript omits HELLO");
+      var hello = JsonFiles.GSON.fromJson(messages.get(0), ControlMessage.class);
+      if (hello == null
+          || hello.run() != run
+          || hello.kind() != ControlMessage.Kind.HELLO
+          || hello.sequence() != 0) throw new IOException("Control transcript HELLO mismatch");
+      var visits = new CheckpointPlan(oracle).visits();
+      for (int index = 0; index < visits.size(); index++) {
+        if (index + 1 >= messages.size())
+          throw new IOException("Control checkpoint suffix is incomplete");
+        var message = JsonFiles.GSON.fromJson(messages.get(index + 1), ControlMessage.class);
+        var visit = visits.get(index);
+        if (message == null
+            || message.run() != run
+            || message.kind() != ControlMessage.Kind.CHECKPOINT
+            || message.sequence() != index + 1L
+            || message.operation() != visit.operation()
+            || message.occurrence() != visit.occurrence())
+          throw new IOException("Control checkpoint identity differs from the exact oracle");
+        trusted++;
+      }
+      if (messages.size() != visits.size() + 2)
+        throw new IOException("Control completion suffix is incomplete");
+      var complete =
+          JsonFiles.GSON.fromJson(messages.get(messages.size() - 1), ControlMessage.class);
+      if (complete == null
+          || complete.run() != run
+          || complete.kind() != ControlMessage.Kind.COMPLETE
+          || complete.sequence() != visits.size())
+        throw new IOException("Control completion identity mismatch");
+      return new ControlCoverage(trusted, true, "");
+    } catch (IOException | RuntimeException failure) {
+      return new ControlCoverage(
+          trusted, false, "Control correspondence extraction failed: " + failure);
+    }
+  }
+
+  private static boolean prefixMatches(ExecutionTrace actual, ExecutionTrace expected) {
+    var wanted = expected.byWorker();
+    if (actual.complete()) return actual.byWorker().equals(wanted);
+    for (var worker : actual.byWorker().entrySet()) {
+      var events = wanted.getOrDefault(worker.getKey(), List.of());
+      if (worker.getValue().size() > events.size()
+          || !worker.getValue().equals(events.subList(0, worker.getValue().size()))) return false;
+    }
+    return true;
+  }
+
   /** Loads independent captures without letting a later gap erase an earlier refutation. */
   private static final class CaptureReader {
     private final Path directory;
@@ -321,6 +447,46 @@ final class RunVerifier {
         errors.add(problem);
         return new SnapshotProjector.Projection(Optional.empty(), List.of(problem));
       }
+    }
+
+    NaturalCapture natural(long sequence, Set<Integer> candidates, Set<Integer> required) {
+      HeapSnapshot capture = null;
+      try {
+        capture = snapshot(directory, run, sequence);
+        compilationCoverage(capture, profile, unmet);
+        if (Files.exists(directory.resolve("snapshots/" + sequence + ".gcut")))
+          throw new IOException("Unexpected coordinated capture envelope");
+        var evidence =
+            BindingEvidence.read(
+                directory.resolve("snapshots/" + sequence + ".gbind"), run, sequence);
+        if (evidence.thread() != Long.parseLong(target(directory).getProperty("main.thread"))
+            || evidence.worker() != 0
+            || evidence.activation() != 1)
+          throw new IOException("Binding thread/activation mismatch");
+        var presence =
+            evidence.bindings().stream()
+                .collect(
+                    Collectors.toMap(
+                        BindingEvidence.Binding::declaration, BindingEvidence.Binding::present));
+        if (!presence.keySet().equals(candidates))
+          throw new IOException("Incomplete lexical candidate declaration coverage");
+        if (!required.isEmpty()) exercised.add("local-bindings");
+        return new NaturalCapture(
+            SnapshotProjector.projectCandidates(capture, layout, evidence, required), presence);
+      } catch (IOException | RuntimeException failure) {
+        String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
+        error(problem);
+        var named =
+            capture == null
+                ? Optional.<Graph>empty()
+                : SnapshotProjector.project(capture, layout).graph();
+        return new NaturalCapture(
+            new SnapshotProjector.Projection(Optional.empty(), List.of(problem), named), Map.of());
+      }
+    }
+
+    void error(String problem) {
+      errors.add(problem);
     }
 
     boolean failed() {

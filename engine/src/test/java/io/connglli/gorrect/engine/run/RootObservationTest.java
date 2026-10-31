@@ -58,8 +58,8 @@ class RootObservationTest {
     long token = manifest.get("run").getAsLong();
     var first = BindingEvidence.read(run.resolve("snapshots/1.gbind"), token, 1);
     var second = BindingEvidence.read(run.resolve("snapshots/2.gbind"), token, 2);
-    assertEquals(observation.equals("roots-natural") ? 2 : 3, first.bindings().size());
-    assertEquals(observation.equals("roots-natural") ? 0 : 3, second.bindings().size());
+    assertEquals(3, first.bindings().size());
+    assertEquals(3, second.bindings().size());
     assertTrue(first.bindings().stream().anyMatch(binding -> !binding.present()));
     String source = Files.readString(run.resolve("generated/Case.java"));
     assertEquals(
@@ -206,7 +206,7 @@ class RootObservationTest {
     long token = JsonFiles.read(run.resolve("manifest.json")).get("run").getAsLong();
     for (int sequence = 1; sequence <= 3; sequence++)
       assertEquals(
-          sequence < 3 ? 1 : 0,
+          1,
           BindingEvidence.read(run.resolve("snapshots/" + sequence + ".gbind"), token, sequence)
               .bindings()
               .size());

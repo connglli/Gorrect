@@ -16,6 +16,7 @@ import java.util.ArrayList;
 import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.ValueSource;
@@ -95,6 +96,43 @@ class BindingProjectionTest {
             .verdict());
   }
 
+  @Test
+  void unusedLexicalCandidateIsNeitherANullValueNorAPhysicalRootObligation() {
+    var projection = SnapshotProjector.projectCandidates(snapshot(), LAYOUT, PRESENT, Set.of());
+    var expected = expected(Value.Reference.NULL);
+    expected = new Graph(expected.objects(), expected.roots(), Map.of());
+    assertEquals(Map.of(), projection.graph().orElseThrow().handles());
+    assertEquals(ExactVerifier.Verdict.SATISFIED, projection.verify(expected).verdict());
+  }
+
+  @Test
+  void missingRequiredLocalCannotHideAnIndependentNamedRootRefutation() {
+    var raw = snapshot();
+    var expected = expected(Value.Reference.strong(new ObjectId(0, 7, 1)));
+    expected =
+        new Graph(
+            expected.objects(), Map.of("main", expected.handles().get(7)), expected.handles());
+    var projection = SnapshotProjector.projectCandidates(raw, LAYOUT, PRESENT, Set.of(7));
+    assertEquals(true, projection.graph().isEmpty());
+    assertEquals(ExactVerifier.Verdict.VIOLATED, projection.verify(expected).verdict());
+  }
+
+  @Test
+  void requiredCandidateStillNeedsTheActualTargetAndExplicitNullness() {
+    var expected = expected(Value.Reference.strong(new ObjectId(0, 7, 1)));
+    assertEquals(
+        ExactVerifier.Verdict.INCONCLUSIVE,
+        SnapshotProjector.projectCandidates(snapshot(), LAYOUT, PRESENT, Set.of(7))
+            .verify(expected)
+            .verdict());
+    assertEquals(
+        ExactVerifier.Verdict.VIOLATED,
+        SnapshotProjector.projectCandidates(
+                snapshot(root(200, 11, 2, 901, 20)), LAYOUT, PRESENT, Set.of(7))
+            .verify(expected)
+            .verdict());
+  }
+
   @ParameterizedTest
   @ValueSource(strings = {"complete", "missing", "thread", "slot", "activation", "wrong-target"})
   void projectsCallerAndWorkerFromTheirOwnPhysicalFrames(String damage) {
@@ -166,6 +204,16 @@ class BindingProjectionTest {
         SnapshotProjector.projectParticipants(raw, layout, List.of(PRESENT, worker))
             .verify(expected)
             .verdict());
+  }
+
+  @Test
+  void emptyCandidateEvidenceCannotClaimCompleteRequiredCoverage() {
+    var empty = new BindingEvidence(1, 1, 11, 0, 1, List.of());
+    assertEquals(
+        true,
+        SnapshotProjector.projectCandidates(snapshot(), LAYOUT, empty, Set.of(7))
+            .graph()
+            .isEmpty());
   }
 
   private static Graph expected(Value.Reference binding) {

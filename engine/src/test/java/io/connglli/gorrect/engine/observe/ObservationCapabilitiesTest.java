@@ -62,7 +62,7 @@ class ObservationCapabilitiesTest {
   }
 
   @Test
-  void doesNotAdvertiseUnsupportedMemoryOrConditionalCombinations() {
+  void permitsExactConditionalsWithoutEnablingNaturalHistories() {
     var history =
         GirParser.parse(
             "gir 1; shape N object 0 0; root r = null; program { read-volatile-root n N r; }");
@@ -72,7 +72,7 @@ class ObservationCapabilitiesTest {
         GirParser.parse(
             "gir 1; shape N object 0 0; root r = null; program { read-root n N r; if-present n {}"
                 + " }");
-    assertFalse(
+    assertTrue(
         ObservationCapabilities.unsupported(conditional, ObservationProfile.NATURAL_ROOTS)
             .isEmpty());
   }

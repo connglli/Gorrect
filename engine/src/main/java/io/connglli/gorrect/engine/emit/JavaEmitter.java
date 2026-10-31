@@ -12,7 +12,6 @@ import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
-import io.connglli.gorrect.engine.observe.NaturalLiveness;
 import io.connglli.gorrect.engine.observe.ObservationCapabilities;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
@@ -50,7 +49,6 @@ public final class JavaEmitter {
   private final List<Instruction.Worker> workers = new ArrayList<>();
   private final List<ObservationLayout.LocalBinding> bindings = new ArrayList<>();
   private final ObservationProfile observation;
-  private final NaturalLiveness natural;
   private int worker;
   private final boolean references;
   private final boolean concurrent;
@@ -58,7 +56,6 @@ public final class JavaEmitter {
   private JavaEmitter(GirProgram program, ObservationProfile observation) {
     this.program = program;
     this.observation = observation;
-    natural = observation.controlled() ? null : NaturalLiveness.analyze(program);
     references = ReferenceProgram.usesReferences(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
   }
@@ -199,7 +196,10 @@ public final class JavaEmitter {
             program.shapes().stream().filter(shape -> shape.kind() != Shape.Kind.OBJECT).toList(),
             new ObservationLayout.Roots("LCase$Roots;", rootFields),
             referenceLayouts,
-            bindings));
+            bindings,
+            observation.controlled()
+                ? ObservationLayout.REQUIRED
+                : ObservationLayout.LEXICAL_CANDIDATES));
   }
 
   private void referenceClasses() {
@@ -345,9 +345,6 @@ public final class JavaEmitter {
             instruction -> {
               switch (instruction) {
                 case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
-                case Instruction.Checkpoint op -> {
-                  if (natural != null) line("private static long c" + op.id() + ";");
-                }
                 case Instruction.WriteReference op -> {
                   if (op.kind() != Value.ReferenceKind.STRONG)
                     line("private static long w" + op.id() + ";");
@@ -811,41 +808,10 @@ public final class JavaEmitter {
 
   private void checkpointBindings(int operation) {
     if (!observation.bindings()) return;
-    if (natural != null) line("long visit" + operation + " = ++c" + operation + ";");
     for (var scope : scopes)
       for (var binding : scope.values()) {
         if (binding.shape() == null) continue;
-        String condition = "";
-        if (natural != null) {
-          var visits = natural.visits(operation, binding.id());
-          if (visits.isEmpty()) continue;
-          var ranges = new ArrayList<String>();
-          for (int i = 0; i < visits.size(); i++) {
-            long first = visits.get(i), last = first;
-            while (i + 1 < visits.size() && visits.get(i + 1) == last + 1) last = visits.get(++i);
-            ranges.add(
-                first == last
-                    ? "visit" + operation + " == " + first + "L"
-                    : "(visit"
-                        + operation
-                        + " >= "
-                        + first
-                        + "L && visit"
-                        + operation
-                        + " <= "
-                        + last
-                        + "L)");
-          }
-          condition = "if (" + String.join(" || ", ranges) + ") ";
-        }
-        line(
-            condition
-                + recorder()
-                + ".binding("
-                + binding.id()
-                + ", "
-                + binding.name()
-                + " != null);");
+        line(recorder() + ".binding(" + binding.id() + ", " + binding.name() + " != null);");
       }
   }
 

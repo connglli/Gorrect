@@ -144,4 +144,59 @@ class NaturalLivenessTest {
             afterLoop ? Set.of(outer) : Set.of(), analysis.at(last.operation(), last.occurrence()));
       }
   }
+
+  @Test
+  void indexesOptionalVisitsByTheirActualIterationAndKillsOldDefinitions() {
+    for (int count = 1; count <= 5; count++)
+      for (boolean initiallyPresent : List.of(false, true))
+        for (boolean initiallyNeeded : List.of(false, true)) {
+          var program =
+              GirParser.parse(
+                  HEADER
+                      + "object 1 N [] [7]; root stable = 1; root gate = "
+                      + (initiallyPresent ? "1" : "null")
+                      + "; root need = "
+                      + (initiallyNeeded ? "1" : "null")
+                      + "; program { repeat "
+                      + count
+                      + " {"
+                      + " allocate inner N; read-root selected N gate; if-present selected {"
+                      + " checkpoint; read-root required N need; if-present required {"
+                      + " read-data value inner 0; write-root need null; } }"
+                      + " read-root reset N stable; write-root gate reset; } }");
+          var oracle = Oracle.interpret(program);
+          var analysis = NaturalLiveness.analyze(program, oracle);
+          int inner =
+              program
+                  .instructions()
+                  .filter(instruction -> instruction instanceof Instruction.Allocate)
+                  .findFirst()
+                  .orElseThrow()
+                  .id();
+          int visits = Math.max(0, count - (initiallyPresent ? 0 : 1));
+          assertEquals(visits, oracle.checkpoints().size());
+          for (int visit = 0; visit < visits; visit++) {
+            var point = oracle.checkpoints().get(visit);
+            assertEquals(visit + 1L, point.occurrence());
+            assertEquals(
+                initiallyNeeded && visit == 0 ? Set.of(inner) : Set.of(),
+                analysis.at(point.operation(), point.occurrence()),
+                "count=" + count + ", initial=" + initiallyPresent + ", need=" + initiallyNeeded);
+          }
+        }
+  }
+
+  @Test
+  void scalarRouteIgnoresUsesInUntakenArms() {
+    var program =
+        GirParser.parse(
+            HEADER
+                + "program { allocate unused N; allocate used N; checkpoint; if-nonzero 0 {"
+                + " read-data x unused 0; } else { read-data x used 0; } }");
+    var oracle = Oracle.interpret(program);
+    var point = oracle.checkpoints().getFirst();
+    assertEquals(
+        Set.of(program.body().get(1).id()),
+        NaturalLiveness.analyze(program, oracle).at(point.operation(), point.occurrence()));
+  }
 }

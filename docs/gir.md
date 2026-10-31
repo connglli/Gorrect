@@ -118,7 +118,7 @@ if-nonzero won {
 
 Bindings live until release or scope exit. Reference bindings are strong handles; scalars retain no objects. Ending a binding removes its reachability obligation, without requiring reclamation or immediate disappearance of physical references. Names cannot shadow active-scope declarations or be reused after release in the same scope. Each loop iteration has a fresh scope. The outer scope ends before the final graph is derived.
 
-Main-thread checkpoints inside `acquire`, `if-present`, or `if-nonzero` execute only on the selected path. A skipped arm contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. These checkpoints require [controlled observation](./observation.md#coverage-and-observer-effects), with binding coverage for live reference handles, including acquired handles.
+Main-thread checkpoints inside `acquire`, `if-present`, or `if-nonzero` execute only on the selected path. A skipped arm contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. The [observation profile](./observation.md#coverage-and-observer-effects) determines local obligations. Exact strong-graph main paths support natural capture; acquisitions and reference/contended histories require controlled observation.
 
 ## Reference histories
 

@@ -11,12 +11,35 @@ public record ObservationLayout(
     List<Shape> arrays,
     Roots roots,
     List<ReferenceType> references,
-    List<LocalBinding> bindings) {
+    List<LocalBinding> bindings,
+    String bindingSelection) {
+  public static final String REQUIRED = "required";
+  public static final String LEXICAL_CANDIDATES = "lexical-candidates";
+
   public ObservationLayout {
     objects = List.copyOf(objects);
     arrays = List.copyOf(arrays);
     references = references == null ? List.of() : List.copyOf(references);
     bindings = bindings == null ? List.of() : List.copyOf(bindings);
+    if (bindingSelection != null
+        && !bindingSelection.equals(REQUIRED)
+        && !bindingSelection.equals(LEXICAL_CANDIDATES))
+      throw new IllegalArgumentException("Unknown binding-selection rule");
+  }
+
+  /** Missing selection metadata denotes the original required-binding emission rule. */
+  public ObservationLayout(
+      List<ObjectType> objects,
+      List<Shape> arrays,
+      Roots roots,
+      List<ReferenceType> references,
+      List<LocalBinding> bindings) {
+    this(objects, arrays, roots, references, bindings, null);
+  }
+
+  /** Lexical candidates require separate future-use selection before physical-root matching. */
+  public boolean lexicalCandidates() {
+    return LEXICAL_CANDIDATES.equals(bindingSelection);
   }
 
   public ObservationLayout(
