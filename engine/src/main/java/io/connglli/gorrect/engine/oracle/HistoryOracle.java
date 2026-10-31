@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.ArrayCopyProgram;
 import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
@@ -136,6 +137,8 @@ public final class HistoryOracle {
     GirValidator.validate(program);
     var clones = CloneProgram.unsupported(program);
     if (!clones.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", clones));
+    var copies = ArrayCopyProgram.unsupported(program);
+    if (!copies.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", copies));
     var support = ReferenceProgram.firstClassGaps(program);
     if (!support.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", support));
   }

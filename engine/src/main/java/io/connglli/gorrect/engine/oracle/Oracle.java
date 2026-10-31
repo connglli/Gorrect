@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.ArrayCopyProgram;
 import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
@@ -32,6 +33,8 @@ public final class Oracle {
     var unsupported = CloneProgram.unsupported(program);
     if (!unsupported.isEmpty())
       throw new UnsupportedHistoryException(String.join("; ", unsupported));
+    var copies = ArrayCopyProgram.unsupported(program);
+    if (!copies.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", copies));
     if (HistoryProgram.usesConcurrentHistory(program) || ReferenceProgram.usesReferences(program))
       throw new GirException("Conditional references require a recorded history");
     var machine = new GraphMachine(program, limits);

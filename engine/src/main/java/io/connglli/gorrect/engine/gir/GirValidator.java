@@ -242,6 +242,17 @@ public final class GirValidator {
         declare(op.name(), source);
         cloneShapes.put(op.id(), source);
       }
+      case Instruction.CopyArray op -> {
+        var source = binding(op.source()).shape();
+        var destination = binding(op.destination()).shape();
+        if (source == null
+            || destination == null
+            || !source.array()
+            || !destination.array()
+            || source.kind() != destination.kind()) fail("copy-array requires compatible arrays");
+        copyRange(op.sourceIndex(), op.length(), (int) source.slots());
+        copyRange(op.destinationIndex(), op.length(), (int) destination.slots());
+      }
       case Instruction.AllocateReference op -> {
         var shape = shape(op.shape());
         if (!shape.wrapper()) fail("allocate-ref requires a wrapper type");
@@ -348,6 +359,11 @@ public final class GirValidator {
       root(location.owner());
       if (location.index() != 0) fail("Root location has no index");
     } else slot(location.owner(), location.index(), location.reference());
+  }
+
+  private static void copyRange(int index, int length, int size) {
+    if (index < 0 || length < 0 || index > size || length > size - index)
+      fail("Invalid copy-array range");
   }
 
   private void wrapper(String owner) {

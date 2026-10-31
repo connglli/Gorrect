@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.observe;
 
+import io.connglli.gorrect.engine.gir.ArrayCopyProgram;
 import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
@@ -42,6 +43,9 @@ public final class ObservationCapabilities {
     var reasons = new ArrayList<String>(CloneProgram.unsupported(program));
     if (CloneProgram.usesClones(program) && !profile.controlled())
       reasons.add("Array cloning requires controlled observation");
+    reasons.addAll(ArrayCopyProgram.unsupported(program));
+    if (ArrayCopyProgram.usesCopies(program) && !profile.controlled())
+      reasons.add("Array copying requires controlled observation");
     if (ReferenceProgram.usesFirstClass(program)) {
       reasons.addAll(ReferenceProgram.firstClassGaps(program));
       if (!profile.controlled()) reasons.add("First-class wrappers require controlled observation");

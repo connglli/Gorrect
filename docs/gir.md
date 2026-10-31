@@ -59,6 +59,7 @@ The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/g
 | --- | --- |
 | `allocate h N;` | Fresh zero-filled instance and strong handle. |
 | `clone copy original;` | Fresh shallow array copy with the source's nominal shape. |
+| `copy-array source sourceIndex destination destinationIndex length;` | Copy a complete shallow range, preserving identities and overlap semantics. |
 | `allocate-ref r W value;` | Fresh no-queue soft/weak wrapper. |
 | `read-root h N root;` | Copy a named root into a strong handle. |
 | `read-volatile-root h N root;` | Volatile root read into a strong handle. |
@@ -99,7 +100,7 @@ Ordinary root, strong-reference and data reads/writes are plain; the listed vola
 
 Reference bindings are strong until release or scope exit; acquired handles last through their whole acquisition body. Scalars retain no objects. Names cannot shadow active bindings or be reused after release in the same scope. Release applies only to the current scope. Releasing a handle removes its obligation without requiring immediate reclamation. The outer scope ends before the final capture. Checkpoints in selected branches count only executed visits; [observation profiles](./observation.md#coverage-and-observer-effects) determine physical local obligations.
 
-Array cloning uses real Java `clone()` in strong sequential controlled programs. Object cloning, reference/contended histories, parallel cloning and natural capture are unsupported.
+Array cloning and range copying require strong sequential programs with controlled observation.
 
 ## Reference histories
 

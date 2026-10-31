@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.ArrayCopyProgram;
 import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
@@ -224,6 +225,9 @@ public final class ConcurrentHistory {
     if (CloneProgram.usesClones(program))
       throw new UnsupportedHistoryException(
           "Array cloning is unsupported by the concurrent history backend");
+    if (ArrayCopyProgram.usesCopies(program))
+      throw new UnsupportedHistoryException(
+          "Array copying is unsupported by the concurrent history backend");
 
     // Direct callers can supply sequential source, so source classification is insufficient.
     if (ReferenceProgram.usesFirstClass(program))

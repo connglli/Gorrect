@@ -114,6 +114,8 @@ public final class GirParser {
           switch (opcode) {
             case "allocate" -> new Instruction.Allocate(id, name(), name());
             case "clone" -> new Instruction.Clone(id, name(), name());
+            case "copy-array" ->
+                new Instruction.CopyArray(id, name(), integer(), name(), integer(), integer());
             case "allocate-ref" -> new Instruction.AllocateReference(id, name(), name(), operand());
             case "read-volatile-root" ->
                 new Instruction.ReadRoot(id, name(), name(), name(), MemoryMode.VOLATILE);

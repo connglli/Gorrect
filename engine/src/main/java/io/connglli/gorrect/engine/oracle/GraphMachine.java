@@ -325,6 +325,7 @@ final class GraphMachine {
     switch (operation) {
       case Instruction.Allocate op -> allocate(op);
       case Instruction.Clone op -> cloneArray(op);
+      case Instruction.CopyArray op -> copyArray(op);
       case Instruction.AllocateReference op -> allocateReference(op);
       case Instruction.ReadRoot op -> {
         requireDeclaration(op.name());
@@ -523,6 +524,8 @@ final class GraphMachine {
     return switch (operation) {
       case Instruction.Clone ignored ->
           throw new UnsupportedHistoryException("Array cloning has no concurrent access contract");
+      case Instruction.CopyArray ignored ->
+          throw new UnsupportedHistoryException("Array copying has no concurrent access contract");
       case Instruction.ReadRoot op ->
           new Memory(new Slot(null, op.root(), true, 0), false, op.mode() == MemoryMode.VOLATILE);
       case Instruction.WriteRoot op ->
@@ -656,6 +659,47 @@ final class GraphMachine {
     bind(op.name(), op.id(), Value.Reference.strong(id));
     occurrences.put(op.id(), occurrence);
     slots += original.shape().slots();
+  }
+
+  private void copyArray(Instruction.CopyArray op) {
+    var source = arrayTarget(op.source());
+    var destination = arrayTarget(op.destination());
+    if (source.object().shape().kind() != destination.object().shape().kind())
+      throw new GirException("copy-array requires compatible arrays");
+    copyRange(op.sourceIndex(), op.length(), (int) source.object().shape().slots());
+    copyRange(op.destinationIndex(), op.length(), (int) destination.object().shape().slots());
+
+    // Both source lists are immutable pre-operation contents, including for overlapping self-copy.
+    var target = destination.object();
+    if (target.shape().kind() == Shape.Kind.REFERENCE_ARRAY) {
+      var values = new ArrayList<>(target.references());
+      for (int index = 0; index < op.length(); index++)
+        values.set(
+            op.destinationIndex() + index,
+            source.object().references().get(op.sourceIndex() + index));
+      objects.put(destination.id(), new HeapObject(target.shape(), values, target.data()));
+    } else {
+      var values = new ArrayList<>(target.data());
+      for (int index = 0; index < op.length(); index++)
+        values.set(
+            op.destinationIndex() + index, source.object().data().get(op.sourceIndex() + index));
+      objects.put(destination.id(), new HeapObject(target.shape(), target.references(), values));
+    }
+  }
+
+  private Target arrayTarget(String name) {
+    var value = reference(new Operand.Name(name));
+    if (value.target() == null || value.wrapperTarget() != null)
+      throw new GirException("copy-array requires a live non-null array handle");
+    var object = objects.get(value.target());
+    if (object == null || !object.shape().array())
+      throw new GirException("copy-array requires array handles");
+    return new Target(value.target(), object);
+  }
+
+  private static void copyRange(int index, int length, int size) {
+    if (index < 0 || length < 0 || index > size || length > size - index)
+      throw new GirException("Invalid copy-array range");
   }
 
   private void allocateReference(Instruction.AllocateReference op) {

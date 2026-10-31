@@ -41,6 +41,18 @@ public sealed interface Instruction {
    */
   record Clone(int id, String name, String owner) implements Operation {}
 
+  /**
+   * Copies a complete range between live non-null arrays of the same supported kind. Ranges use
+   * nonnegative literals and are validated even for zero length. Contents are shallow: targets
+   * remain shared, identities and values outside the destination range remain unchanged. Overlap
+   * uses the source contents before this operation. No logical allocation or slot budget is used;
+   * invalid operands/ranges and exhausted step budgets reject before effects. Initial support is
+   * limited to strong sequential programs under controlled observation.
+   */
+  record CopyArray(
+      int id, String source, int sourceIndex, String destination, int destinationIndex, int length)
+      implements Operation {}
+
   /** Constructs a fresh no-queue soft/weak wrapper around the current reference operand. */
   record AllocateReference(int id, String name, String shape, Operand value) implements Operation {}
 

@@ -716,6 +716,19 @@ public final class JavaEmitter {
         line("++a" + op.id() + ";");
         bindArray(name, shape, op.id(), "a" + op.id());
       }
+      case Instruction.CopyArray op ->
+          line(
+              "System.arraycopy("
+                  + binding(op.source()).name()
+                  + ", "
+                  + op.sourceIndex()
+                  + ", "
+                  + binding(op.destination()).name()
+                  + ", "
+                  + op.destinationIndex()
+                  + ", "
+                  + op.length()
+                  + ");");
       case Instruction.Allocate op -> {
         var shape = shapes.get(op.shape());
         String name = declare(op.name(), shape, op.id());
