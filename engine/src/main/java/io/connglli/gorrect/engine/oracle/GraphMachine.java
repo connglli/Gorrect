@@ -41,6 +41,7 @@ final class GraphMachine {
   private final Map<Integer, Long> occurrences = new HashMap<>();
   private final List<OracleResult.Checkpoint> checkpoints = new ArrayList<>();
   private final List<ExecutionTrace.Event> events = new ArrayList<>();
+  private final List<OracleResult.IdentityHash> identityHashes = new ArrayList<>();
   private long steps;
   private long slots;
   private long snapshotCells;
@@ -309,6 +310,10 @@ final class GraphMachine {
     return steps;
   }
 
+  List<OracleResult.IdentityHash> identityHashes() {
+    return List.copyOf(identityHashes);
+  }
+
   List<OracleResult.Checkpoint> checkpoints() {
     return List.copyOf(checkpoints);
   }
@@ -408,6 +413,11 @@ final class GraphMachine {
           throw new GirException("Reference state requires a recorded history");
       case Instruction.PollQueue ignored ->
           throw new GirException("Queue polling requires a recorded history");
+      case Instruction.IdentityHash op -> {
+        // The scalar event stays a placeholder; only the subject is a model prediction.
+        var subject = reference(op.owner()).heapTarget();
+        identityHashes.add(new OracleResult.IdentityHash(events.size(), subject));
+      }
       case Instruction.SameObject op -> {
         requireDeclaration(op.name());
         read = operand(op.left(), true).equals(operand(op.right(), true)) ? 1L : 0L;
@@ -493,6 +503,7 @@ final class GraphMachine {
       case Instruction.Barrier ignored -> ExecutionTrace.Kind.BARRIER;
       case Instruction.CompareSet ignored -> ExecutionTrace.Kind.COMPARE_SET;
       case Instruction.ReadData ignored -> ExecutionTrace.Kind.SCALAR_READ;
+      case Instruction.IdentityHash ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.SameObject ignored -> ExecutionTrace.Kind.SCALAR_READ;
       case Instruction.Exchange exchange ->
           exchange.location().reference()

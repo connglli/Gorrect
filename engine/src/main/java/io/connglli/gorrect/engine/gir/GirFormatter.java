@@ -131,6 +131,7 @@ public final class GirFormatter {
               + op.destinationIndex()
               + " "
               + op.length();
+      case Instruction.IdentityHash op -> "identity-hash " + operand(op.owner());
       case Instruction.AllocateReference op ->
           "allocate-ref " + op.name() + " " + op.shape() + " " + operand(op.value());
       case Instruction.ReadRoot op ->

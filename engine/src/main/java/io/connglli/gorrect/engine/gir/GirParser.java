@@ -116,6 +116,7 @@ public final class GirParser {
             case "clone" -> new Instruction.Clone(id, name(), name());
             case "copy-array" ->
                 new Instruction.CopyArray(id, name(), integer(), name(), integer(), integer());
+            case "identity-hash" -> new Instruction.IdentityHash(id, operand());
             case "allocate-ref" -> new Instruction.AllocateReference(id, name(), name(), operand());
             case "read-volatile-root" ->
                 new Instruction.ReadRoot(id, name(), name(), name(), MemoryMode.VOLATILE);

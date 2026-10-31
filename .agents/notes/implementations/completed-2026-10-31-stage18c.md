@@ -1,0 +1,11 @@
+# Opaque identity-hash observations
+
+The identity-observation slice of stage 18 is implemented. [Instruction.IdentityHash](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) owns its contract: a real Java call records a primitive token without binding a GIR result or retaining an object registry. Hash values supply neither allocation identities nor predicted graph data.
+
+[OracleResult.IdentityHash](../../../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleResult.java) indexes independently interpreted subjects by trace position. [ExactTraceVerifier](../../../engine/src/main/java/io/connglli/gorrect/engine/oracle/ExactTraceVerifier.java) checks signed-int range, null zero and per-allocation stability while allowing collisions and non-null zero. Ordinary scalars and all event metadata remain exact. Only a contiguous prefix of validated checkpoint identities can label graph comparisons.
+
+The slice supports strong sequential controlled programs, including array clone/copy composition. Static/direct guards cover skipped blocks and precede evidence-completeness exits. Recording reuses version 1 scalar events and existing budgets; runtime, native and protocol layouts stay unchanged. Hashing's header, materialization and timing effects belong to the workload and establish no intrinsic or continuous-compilation claim.
+
+Completed executions retain established hash/scalar and covered graph refutations through later recorder or extraction gaps. Failed executions retain the existing reference-only prefix diagnosis; hash-prefix diagnosis remains separate work. An independently exercised failed hash run stays RUNTIME_ERROR/INCONCLUSIVE and cannot pass.
+
+The final combined build passes 745 Java tests (541 unit, 202 target integration and two observer), eight native tests and JDK 17/21 runtime checks. Independent semantic/capture reviews cover opaque constraints, capture-index damage, direct API bytecode and genuine pre-hash plain/C1 bundle copies. A separate merged-source review checks copy/hash composition with 52 literal assertions. Selected OpenJ9 evidence belongs to the unchanged author candidate; no additional combined OpenJ9 matrix is claimed. Compiler/Javadoc and both hook stages pass.

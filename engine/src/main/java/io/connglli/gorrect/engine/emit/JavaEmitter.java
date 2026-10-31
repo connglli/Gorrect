@@ -883,6 +883,19 @@ public final class JavaEmitter {
         return;
       }
 
+      case Instruction.IdentityHash op -> {
+        // Record only the primitive result; no helper or recorder retains the observed object.
+        line(
+            recorder()
+                + ".record("
+                + op.id()
+                + ", "
+                + ExecutionTrace.Kind.SCALAR_READ.ordinal()
+                + ", System.identityHashCode("
+                + operand(op.owner())
+                + "));");
+        return;
+      }
       case Instruction.ReadData op -> {
         String name = declare(op.name(), null, op.id());
         line(

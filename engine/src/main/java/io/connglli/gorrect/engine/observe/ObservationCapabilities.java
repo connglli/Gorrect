@@ -4,6 +4,7 @@ import io.connglli.gorrect.engine.gir.ArrayCopyProgram;
 import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
@@ -41,6 +42,9 @@ public final class ObservationCapabilities {
   /** Reasons the selected profile cannot faithfully execute/check this combination. */
   public static List<String> unsupported(GirProgram program, ObservationProfile profile) {
     var reasons = new ArrayList<String>(CloneProgram.unsupported(program));
+    reasons.addAll(IdentityHashProgram.unsupported(program));
+    if (IdentityHashProgram.usesIdentityHash(program) && !profile.controlled())
+      reasons.add("Identity hashes require controlled observation");
     if (CloneProgram.usesClones(program) && !profile.controlled())
       reasons.add("Array cloning requires controlled observation");
     reasons.addAll(ArrayCopyProgram.unsupported(program));

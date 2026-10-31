@@ -6,6 +6,7 @@ import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.protocol.ExecutionTrace;
@@ -35,13 +36,20 @@ public final class Oracle {
       throw new UnsupportedHistoryException(String.join("; ", unsupported));
     var copies = ArrayCopyProgram.unsupported(program);
     if (!copies.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", copies));
+    var hashSupport = IdentityHashProgram.unsupported(program);
+    if (!hashSupport.isEmpty())
+      throw new UnsupportedHistoryException(String.join("; ", hashSupport));
     if (HistoryProgram.usesConcurrentHistory(program) || ReferenceProgram.usesReferences(program))
       throw new GirException("Conditional references require a recorded history");
     var machine = new GraphMachine(program, limits);
     execute(program.body(), machine);
     machine.leaveScope();
     return new OracleResult(
-        machine.snapshot(), machine.checkpoints(), machine.steps(), machine.events());
+        machine.snapshot(),
+        machine.checkpoints(),
+        machine.steps(),
+        machine.events(),
+        machine.identityHashes());
   }
 
   private static void execute(List<Instruction> instructions, GraphMachine machine) {

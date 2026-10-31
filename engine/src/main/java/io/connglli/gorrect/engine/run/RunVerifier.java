@@ -11,6 +11,7 @@ import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
@@ -21,6 +22,7 @@ import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.engine.oracle.CheckpointPlan;
 import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
+import io.connglli.gorrect.engine.oracle.ExactTraceVerifier;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.HistoryLimitException;
 import io.connglli.gorrect.engine.oracle.HistoryLimits;
@@ -66,7 +68,7 @@ final class RunVerifier {
               JsonFiles.read(directory.resolve("execution.json")), RunReport.class);
 
       if (execution.execution() != RunReport.Outcome.COMPLETED) {
-
+        // Failed-execution prefix diagnosis currently covers reference histories only.
         report = diagnoseReferenceFailure(directory, manifest, execution);
         JsonFiles.write(directory.resolve("result.json"), report);
         return report;
@@ -81,6 +83,7 @@ final class RunVerifier {
       unsupported.addAll(VmDriver.unsupported(profile));
       if (!unsupported.isEmpty())
         throw new UnsupportedHistoryException(String.join("; ", unsupported));
+      boolean identityHashes = IdentityHashProgram.usesIdentityHash(program);
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -128,12 +131,13 @@ final class RunVerifier {
       try {
         trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       } catch (IOException | RuntimeException failure) {
-        if (!lexicalNatural) throw failure;
+        if (!lexicalNatural && !identityHashes) throw failure;
         captures.error("Scalar trace extraction failed: " + failure);
         trace = new ExecutionTrace(run, false, List.of());
       }
       if (!trace.complete()) {
-        if (!lexicalNatural) throw new IOException("Execution trace is incomplete");
+        if (!lexicalNatural && !identityHashes)
+          throw new IOException("Execution trace is incomplete");
         captures.error("Execution trace is incomplete");
       }
       boolean workerEvidenceFailed =
@@ -237,15 +241,19 @@ final class RunVerifier {
         return report;
       }
 
-      var expectedTrace = new ExecutionTrace(run, true, oracle.events());
-      boolean violated = !prefixMatches(trace, expectedTrace);
+      var traceVerdict = ExactTraceVerifier.verify(trace, oracle);
+      boolean violated = traceVerdict == ExactVerifier.Verdict.VIOLATED;
       boolean matchedPath = trace.complete() && !violated;
-      var controlCoverage = lexicalNatural ? naturalControls(directory, run, oracle) : null;
+      var controlCoverage =
+          lexicalNatural || identityHashes ? exactControls(directory, run, oracle) : null;
       if (controlCoverage != null && !controlCoverage.complete()) {
         captures.error(controlCoverage.problem());
         matchedPath = false;
       }
-      boolean trustedCoverage = trace.complete() && (!lexicalNatural || matchedPath);
+      boolean trustedCoverage =
+          trace.complete()
+              && (controlCoverage == null || controlCoverage.complete())
+              && (!lexicalNatural || matchedPath);
       if (trustedCoverage && !workerEvidenceFailed)
         workerEvidenceFailed =
             !stressCoverage(directory, run, program, oracle, profile, unmet, problems);
@@ -261,7 +269,8 @@ final class RunVerifier {
       var verified = new HashSet<String>();
       if (!violated) verified.addAll(exercised);
 
-      if (!lexicalNatural) controls(directory, run, oracle, program, trace, false);
+      if (!lexicalNatural && !identityHashes)
+        controls(directory, run, oracle, program, trace, false);
       boolean inconclusive = workerEvidenceFailed || !trace.complete();
       if (controlCoverage != null && !controlCoverage.complete()) inconclusive = true;
       var natural =
@@ -378,7 +387,7 @@ final class RunVerifier {
   private record ControlCoverage(int captures, boolean complete, String problem) {}
 
   /** A bad suffix cannot revoke an earlier capture's independently checked site identity. */
-  private static ControlCoverage naturalControls(Path directory, long run, OracleResult oracle) {
+  private static ControlCoverage exactControls(Path directory, long run, OracleResult oracle) {
     int trusted = 0;
     try {
       var transcript = JsonFiles.read(directory.resolve("traces/control.json"));
@@ -421,17 +430,6 @@ final class RunVerifier {
       return new ControlCoverage(
           trusted, false, "Control correspondence extraction failed: " + failure);
     }
-  }
-
-  private static boolean prefixMatches(ExecutionTrace actual, ExecutionTrace expected) {
-    var wanted = expected.byWorker();
-    if (actual.complete()) return actual.byWorker().equals(wanted);
-    for (var worker : actual.byWorker().entrySet()) {
-      var events = wanted.getOrDefault(worker.getKey(), List.of());
-      if (worker.getValue().size() > events.size()
-          || !worker.getValue().equals(events.subList(0, worker.getValue().size()))) return false;
-    }
-    return true;
   }
 
   /** Loads independent captures without letting a later gap erase an earlier refutation. */

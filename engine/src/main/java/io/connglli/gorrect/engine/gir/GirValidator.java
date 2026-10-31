@@ -307,6 +307,7 @@ public final class GirValidator {
       }
 
       case Instruction.PollQueue ignored -> {}
+      case Instruction.IdentityHash op -> operand(op.owner(), true);
       case Instruction.SameObject op -> {
         operand(op.left(), true);
         operand(op.right(), true);

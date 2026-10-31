@@ -80,6 +80,7 @@ The [instruction contracts](../engine/src/main/java/io/connglli/gorrect/engine/g
 | `write-data owner index value;` | Replace a long slot. |
 | `write-volatile-data owner index value;` | Volatile long-slot write. |
 | `same-object equal left right;` | Bind 1 for identical targets, including two nulls; otherwise 0. |
+| `identity-hash owner;` | Observe an opaque hash without binding a value; strong sequential controlled only. |
 | `compare-set-root won root expected update;` | Strong CAS on a root, returning 0/1. |
 | `compare-set-ref won owner index expected update;` | Strong CAS on a strong reference slot. |
 | `compare-set-data won owner index expected update;` | Strong CAS on a long slot. |

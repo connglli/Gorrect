@@ -6,6 +6,7 @@ import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
+import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
@@ -135,6 +136,8 @@ public final class HistoryOracle {
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
   static void validateProgram(GirProgram program) {
     GirValidator.validate(program);
+    if (IdentityHashProgram.usesIdentityHash(program))
+      throw new UnsupportedHistoryException("Identity hashes require the exact sequential backend");
     var clones = CloneProgram.unsupported(program);
     if (!clones.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", clones));
     var copies = ArrayCopyProgram.unsupported(program);

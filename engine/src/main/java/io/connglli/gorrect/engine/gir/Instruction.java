@@ -53,6 +53,15 @@ public sealed interface Instruction {
       int id, String source, int sourceIndex, String destination, int destinationIndex, int length)
       implements Operation {}
 
+  /**
+   * Observes System.identityHashCode once for a live reference or null, without binding a scalar.
+   * The signed int is opaque: null requires zero; non-null zero and collisions are legal. Repeated
+   * observations of one allocation must agree, including across payload changes and collections.
+   * The call may affect headers, materialization, escape analysis and timing; it is a workload
+   * effect. The initial contract requires strong sequential controlled observation.
+   */
+  record IdentityHash(int id, Operand owner) implements Operation {}
+
   /** Constructs a fresh no-queue soft/weak wrapper around the current reference operand. */
   record AllocateReference(int id, String name, String shape, Operand value) implements Operation {}
 
