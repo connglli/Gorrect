@@ -1,10 +1,10 @@
 # First-class reference semantics proposal
 
-Status: unaccepted design proposal for [stage 15](../implementations/2026-10-29-implementation-plan.md#15-make-references-and-queues-first-class). No GIR, runtime, observer, oracle, capability, or artifact behavior is enabled by this note. Keep formats at version 1. The [observation contract](../../../docs/observation.md) and [instruction contracts](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) remain authoritative for supported behavior.
+Status: accepted design basis for the first no-queue implementation; later queue/actor/concurrency slices remain proposals for [stage 15](../implementations/2026-10-29-implementation-plan.md#15-make-references-and-queues-first-class). Implemented contracts belong to the linked source/specifications; this note retains the design and later enabling gates. Keep formats at version 1. The [observation contract](../../../docs/observation.md) and [instruction contracts](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) remain authoritative for supported behavior.
 
 ## Small first slice
 
-Start with sequential controlled observation of first-class soft/weak wrappers without queues. Propose the following additions; these spellings are not accepted by the current parser. Wrapper type names share the existing shape namespace.
+Start with sequential controlled observation of first-class soft/weak wrappers without queues. The first implementation uses the following small surface. Wrapper type names share the existing shape namespace.
 
 | Proposed form | Contract |
 | --- | --- |
@@ -18,7 +18,7 @@ Start with sequential controlled observation of first-class soft/weak wrappers w
 
 Receiver operations require a live non-null wrapper, and a non-null load/acquisition result must match its declared type. Invalid preconditions retain transactional invalid-GIR behavior. Release/scope rules are unchanged; `if-present` tests wrapper nullness, not referent clearing.
 
-This complete example uses proposed GIR. The box stores and loads one wrapper identity; clearing alias is observed through wrapper:
+This complete example uses the no-queue first slice. The box stores and loads one wrapper identity; clearing alias is observed through wrapper:
 
 ```text
 gir 1;

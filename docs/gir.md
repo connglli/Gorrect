@@ -41,13 +41,14 @@ Each logical object has:
 | Reference slots | A kind (strong, soft, weak) and target identity or `null` at each index. Soft/weak values also identify their wrapper incarnation. |
 | Data slots | Signed 64-bit payload values. A value equal to an object ID still forms no graph edge. |
 
-Shapes are reusable layouts: `object` selects fields, `refs` reference arrays, and `data` long arrays. Counts specify fields or elements. Identity is separate metadata; JVM headers, addresses, alignment, and collector bookkeeping are outside this model.
+Shapes are reusable layouts: `object` selects fields, `refs` reference arrays, `data` long arrays, and `soft` / `weak` first-class reference objects. Counts specify fields or elements. Identity is separate metadata; JVM headers, addresses, alignment, and collector bookkeeping are outside this model.
 
 | Declaration | Meaning |
 | --- | --- |
 | `shape N object 2 1;` | Declares layout `N` with reference slots 0 and 1, and data slot 0. Creates no instance. |
 | `shape Links refs 4;` | Declares a reference-array layout with element indices 0 through 3. |
 | `shape Payload data 8;` | Declares a long-array layout with element indices 0 through 7. |
+| `shape W weak;` / `shape S soft;` | Declares a nominal no-queue wrapper type with no ordinary indexed slots. |
 | `object 1 N [2, null] [7];` | Creates initial object ID `1` using `N`: reference slot 0 targets object `2`, reference slot 1 is null, and data slot 0 contains `7`. |
 | `root main = 1;` | Declares named strong root slot `main`, initially targeting the object declared with ID `1`. |
 | `root saved = null;` | Declares a root slot whose initial target is null. |
@@ -75,14 +76,15 @@ The [instruction types](../engine/src/main/java/io/connglli/gorrect/engine/gir/I
 | Instruction | Effect |
 | --- | --- |
 | `allocate h N;` | Allocate a zero-filled object and bind handle `h`. |
+| `allocate-ref r W value;` | Construct a fresh no-queue wrapper of type `W` around the current reference operand. |
 | `read-root h N root;` | Read a root into a handle declared with shape `N`. |
 | `write-root root h;` | Set an existing root to a handle's target. |
 | `read-ref h N owner index;` | Read a strong slot into a handle declared with shape `N`. |
 | `write-ref owner index h;` | Replace a slot with a strong reference. |
 | `write-soft owner index h;` / `write-weak owner index h;` | Install a fresh soft/weak wrapper, including for `null`. |
-| `acquire h N owner index { ... }` | Read a soft/weak referent once; execute the body with strong handle `h` if non-null. |
-| `is-cleared value owner index;` | Bind scalar 1 for a cleared wrapper, otherwise 0, without acquiring the referent. |
-| `clear-ref owner index;` | Explicitly clear the current wrapper without enqueueing it. |
+| `acquire h N owner index { ... }` / `acquire h N r { ... }` | Read a slot wrapper or receiver referent once; execute the body with strong handle `h` if non-null. |
+| `is-cleared value owner index;` / `is-cleared value r;` | Bind scalar 1 for a cleared slot wrapper or receiver, otherwise 0, without acquiring the referent. |
+| `clear-ref owner index;` / `clear-ref r;` | Clear the slot wrapper or first-class receiver, without enqueueing it. |
 | `poll-queue;` | Record one wrapper incarnation from the case's reference queue, or an empty result. |
 | `read-data value owner index;` | Bind a scalar to a data slot's contents. |
 | `same-object equal left right;` | Bind scalar 1 for identical reference operands, including two nulls; otherwise 0. |
@@ -121,6 +123,10 @@ Bindings live until release or scope exit. Reference bindings are strong handles
 Main-thread checkpoints inside `acquire`, `if-present`, or `if-nonzero` execute only on the selected path. A skipped arm contributes no capture or checkpoint visit; visit numbers count actual executions of each site from one. The [observation profile](./observation.md#coverage-and-observer-effects) determines local obligations. Exact strong-graph main paths support natural capture; acquisitions and reference/contended histories require controlled observation.
 
 ## Reference histories
+
+First-class wrappers use `allocate-ref`, with an ordinary or older no-queue wrapper referent. Ordinary `allocate` and initial `object` declarations do not construct wrapper types. Existing typed root/strong-slot loads and stores move the same wrapper pointer; clearing through any alias changes its shared state. A wrapper handle keeps the wrapper alive, while an acquired handle keeps the referent alive. Null wrappers and cleared non-null wrappers are distinct. [reference-objects.gir](../examples/reference-objects.gir) shows aliases and a detached container.
+
+First-class wrappers require sequential controlled observation. Natural observation and atomic/concurrent first-class combinations are unsupported. Registered legacy wrappers cannot become first-class values, and legacy soft/weak store operands remain ordinary objects or null. A conservative all-syntax type/location proof rejects potentially registered loads even when a saved path avoids them; ordinary legacy-only programs retain their existing rules. Named queues, phantom references, Cleaner actors and initial wrapper construction remain unsupported.
 
 Reference histories support object fields and array elements, and can include parallel workers under the [contended-history rules](#contended-histories). [references.gir](../examples/references.gir) shows a complete example.
 

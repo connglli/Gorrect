@@ -47,6 +47,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final List<ExecutionEvidence.Window> windows = new ArrayList<>();
   private VmControl control;
   private final boolean referenceRecording;
+  private final boolean typedReferences;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
   private long collections;
@@ -64,6 +65,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       throw new IllegalArgumentException("Invalid trace capacity or run token");
 
     referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
+    typedReferences = Files.exists(directory.resolve("generated/typed-references.properties"));
     boolean localBindings =
         !System.getProperty("gorrect.observation", "named-roots-diagnostic")
             .equals("named-roots-diagnostic");
@@ -146,6 +148,43 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
             targetWorker,
             targetSite,
             targetOccurrence,
+            0,
+            0,
+            0);
+  }
+
+  @Override
+  public void referenceTyped(
+      int operation,
+      int kind,
+      long value,
+      int strength,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
+      int targetWorker,
+      int targetSite,
+      long targetOccurrence,
+      int targetKind,
+      int targetSlot) {
+    if (!typedReferences) throw new IllegalStateException("Tagged references were not selected");
+    recorders
+        .get(0)
+        .referenceTyped(
+            operation,
+            kind,
+            value,
+            strength,
+            wrapperWorker,
+            wrapperSite,
+            wrapperOccurrence,
+            wrapperSlot,
+            targetWorker,
+            targetSite,
+            targetOccurrence,
+            targetKind,
+            targetSlot,
             0,
             0,
             0);
@@ -409,8 +448,9 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     if (referenceRecording) {
       var references = new ArrayList<ReferenceHistory.Event>();
       recorders.values().forEach(recorder -> recorder.appendReferences(references));
-      new ReferenceHistory(run, finished, references)
-          .write(directory.resolve("traces/references.ghistory"));
+      var history = new ReferenceHistory(run, finished, references);
+      if (typedReferences) history.writeTyped(directory.resolve("traces/references.gtyped"));
+      else history.write(directory.resolve("traces/references.ghistory"));
     }
 
     new ExecutionEvidence(run, finished, groups, windows)

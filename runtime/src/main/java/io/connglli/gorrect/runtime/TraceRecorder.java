@@ -59,12 +59,48 @@ final class TraceRecorder {
       int group,
       long round,
       int phase) {
+    referenceTyped(
+        operation,
+        kind,
+        value,
+        strength,
+        wrapperWorker,
+        wrapperSite,
+        wrapperOccurrence,
+        wrapperSlot,
+        targetWorker,
+        targetSite,
+        targetOccurrence,
+        0,
+        0,
+        group,
+        round,
+        phase);
+  }
+
+  void referenceTyped(
+      int operation,
+      int kind,
+      long value,
+      int strength,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
+      int targetWorker,
+      int targetSite,
+      long targetOccurrence,
+      int targetKind,
+      int targetSlot,
+      int group,
+      long round,
+      int phase) {
     if (references == null)
       throw new IllegalStateException("Reference recording was not configured");
     var type = REFERENCE_KINDS[kind];
     var traceKind =
         switch (type) {
-          case INSTALL, CLEAR -> ExecutionTrace.Kind.OPERATION;
+          case INSTALL, CLEAR, CREATE -> ExecutionTrace.Kind.OPERATION;
           case ACQUIRE -> ExecutionTrace.Kind.ACQUIRE;
           case STATE -> ExecutionTrace.Kind.REFERENCE_STATE;
           case QUEUE -> ExecutionTrace.Kind.QUEUE_POLL;
@@ -72,7 +108,7 @@ final class TraceRecorder {
         };
     record(operation, traceKind.ordinal(), value, group, round, phase);
     // count is now the just-appended scalar event's one-based position in this worker's trace.
-    references.record(
+    references.recordTyped(
         count,
         kind,
         strength,
@@ -82,7 +118,9 @@ final class TraceRecorder {
         wrapperSlot,
         targetWorker,
         targetSite,
-        targetOccurrence);
+        targetOccurrence,
+        targetKind,
+        targetSlot);
   }
 
   void appendReferences(List<ReferenceHistory.Event> events) {

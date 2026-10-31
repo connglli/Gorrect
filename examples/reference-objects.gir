@@ -1,0 +1,18 @@
+gir 1;
+shape Node object 0 1;
+shape Box object 1 0;
+shape Weak weak;
+root saved = null;
+program {
+  allocate value Node;
+  allocate box Box;
+  allocate-ref wrapper Weak value;
+  write-ref box 0 wrapper;
+  read-ref alias Weak box 0;
+  write-ref box 0 null;
+  acquire held Node alias { write-data held 0 7; }
+  clear-ref alias;
+  is-cleared cleared wrapper;
+  write-root saved wrapper;
+  checkpoint;
+}

@@ -5,7 +5,9 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
@@ -57,6 +59,7 @@ public final class HistoryOracle {
   private int position, referencePosition, checkpoint;
   private boolean incomplete;
   private boolean prefix;
+  private final boolean typed;
 
   private HistoryOracle(
       GirProgram program,
@@ -64,6 +67,7 @@ public final class HistoryOracle {
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits) {
+    typed = ReferenceProgram.usesFirstClass(program);
     machine = new GraphMachine(program, OracleLimits.DEFAULT);
     frontier = new ReferenceFrontier(limits);
     machine
@@ -87,7 +91,8 @@ public final class HistoryOracle {
    * Validates a complete recorded case, checking choices before they affect graph interpretation.
    * Contended/concurrent-reference programs delegate to {@link ConcurrentHistory#check}. Inputs
    * remain unchanged. Incomplete evidence or exhausted search yields INCONCLUSIVE; impossible
-   * complete observations yield VIOLATED.
+   * complete observations yield VIOLATED. Invalid programs and unsupported reference composites
+   * throw their preflight exceptions before evidence is interpreted.
    */
   public static Result check(
       GirProgram program,
@@ -95,6 +100,7 @@ public final class HistoryOracle {
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits) {
+    validateProgram(program);
     if (HistoryProgram.usesConcurrentHistory(program))
       return ConcurrentHistory.check(program, trace, history, observations, limits);
     return check(program, trace, history, observations, limits, false);
@@ -103,7 +109,8 @@ public final class HistoryOracle {
   /**
    * Diagnoses a sequential conditional runtime failure from its recorded prefix. InvalidWorkload
    * becomes true only when the entire prefix is legal and reaches the rejected precondition;
-   * missing, impossible, or inconclusive prefixes do not establish that classification.
+   * missing, impossible, or inconclusive prefixes do not establish that classification. Static
+   * validity and reference support are checked independently of prefix completeness.
    */
   public static Result checkFailure(
       GirProgram program,
@@ -111,7 +118,15 @@ public final class HistoryOracle {
       ReferenceHistory history,
       List<Observation> observations,
       HistoryLimits limits) {
+    validateProgram(program);
     return check(program, trace, history, observations, limits, true);
+  }
+
+  // Static validity and support selection precede dispatch and any evidence-completeness exit.
+  static void validateProgram(GirProgram program) {
+    GirValidator.validate(program);
+    var support = ReferenceProgram.firstClassGaps(program);
+    if (!support.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", support));
   }
 
   /** Orphan identity records indicate missing cross-channel evidence, not a heap refutation. */
@@ -131,7 +146,6 @@ public final class HistoryOracle {
       List<Observation> observations,
       HistoryLimits limits,
       boolean prefix) {
-    GirValidator.validate(program);
     if ((!prefix && (!trace.complete() || !history.complete()))
         || trace.run() != history.run()
         || !linked(trace, history))
@@ -256,8 +270,20 @@ public final class HistoryOracle {
           checkpoints.add(new OracleResult.Checkpoint(point.id(), visit, machine.graph()));
         }
 
+        case Instruction.AllocateReference allocation -> {
+          machine.apply(allocation);
+          expect();
+          var value = machine.referenceValue(allocation.name(), -1);
+          var event = take(ReferenceHistory.Kind.CREATE, position);
+          subject(event, value);
+          require(
+              Objects.equals(value.heapTarget(), target(event.target())),
+              "Reference construction changed its target");
+          frontier.register(value, false);
+        }
+
         case Instruction.ReferenceState state -> {
-          var value = wrapped(state.owner(), state.index());
+          var value = wrapped(state.owner(), state.index(), state.receiver());
           long result = choice(state.id(), ExecutionTrace.Kind.REFERENCE_STATE);
           var event = take(ReferenceHistory.Kind.STATE, position + 1);
           subject(event, value);
@@ -289,7 +315,7 @@ public final class HistoryOracle {
         }
 
         case Instruction.ClearReference clear -> {
-          var value = wrapped(clear.owner(), clear.index());
+          var value = wrapped(clear.owner(), clear.index(), clear.receiver());
           machine.apply(clear);
           expect();
           subject(take(ReferenceHistory.Kind.CLEAR, position), value);
@@ -298,14 +324,29 @@ public final class HistoryOracle {
 
         case Instruction.Operation operation -> {
           machine.apply(operation);
+          String read =
+              operation instanceof Instruction.ReadRoot op
+                  ? op.name()
+                  : operation instanceof Instruction.ReadReference op ? op.name() : null;
+          if (typed && read != null) machine.referenceReadMarker(read);
           expect();
+          if (typed && read != null) {
+            var event = take(ReferenceHistory.Kind.STRONG_READ, position);
+            require(
+                event.wrapper() == null
+                    && event.strength() == 0
+                    && Objects.equals(
+                        ((Value.Reference) machine.bound(read)).heapTarget(),
+                        target(event.target())),
+                "Strong read changed its tagged target");
+          }
           if (operation instanceof Instruction.WriteReference write
               && write.kind() != Value.ReferenceKind.STRONG) {
             var value = machine.referenceSlot(write.owner(), write.index());
             var event = take(ReferenceHistory.Kind.INSTALL, position);
             subject(event, value);
             require(
-                Objects.equals(value.target(), target(event.target())),
+                Objects.equals(value.heapTarget(), target(event.target())),
                 "Reference store changed its referent identity");
             frontier.register(value);
           }
@@ -325,18 +366,18 @@ public final class HistoryOracle {
   }
 
   private void acquire(Instruction.Acquire operation) {
-    var value = wrapped(operation.owner(), operation.index());
+    var value = wrapped(operation.owner(), operation.index(), operation.receiver());
     long result = choice(operation.id(), ExecutionTrace.Kind.ACQUIRE);
     var event = take(ReferenceHistory.Kind.ACQUIRE, position + 1);
     subject(event, value);
-    ObjectId target = target(event.target());
+    HeapId target = target(event.target());
     require(
         (target != null) == (result == 1),
         "Acquisition branch disagrees with its recorded referent");
     require(
-        frontier.acquire(value.wrapper(), target),
+        frontier.acquireHeap(value.wrapper(), target),
         "Impossible acquisition at operation " + operation.id());
-    if (target != null) machine.bindAcquired(operation, target);
+    if (target != null) machine.bindAcquiredHeap(operation, target);
     machine.marker(operation.id(), ExecutionTrace.Kind.ACQUIRE, result);
     expect();
     if (target != null) {
@@ -351,8 +392,8 @@ public final class HistoryOracle {
     }
   }
 
-  private Value.Reference wrapped(String owner, int index) {
-    var value = machine.referenceSlot(owner, index);
+  private Value.Reference wrapped(String owner, int index, boolean receiver) {
+    var value = receiver ? machine.referenceValue(owner, -1) : machine.referenceSlot(owner, index);
     if (value.kind() == Value.ReferenceKind.STRONG || value.wrapper() == null)
       throw new GirException("Reference operation requires a soft/weak wrapper");
     return value;
@@ -427,8 +468,12 @@ public final class HistoryOracle {
         : new WrapperId(value.worker(), value.site(), value.occurrence(), value.slot());
   }
 
-  private static ObjectId target(ReferenceHistory.Target value) {
-    return value == null ? null : new ObjectId(value.worker(), value.site(), value.occurrence());
+  private static HeapId target(ReferenceHistory.Target value) {
+    if (value == null) return null;
+    return value.kind() == 0
+        ? HeapId.object(new ObjectId(value.worker(), value.site(), value.occurrence()))
+        : HeapId.wrapper(
+            new WrapperId(value.worker(), value.site(), value.occurrence(), value.slot()));
   }
 
   private static void require(boolean valid, String message) {

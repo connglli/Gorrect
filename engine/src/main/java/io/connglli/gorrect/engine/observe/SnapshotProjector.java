@@ -1,7 +1,9 @@
 package io.connglli.gorrect.engine.observe;
 
 import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.HeapReference;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
@@ -61,12 +63,14 @@ public final class SnapshotProjector {
       for (var entry : expected.handles().entrySet())
         if (observed.handles().containsKey(entry.getKey()))
           handles.put(entry.getKey(), entry.getValue());
-      var partial = new Graph(expected.objects(), expected.roots(), handles);
+      var partial = new Graph(expected.objects(), expected.roots(), handles, expected.wrappers());
       var observedHandles = new HashMap<Integer, Value.Reference>();
       for (int id : handles.keySet()) observedHandles.put(id, observed.handles().get(id));
       var result =
           ExactVerifier.verify(
-              partial, new Graph(observed.objects(), observed.roots(), observedHandles), true);
+              partial,
+              new Graph(observed.objects(), observed.roots(), observedHandles, observed.wrappers()),
+              true);
       var diagnostics = new ArrayList<>(problems);
       diagnostics.addAll(result.differences());
       if (result.verdict() == ExactVerifier.Verdict.VIOLATED)
@@ -130,7 +134,8 @@ public final class SnapshotProjector {
               "Duplicate binding participant declaration");
       }
       return new Projection(
-          Optional.of(new Graph(graph.objects(), graph.roots(), handles)), List.of());
+          Optional.of(new Graph(graph.objects(), graph.roots(), handles, graph.wrappers())),
+          List.of());
     } catch (IllegalArgumentException exception) {
       return new Projection(Optional.empty(), List.of(exception.getMessage()));
     }
@@ -158,7 +163,7 @@ public final class SnapshotProjector {
           "Unsupported natural binding activation");
       var problems = new ArrayList<String>();
       var handles = decoder.bindings(candidates, required, problems);
-      var covered = new Graph(graph.objects(), graph.roots(), handles);
+      var covered = new Graph(graph.objects(), graph.roots(), handles, graph.wrappers());
       return new Projection(
           problems.isEmpty() ? Optional.of(covered) : Optional.empty(),
           problems,
@@ -183,6 +188,8 @@ public final class SnapshotProjector {
     private final Set<Long> visitedClasses = new HashSet<>();
     private final Map<Long, ObjectId> identities = new HashMap<>();
     private final Map<Long, Value.Reference> wrappers = new HashMap<>();
+    private final Map<Long, WrapperId> referenceIds = new HashMap<>();
+    private final Map<WrapperId, HeapReference> referenceObjects = new HashMap<>();
 
     Decoder(HeapSnapshot snapshot, ObservationLayout layout) {
       this.snapshot = snapshot;
@@ -281,9 +288,9 @@ public final class SnapshotProjector {
       require(
           matches.size() == 1,
           "Missing or ambiguous physical root for binding " + binding.declaration());
-      ObjectId id = identities.get(matches.iterator().next().a());
+      HeapId id = heapId(matches.iterator().next().a());
       require(id != null, "Unmapped binding target");
-      return Value.Reference.strong(id);
+      return Value.Reference.strongHeap(id);
     }
 
     private Map<LocalName, Set<HeapSnapshot.Record>> bindingOrigins(
@@ -394,7 +401,7 @@ public final class SnapshotProjector {
 
       for (var shape : layout.arrays()) {
         require(
-            shape.kind() != Shape.Kind.OBJECT && arrays.putIfAbsent(shape.name(), shape) == null,
+            shape.array() && arrays.putIfAbsent(shape.name(), shape) == null,
             "Duplicate or invalid array layout");
       }
 
@@ -477,24 +484,39 @@ public final class SnapshotProjector {
       }
     }
 
+    private record WrapperInfo(
+        WrapperId id, ObservationLayout.ReferenceType layout, HeapSnapshot.FieldInfo referent) {}
+
+    private HeapId heapId(long tag) {
+      var object = identities.get(tag);
+      return object != null ? HeapId.object(object) : HeapId.wrapper(referenceIds.get(tag));
+    }
+
     private void resolveWrappers() {
-      for (var layout : layout.references()) {
-        var type = type(layout.signature());
+      var infos = new HashMap<Long, WrapperInfo>();
+      var used = new HashSet<WrapperId>();
+      // Every identity is indexed before an edge is resolved, including wrapper-as-referent chains.
+      for (var referenceLayout : layout.references()) {
+        var type = type(referenceLayout.signature());
         require(
             isWrapper(type)
                 && (type.kind() == HeapSnapshot.ClassKind.SOFT_REFERENCE)
-                    == (layout.kind() == Value.ReferenceKind.SOFT),
+                    == (referenceLayout.kind() == Value.ReferenceKind.SOFT),
             "Wrapper class kind mismatch");
         var roles = new HashSet<String>();
-        var worker = identityField(type, layout.worker(), "I", roles);
-        var site = identityField(type, layout.site(), "I", roles);
-        var occurrence = identityField(type, layout.occurrence(), "J", roles);
-        var slot = identityField(type, layout.slot(), "I", roles);
-        var referent = field(type, layout.referent(), roles);
+        var worker = identityField(type, referenceLayout.worker(), "I", roles);
+        var site = identityField(type, referenceLayout.site(), "I", roles);
+        var occurrence = identityField(type, referenceLayout.occurrence(), "J", roles);
+        var slot = identityField(type, referenceLayout.slot(), "I", roles);
+        var referent = field(type, referenceLayout.referent(), roles);
         require(
             !Modifier.isStatic(referent.modifiers())
                 && referent.descriptor().equals("Ljava/lang/Object;"),
             "Invalid referent metadata");
+        var shape = referenceLayout.shape();
+        require(
+            shape == null || shape.wrapper() && shape.strength() == referenceLayout.kind(),
+            "Invalid wrapper shape");
         for (var entry : objects.entrySet()) {
           long tag = entry.getKey();
           if (entry.getValue().b() != type.id()) continue;
@@ -504,16 +526,32 @@ public final class SnapshotProjector {
                   integer(primitive(tag, site, INT)),
                   primitive(tag, occurrence, LONG),
                   integer(primitive(tag, slot, INT)));
-          var edge = references.get(new Slot(tag, referent.index()));
-          ObjectId target = edge == null ? null : identities.get(edge.b());
-          require(edge == null || target != null, "Unmapped non-null referent");
-          wrappers.put(tag, new Value.Reference(layout.kind(), target, id));
+          require(used.add(id), "Duplicate wrapper incarnation");
+          infos.put(tag, new WrapperInfo(id, referenceLayout, referent));
+          if (shape != null) {
+            require(id.site() > 0 && id.slot() == -1, "First-class wrapper has invalid origin");
+            referenceIds.put(tag, id);
+          }
         }
       }
-      require(
-          wrappers.values().stream().map(Value.Reference::wrapper).distinct().count()
-              == wrappers.size(),
-          "Duplicate wrapper incarnation");
+      for (var entry : infos.entrySet()) {
+        long tag = entry.getKey();
+        var info = entry.getValue();
+        var edge = references.get(new Slot(tag, info.referent().index()));
+        var target = edge == null ? null : heapId(edge.b());
+        require(edge == null || target != null, "Unmapped non-null referent");
+        if (info.layout().shape() != null)
+          referenceObjects.put(info.id(), new HeapReference(info.layout().shape(), target));
+        else {
+          require(
+              target == null || target.object() != null,
+              "Legacy wrapper targets a first-class wrapper");
+          wrappers.put(
+              tag,
+              new Value.Reference(
+                  info.layout().kind(), target == null ? null : target.object(), info.id()));
+        }
+      }
     }
 
     private Graph buildGraph() {
@@ -581,7 +619,7 @@ public final class SnapshotProjector {
 
       require(roots.size() == layout.roots().fields().size(), "Declared root field is missing");
 
-      return new Graph(heap, roots, Map.of());
+      return new Graph(heap, roots, Map.of(), referenceObjects);
     }
 
     private HeapSnapshot.ClassInfo type(String signature) {
@@ -682,11 +720,11 @@ public final class SnapshotProjector {
       // slot.
       if (record == null) return Value.Reference.NULL;
       require(record.c() == kind, "Reference kind mismatch");
-      var id = identities.get(record.b());
+      var id = heapId(record.b());
       var wrapper = wrappers.get(record.b());
       if (wrapper != null) return wrapper;
       require(id != null, "Unmapped non-null reference target " + record.b());
-      return Value.Reference.strong(id);
+      return Value.Reference.strongHeap(id);
     }
   }
 

@@ -135,6 +135,8 @@ Complete when CAS results control execution, repeated/recursive frames keep dist
 
 ## 15. Make references and queues first-class
 
+Status: in progress. [First-class no-queue soft/weak objects](./completed-2026-10-31-stage15a.md) form the first reviewable slice; registered-wrapper exposure, named queues, phantom processing and Cleaner actors retain separate gates.
+
 Goal: model Reference objects as graph participants and cover asynchronous cleanup.
 
 Allow wrapper aliases, roots, container movement, wrapper referents, and lifetimes independent of their original slots. Add named/optional queues, explicit enqueue outcomes, phantom processing, and Cleaner actors with modeled effects. Phantom observation must not reuse weak/soft acquisition semantics.

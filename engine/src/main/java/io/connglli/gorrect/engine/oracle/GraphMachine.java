@@ -7,7 +7,9 @@ import io.connglli.gorrect.engine.gir.Location;
 import io.connglli.gorrect.engine.gir.MemoryMode;
 import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.HeapReference;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
@@ -30,6 +32,7 @@ final class GraphMachine {
   private final OracleLimits limits;
   private final Map<String, Shape> shapes;
   private final Map<ObjectId, HeapObject> objects = new HashMap<>();
+  private final Map<WrapperId, HeapReference> referenceObjects = new HashMap<>();
   private final Map<String, Value.Reference> roots = new HashMap<>();
   private Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private int worker, group, phase;
@@ -73,6 +76,7 @@ final class GraphMachine {
     // Declarations never change; payload, root, and binding maps belong to each fork.
     shapes = source.shapes;
     objects.putAll(source.objects);
+    referenceObjects.putAll(source.referenceObjects);
     roots.putAll(source.roots);
     occurrences.putAll(source.occurrences);
     scopes = copyContext(source.context()).scopes();
@@ -95,7 +99,12 @@ final class GraphMachine {
   }
 
   long forkCells() {
-    return 1L + objects.size() + roots.size() + occurrences.size() + contextCells(context());
+    return 1L
+        + objects.size()
+        + referenceObjects.size()
+        + roots.size()
+        + occurrences.size()
+        + contextCells(context());
   }
 
   private record ModelKey(
@@ -142,7 +151,12 @@ final class GraphMachine {
 
   /** Shared key cells exclude contexts, which the caller charges for graph and scope snapshots. */
   long sharedKeyCells() {
-    return 1L + objects.size() + roots.size() + occurrences.size() + slots;
+    return 1L
+        + objects.size()
+        + referenceObjects.size()
+        + roots.size()
+        + occurrences.size()
+        + slots;
   }
 
   long keyCells() {
@@ -310,6 +324,7 @@ final class GraphMachine {
 
     switch (operation) {
       case Instruction.Allocate op -> allocate(op);
+      case Instruction.AllocateReference op -> allocateReference(op);
       case Instruction.ReadRoot op -> {
         requireDeclaration(op.name());
         var value = root(op.root());
@@ -331,8 +346,12 @@ final class GraphMachine {
         requireDeclaration(op.name());
         var target = target(op.owner(), op.index(), true);
         var value = target.object().references().get(op.index());
-        if (value.kind() != Value.ReferenceKind.STRONG)
+        if (value.kind() != Value.ReferenceKind.STRONG) {
+          if (shape(op.shape()).wrapper())
+            throw new UnsupportedHistoryException(
+                "Registered legacy wrapper exposure is unsupported");
           throw new GirException("Soft/weak slots require acquire");
+        }
         requireShape(value, shape(op.shape()));
 
         bind(op.name(), op.id(), value);
@@ -342,6 +361,8 @@ final class GraphMachine {
       case Instruction.WriteReference op -> {
         var target = target(op.owner(), op.index(), true);
         var value = reference(op.value());
+        if (op.kind() != Value.ReferenceKind.STRONG && value.wrapperTarget() != null)
+          throw new UnsupportedHistoryException("Legacy wrappers require ordinary referents");
 
         long occurrence = 0;
         if (op.kind() != Value.ReferenceKind.STRONG) {
@@ -365,6 +386,10 @@ final class GraphMachine {
       }
 
       case Instruction.ClearReference op -> {
+        if (op.receiver()) {
+          referenceValue(op.owner(), op.index());
+          break;
+        }
         var target = target(op.owner(), op.index(), true);
         var value = target.object().references().get(op.index());
         if (value.kind() == Value.ReferenceKind.STRONG)
@@ -411,6 +436,8 @@ final class GraphMachine {
         var current = atomicValue(op.location());
         var expected = operand(op.expected(), op.location().reference());
         var update = operand(op.update(), op.location().reference());
+        rejectWrapperAtomic(expected);
+        rejectWrapperAtomic(update);
 
         read = current.equals(expected) ? 1 : 0;
 
@@ -422,6 +449,7 @@ final class GraphMachine {
         requireDeclaration(op.name());
         var current = atomicValue(op.location());
         var update = operand(op.update(), op.location().reference());
+        rejectWrapperAtomic(update);
         if (current instanceof Value.Reference reference) {
           requireShape(reference, shape(op.shape()));
           read = reference.target() == null ? 0 : 1;
@@ -473,7 +501,7 @@ final class GraphMachine {
   }
 
   boolean present(String name) {
-    return ((Value.Reference) binding(name)).target() != null;
+    return ((Value.Reference) binding(name)).heapTarget() != null;
   }
 
   Value bound(String name) {
@@ -517,8 +545,10 @@ final class GraphMachine {
         var access = memory(op.location(), true, MemoryMode.VOLATILE);
         yield new Memory(access.slot(), true, true, true);
       }
-      case Instruction.ClearReference op -> referenceAccess(op.owner(), op.index());
-      case Instruction.ReferenceState op -> referenceAccess(op.owner(), op.index());
+      case Instruction.ClearReference op ->
+          op.receiver() ? null : referenceAccess(op.owner(), op.index());
+      case Instruction.ReferenceState op ->
+          op.receiver() ? null : referenceAccess(op.owner(), op.index());
       default -> null;
     };
   }
@@ -540,6 +570,11 @@ final class GraphMachine {
     return reference ? reference(operand) : scalar(operand);
   }
 
+  private static void rejectWrapperAtomic(Value value) {
+    if (value instanceof Value.Reference reference && reference.wrapperTarget() != null)
+      throw new UnsupportedHistoryException("Wrapper-valued atomics are unsupported");
+  }
+
   private Value atomicValue(Location location) {
     Value value;
     if (location.kind() == Location.Kind.ROOT) value = root(location.owner());
@@ -550,9 +585,12 @@ final class GraphMachine {
               ? target.object().references().get(location.index())
               : new Value.Scalar(target.object().data().get(location.index()));
     }
-    if (value instanceof Value.Reference reference
-        && reference.kind() != Value.ReferenceKind.STRONG)
-      throw new GirException("Atomic operations require a strong slot");
+    if (value instanceof Value.Reference reference) {
+      if (reference.kind() != Value.ReferenceKind.STRONG)
+        throw new GirException("Atomic operations require a strong slot");
+      if (reference.wrapperTarget() != null)
+        throw new UnsupportedHistoryException("Wrapper-valued atomics are unsupported");
+    }
     return value;
   }
 
@@ -577,6 +615,7 @@ final class GraphMachine {
   private void allocate(Instruction.Allocate op) {
     requireDeclaration(op.name());
     var shape = shape(op.shape());
+    if (shape.wrapper()) throw new GirException("Wrapper types require allocate-ref");
     if (objects.size() + wrappers >= limits.objects()) limit("objects");
     if (shape.slots() > limits.slots() - slots) limit("slots");
 
@@ -593,6 +632,45 @@ final class GraphMachine {
     scopes.peek().put(op.name(), binding);
     occurrences.put(op.id(), occurrence);
     slots += shape.slots();
+  }
+
+  private void allocateReference(Instruction.AllocateReference op) {
+    requireDeclaration(op.name());
+    var shape = shape(op.shape());
+    if (!shape.wrapper()) throw new GirException("allocate-ref requires a wrapper type");
+    var target = reference(op.value()).heapTarget();
+    if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
+    if (slots >= limits.slots()) limit("slots");
+    long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
+    var id = new WrapperId(worker, op.id(), occurrence, -1);
+    var object = new HeapReference(shape, target);
+    var value = Value.Reference.toWrapper(id);
+
+    referenceObjects.put(id, object);
+    bind(op.name(), op.id(), value);
+    occurrences.put(op.id(), occurrence);
+    wrappers++;
+    slots++;
+  }
+
+  /** Construction edge for a canonical no-queue wrapper; clearing belongs to the frontier. */
+  Value.Reference referenceValue(String owner, int index) {
+    if (index != -1) return referenceSlot(owner, index);
+    var pointer = reference(new Operand.Name(owner));
+    if (pointer.heapTarget() == null) throw new GirException("Null wrapper receiver " + owner);
+    var id = pointer.wrapperTarget();
+    var wrapper = referenceObjects.get(id);
+    if (wrapper == null) throw new GirException("Expected first-class wrapper " + owner);
+    var target = wrapper.referent();
+    return new Value.Reference(
+        wrapper.shape().strength(),
+        target == null ? null : target.object(),
+        id,
+        target == null ? null : target.wrapper());
+  }
+
+  HeapReference referenceObject(WrapperId id) {
+    return referenceObjects.get(id);
   }
 
   private void requireDeclaration(String name) {
@@ -652,23 +730,34 @@ final class GraphMachine {
    * Opens a scope with a strong acquired handle after the frontier has validated a non-null target.
    */
   void bindAcquired(Instruction.Acquire operation, ObjectId target) {
+    bindAcquiredHeap(operation, HeapId.object(target));
+  }
+
+  void bindAcquiredHeap(Instruction.Acquire operation, HeapId target) {
     requireDeclaration(operation.name());
-    requireShape(Value.Reference.strong(target), shape(operation.shape()));
+    requireShape(Value.Reference.strongHeap(target), shape(operation.shape()));
+    requireStep();
     enterScope();
-    bind(operation.name(), operation.id(), Value.Reference.strong(target));
+    bind(operation.name(), operation.id(), Value.Reference.strongHeap(target));
   }
 
   /** Binds and records a clearing-state choice already validated by the reference frontier. */
   void referenceState(Instruction.ReferenceState operation, boolean cleared) {
     requireDeclaration(operation.name());
-    referenceSlot(operation.owner(), operation.index());
+    if (operation.receiver()) referenceValue(operation.owner(), -1);
+    else referenceSlot(operation.owner(), operation.index());
     requireStep();
     bind(operation.name(), operation.id(), new Value.Scalar(cleared ? 1 : 0));
     marker(operation.id(), ExecutionTrace.Kind.REFERENCE_STATE, cleared ? 1 : 0);
   }
 
   void chargeSnapshot(Graph graph) {
-    long cells = 1L + graph.objects().size() + graph.roots().size() + graph.handles().size();
+    long cells =
+        1L
+            + graph.objects().size()
+            + graph.roots().size()
+            + graph.handles().size()
+            + 2L * graph.wrappers().size();
     for (var object : graph.objects().values()) cells += object.shape().slots();
     if (cells > limits.snapshotCells() - snapshotCells) limit("snapshot cells");
     snapshotCells += cells;
@@ -681,14 +770,22 @@ final class GraphMachine {
   }
 
   private void requireShape(Value.Reference reference, Shape shape) {
-    if (reference.target() != null && !objects.get(reference.target()).shape().equals(shape)) {
+    if (reference.heapTarget() == null) return;
+    Shape actual =
+        reference.wrapperTarget() == null
+            ? objects.get(reference.target()).shape()
+            : referenceObjects.containsKey(reference.wrapperTarget())
+                ? referenceObjects.get(reference.wrapperTarget()).shape()
+                : null;
+    if (actual == null || !actual.equals(shape))
       throw new GirException("Reference target does not have shape " + shape.name());
-    }
   }
 
   private Target target(String owner, int index, boolean reference) {
     var value = reference(new Operand.Name(owner));
-    if (value.target() == null) throw new GirException("Null dereference " + owner);
+    if (value.heapTarget() == null) throw new GirException("Null dereference " + owner);
+    if (value.wrapperTarget() != null)
+      throw new GirException("Wrappers have no ordinary indexed slots");
     var object = objects.get(value.target());
     int size = reference ? object.references().size() : object.data().size();
     if (index < 0 || index >= size)
@@ -705,7 +802,7 @@ final class GraphMachine {
           handles.put(binding.operation(), reference);
       }
     }
-    return new Graph(objects, roots, handles);
+    return new Graph(objects, roots, handles, referenceObjects);
   }
 
   /** All suspended callers and workers contribute strong handle obligations during GC search. */
@@ -716,7 +813,7 @@ final class GraphMachine {
         for (var binding : scope.values())
           if (binding.value() instanceof Value.Reference reference)
             handles.put(binding.operation(), reference);
-    return new Graph(objects, roots, handles);
+    return new Graph(objects, roots, handles, referenceObjects);
   }
 
   /** Captures required obligations and charges their cumulative snapshot budget. */

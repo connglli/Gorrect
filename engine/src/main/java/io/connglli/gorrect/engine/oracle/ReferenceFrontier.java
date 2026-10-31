@@ -1,7 +1,9 @@
 package io.connglli.gorrect.engine.oracle;
 
 import io.connglli.gorrect.engine.model.Graph;
+import io.connglli.gorrect.engine.model.HeapId;
 import io.connglli.gorrect.engine.model.HeapObject;
+import io.connglli.gorrect.engine.model.HeapReference;
 import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
@@ -19,7 +21,16 @@ import java.util.Set;
  * GC changes only wrapper state. Ordinary graph mutations are shared across the surviving frontier.
  */
 final class ReferenceFrontier {
-  record Instance(WrapperId id, Value.ReferenceKind kind, ObjectId target) {}
+  record Instance(
+      WrapperId id,
+      Value.ReferenceKind kind,
+      ObjectId target,
+      WrapperId wrapperTarget,
+      boolean registered) {
+    HeapId heapTarget() {
+      return wrapperTarget == null ? HeapId.object(target) : HeapId.wrapper(wrapperTarget);
+    }
+  }
 
   record State(BitSet cleared, BitSet pending, BitSet delivered) {}
 
@@ -51,13 +62,19 @@ final class ReferenceFrontier {
    * without pending queue delivery. Duplicate IDs are rejected before mutation.
    */
   void register(Value.Reference value) {
+    register(value, true);
+  }
+
+  void register(Value.Reference value, boolean registered) {
     if (value.kind() == Value.ReferenceKind.STRONG) return;
     if (indices.containsKey(value.wrapper()))
       throw new IllegalArgumentException("Duplicate model wrapper identity");
     int index = instances.size();
     indices.put(value.wrapper(), index);
-    instances.add(new Instance(value.wrapper(), value.kind(), value.target()));
-    if (value.target() == null) {
+    instances.add(
+        new Instance(
+            value.wrapper(), value.kind(), value.target(), value.wrapperTarget(), registered));
+    if (value.heapTarget() == null) {
       var next = new LinkedHashSet<State>();
       for (var state : states) {
         var cleared = copy(state.cleared());
@@ -84,11 +101,11 @@ final class ReferenceFrontier {
         spend();
         var instance = instances.get(index);
         if (state.cleared().get(index)
-            || instance.target() == null
-            || strong.contains(instance.target())) continue;
+            || instance.heapTarget() == null
+            || strong.contains(instance.heapTarget())) continue;
 
         var soft = reach(graph, state, Set.of(), 1);
-        if (instance.kind() == Value.ReferenceKind.WEAK && soft.contains(instance.target()))
+        if (instance.kind() == Value.ReferenceKind.WEAK && soft.contains(instance.heapTarget()))
           continue;
 
         // A reference object may outlive its owner. Retaining that wrapper does not create a
@@ -97,14 +114,14 @@ final class ReferenceFrontier {
             reach(
                 graph,
                 state,
-                Set.of(instance.target()),
+                Set.of(instance.heapTarget()),
                 instance.kind() == Value.ReferenceKind.SOFT ? 1 : 2);
         eligible.removeAll(instance.kind() == Value.ReferenceKind.SOFT ? strong : soft);
         var cohort =
             reverse(
                 graph,
                 state,
-                instance.target(),
+                instance.heapTarget(),
                 eligible,
                 instance.kind() == Value.ReferenceKind.WEAK);
 
@@ -114,10 +131,10 @@ final class ReferenceFrontier {
         for (int member = 0; member < instances.size(); member++) {
           var value = instances.get(member);
           if (value.kind() == instance.kind()
-              && cohort.contains(value.target())
+              && cohort.contains(value.heapTarget())
               && !cleared.get(member)) {
             cleared.set(member);
-            pending.set(member);
+            if (value.registered()) pending.set(member);
           }
         }
 
@@ -138,6 +155,10 @@ final class ReferenceFrontier {
    * IDs are model errors; false leaves an empty frontier for this candidate path.
    */
   boolean acquire(WrapperId id, ObjectId target) {
+    return acquireHeap(id, HeapId.object(target));
+  }
+
+  boolean acquireHeap(WrapperId id, HeapId target) {
     int index = index(id);
     var instance = instances.get(index);
 
@@ -145,7 +166,7 @@ final class ReferenceFrontier {
         state ->
             target == null
                 ? !state.cleared().get(index)
-                : state.cleared().get(index) || !target.equals(instance.target()));
+                : state.cleared().get(index) || !target.equals(instance.heapTarget()));
 
     return !states.isEmpty();
   }
@@ -268,66 +289,96 @@ final class ReferenceFrontier {
                           value ->
                               value.kind() != Value.ReferenceKind.STRONG
                                       && state.cleared().get(index(value.wrapper()))
-                                  ? new Value.Reference(value.kind(), null, value.wrapper())
+                                  ? new Value.Reference(value.kind(), null, value.wrapper(), null)
                                   : value)
                       .toList();
               objects.put(id, new HeapObject(object.shape(), values, object.data()));
             });
-    return new Graph(objects, graph.roots(), graph.handles());
+    var wrappers = new HashMap<WrapperId, HeapReference>();
+    graph
+        .wrappers()
+        .forEach(
+            (id, object) -> {
+              spend(2);
+              wrappers.put(
+                  id,
+                  new HeapReference(
+                      object.shape(), state.cleared().get(index(id)) ? null : object.referent()));
+            });
+    return new Graph(objects, graph.roots(), graph.handles(), wrappers);
   }
 
-  private Set<ObjectId> reach(Graph graph, State state, Set<ObjectId> additional, int strength) {
-    var found = new HashSet<ObjectId>();
-    var queue = new ArrayDeque<ObjectId>(additional);
+  private Set<HeapId> reach(Graph graph, State state, Set<HeapId> additional, int strength) {
+    var found = new HashSet<HeapId>();
+    var queue = new ArrayDeque<HeapId>(additional);
     spend(1L + graph.roots().size() + graph.handles().size());
     graph
         .roots()
         .values()
         .forEach(
             value -> {
-              if (value.target() != null) queue.addLast(value.target());
+              if (value.heapTarget() != null) queue.add(value.heapTarget());
             });
     graph
         .handles()
         .values()
         .forEach(
             value -> {
-              if (value.target() != null) queue.addLast(value.target());
+              if (value.heapTarget() != null) queue.add(value.heapTarget());
             });
     while (!queue.isEmpty()) {
       var id = queue.removeFirst();
       if (!found.add(id)) continue;
-      var object = graph.objects().get(id);
-      if (object == null) throw new IllegalArgumentException("Missing model referent " + id);
-      spend(1L + object.references().size());
-      for (var value : object.references())
-        if (value.target() != null
+      for (var value : edges(graph, id)) {
+        spend();
+        if (value.heapTarget() != null
             && value.kind().ordinal() <= strength
             && (value.kind() == Value.ReferenceKind.STRONG
-                || !state.cleared().get(index(value.wrapper())))) queue.addLast(value.target());
+                || !state.cleared().get(index(value.wrapper())))) queue.add(value.heapTarget());
+      }
     }
     return found;
   }
 
-  private Set<ObjectId> reverse(
-      Graph graph, State state, ObjectId seed, Set<ObjectId> eligible, boolean softEdges) {
-    var incoming = new HashMap<ObjectId, List<ObjectId>>();
-    spend(graph.objects().size());
-    for (var entry : graph.objects().entrySet())
-      if (eligible.contains(entry.getKey())) {
-        spend(1L + entry.getValue().references().size());
-        for (var value : entry.getValue().references())
-          if (value.target() != null
+  private List<Value.Reference> edges(Graph graph, HeapId id) {
+    spend();
+    if (id.object() != null) {
+      var object = graph.objects().get(id.object());
+      if (object == null) throw new IllegalArgumentException("Missing model referent " + id);
+      return object.references();
+    }
+    var object = graph.wrappers().get(id.wrapper());
+    if (object == null) throw new IllegalArgumentException("Missing model wrapper " + id);
+    var target = object.referent();
+    return List.of(
+        new Value.Reference(
+            object.shape().strength(),
+            target == null ? null : target.object(),
+            id.wrapper(),
+            target == null ? null : target.wrapper()));
+  }
+
+  private Set<HeapId> reverse(
+      Graph graph, State state, HeapId seed, Set<HeapId> eligible, boolean softEdges) {
+    var incoming = new HashMap<HeapId, List<HeapId>>();
+    var vertices = new ArrayList<HeapId>();
+    graph.objects().keySet().forEach(id -> vertices.add(HeapId.object(id)));
+    graph.wrappers().keySet().forEach(id -> vertices.add(HeapId.wrapper(id)));
+    spend(vertices.size());
+    for (var id : vertices)
+      if (eligible.contains(id)) {
+        for (var value : edges(graph, id)) {
+          spend();
+          if (value.heapTarget() != null
               && (value.kind() == Value.ReferenceKind.STRONG
-                  || (softEdges
+                  || softEdges
                       && value.kind() == Value.ReferenceKind.SOFT
-                      && !state.cleared().get(index(value.wrapper())))))
-            incoming
-                .computeIfAbsent(value.target(), ignored -> new ArrayList<>())
-                .add(entry.getKey());
+                      && !state.cleared().get(index(value.wrapper()))))
+            incoming.computeIfAbsent(value.heapTarget(), ignored -> new ArrayList<>()).add(id);
+        }
       }
-    var found = new HashSet<ObjectId>();
-    var queue = new ArrayDeque<ObjectId>();
+    var found = new HashSet<HeapId>();
+    var queue = new ArrayDeque<HeapId>();
     queue.add(seed);
     while (!queue.isEmpty()) {
       spend();

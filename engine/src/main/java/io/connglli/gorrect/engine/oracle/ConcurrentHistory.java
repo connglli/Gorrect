@@ -2,7 +2,6 @@ package io.connglli.gorrect.engine.oracle;
 
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
-import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
@@ -27,6 +26,8 @@ import java.util.Objects;
  *
  * <p>Race freedom must hold in every SC execution before SC can serve as the oracle. Checking only
  * the recorded path could reject legal behavior of a racy program.
+ *
+ * <p>First-class reference objects require the sequential {@link HistoryOracle} backend.
  */
 public final class ConcurrentHistory {
   // Explicit continuations make scope and handle-lifetime changes schedulable between workers.
@@ -151,12 +152,13 @@ public final class ConcurrentHistory {
    * check, independently of observed results. Returns only after complete exploration succeeds.
    *
    * @throws GirException if static contracts or a possible executed precondition are invalid
-   * @throws UnsupportedHistoryException if the profile cannot prove ordinary-access race freedom
+   * @throws UnsupportedHistoryException if reference semantics are unsupported or the profile
+   *     cannot prove ordinary-access race freedom
    * @throws HistoryLimitException if the search budget cannot complete the proof
    * @throws OracleLimitException if model work exceeds its bounds
    */
   public static void audit(GirProgram program, HistoryLimits limits) {
-    GirValidator.validate(program);
+    validateProgram(program);
     new ConcurrentHistory(new HistoryBudget(limits), null, null, List.of()).explore(program);
   }
 
@@ -166,8 +168,8 @@ public final class ConcurrentHistory {
    * Missing coverage or exhausted bounds yield INCONCLUSIVE; an unmatched complete history yields
    * VIOLATED. File order between workers imposes no scheduling edge.
    *
-   * <p>Inputs are not mutated. Invalid workloads and unsupported race profiles still throw their
-   * preflight exceptions; a saved trace cannot bypass those checks.
+   * <p>Inputs are not mutated. Invalid workloads, unsupported reference semantics, and unsupported
+   * race profiles still throw their preflight exceptions; a saved trace cannot bypass those checks.
    */
   public static HistoryOracle.Result check(
       GirProgram program,
@@ -175,7 +177,7 @@ public final class ConcurrentHistory {
       ReferenceHistory history,
       List<HistoryOracle.Observation> observations,
       HistoryLimits limits) {
-    GirValidator.validate(program);
+    validateProgram(program);
     if (!trace.complete()
         || !history.complete()
         || trace.run() != history.run()
@@ -214,6 +216,15 @@ public final class ConcurrentHistory {
       return new HistoryOracle.Result(
           ExactVerifier.Verdict.INCONCLUSIVE, List.of(limit.getMessage()), null, false);
     }
+  }
+
+  private static void validateProgram(GirProgram program) {
+    HistoryOracle.validateProgram(program);
+
+    // Direct callers can supply sequential source, so source classification is insufficient.
+    if (ReferenceProgram.usesFirstClass(program))
+      throw new UnsupportedHistoryException(
+          "First-class reference objects are unsupported by the concurrent history backend");
   }
 
   private State explore(GirProgram program) {
@@ -804,7 +815,10 @@ public final class ConcurrentHistory {
   }
 
   private static ObjectId target(ReferenceHistory.Target value) {
-    return value == null ? null : new ObjectId(value.worker(), value.site(), value.occurrence());
+    if (value == null) return null;
+    // This profile supports ordinary referents only; a matching numeric tuple is insufficient.
+    require(value.kind() == 0, "Reference target uses the wrapper namespace");
+    return new ObjectId(value.worker(), value.site(), value.occurrence());
   }
 
   private static void require(boolean valid, String message) {

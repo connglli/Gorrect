@@ -105,7 +105,7 @@ runs/<run-id>/
 
 The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. `collector.properties` retains preflight facts; `target.properties` records actual options and VM identity. Generated source, classes, layouts, and support libraries preserve the executable case. Replay reuses those bytes and settings; offline verification needs no target installation.
 
-`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for reference cases, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
+`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for legacy reference cases or `references.gtyped` for first-class wrapper targets, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
 
 ## Checks
 

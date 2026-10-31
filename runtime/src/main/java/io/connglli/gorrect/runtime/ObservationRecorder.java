@@ -38,4 +38,35 @@ public interface ObservationRecorder {
       int targetWorker,
       int targetSite,
       long targetOccurrence);
+
+  /** Primitive tagged-target observation; kind0 is an object, kind1 a complete wrapper identity. */
+  default void referenceTyped(
+      int operation,
+      int kind,
+      long value,
+      int strength,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
+      int targetWorker,
+      int targetSite,
+      long targetOccurrence,
+      int targetKind,
+      int targetSlot) {
+    if (targetKind != 0 || targetSlot != 0)
+      throw new IllegalStateException("Tagged reference recording is unavailable");
+    reference(
+        operation,
+        kind,
+        value,
+        strength,
+        wrapperWorker,
+        wrapperSite,
+        wrapperOccurrence,
+        wrapperSlot,
+        targetWorker,
+        targetSite,
+        targetOccurrence);
+  }
 }

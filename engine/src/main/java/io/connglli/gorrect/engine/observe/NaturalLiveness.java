@@ -90,7 +90,7 @@ public final class NaturalLiveness {
       var value = graph.handles().get(id);
       if (value != null) handles.put(id, value);
     }
-    return new Graph(graph.objects(), graph.roots(), handles);
+    return new Graph(graph.objects(), graph.roots(), handles, graph.wrappers());
   }
 
   /** Main-thread visits requiring this binding under the legacy unconditional selection rule. */

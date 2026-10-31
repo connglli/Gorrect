@@ -64,7 +64,10 @@ public record ObservationLayout(
       String variable,
       String type) {}
 
-  /** Actual wrapper metadata roles; inherited fields use captured JVMTI indices. */
+  /**
+   * Actual wrapper roles; inherited fields use captured JVMTI indices. A nominal shape selects a
+   * first-class no-queue vertex; null preserves the legacy opaque slot-wrapper rule.
+   */
   public record ReferenceType(
       String signature,
       Value.ReferenceKind kind,
@@ -72,7 +75,19 @@ public record ObservationLayout(
       String site,
       String occurrence,
       String slot,
-      String referent) {}
+      String referent,
+      Shape shape) {
+    public ReferenceType(
+        String signature,
+        Value.ReferenceKind kind,
+        String worker,
+        String site,
+        String occurrence,
+        String slot,
+        String referent) {
+      this(signature, kind, worker, site, occurrence, slot, referent, null);
+    }
+  }
 
   /**
    * Maps a JVM class signature to logical slots. Reference and data field names are in logical slot

@@ -32,6 +32,9 @@ public sealed interface Instruction {
    */
   record Allocate(int id, String name, String shape) implements Operation {}
 
+  /** Constructs a fresh no-queue soft/weak wrapper around the current reference operand. */
+  record AllocateReference(int id, String name, String shape, Operand value) implements Operation {}
+
   /**
    * Requires a declared root and shape and a fresh name. Reads the root once into a strong handle,
    * including null. A non-null target must have exactly the declared shape. Later root writes do
@@ -86,29 +89,61 @@ public sealed interface Instruction {
   }
 
   /**
-   * Reads a soft/weak slot exactly once. A non-null result must have the declared shape and is held
-   * strongly in the child scope while its body executes; null skips the body. The result's binding
-   * expires at scope exit and cannot be released early. Checkpoints in the body include the
-   * acquired handle among their binding obligations. Acquisitions consume one step and a successful
-   * scope exit consumes one.
+   * Reads a soft/weak slot or first-class receiver exactly once. The receiver flag denotes omitted
+   * index syntax; explicit negative legacy indices remain invalid. A non-null result must have the
+   * declared shape and is held strongly in the child scope while its body executes; null skips the
+   * body. The result's binding expires at scope exit and cannot be released early. Checkpoints in
+   * the body include the acquired handle among their binding obligations. Acquisitions consume one
+   * step and a successful scope exit consumes one.
    */
-  record Acquire(int id, String name, String shape, String owner, int index, List<Instruction> body)
+  record Acquire(
+      int id,
+      String name,
+      String shape,
+      String owner,
+      int index,
+      List<Instruction> body,
+      boolean receiver)
       implements Instruction {
     public Acquire {
       body = List.copyOf(body);
+      if (receiver && index != -1) throw new IllegalArgumentException("Invalid receiver encoding");
+    }
+
+    public Acquire(
+        int id, String name, String shape, String owner, int index, List<Instruction> body) {
+      this(id, name, shape, owner, index, body, false);
     }
   }
 
   /**
-   * Clears the current wrapper explicitly. This permits clearing a protected referent, without
-   * enqueueing it.
+   * Clears the current slot wrapper or first-class receiver explicitly. Receiver aliases share that
+   * canonical clear state. This permits clearing a protected referent without enqueueing it.
    */
-  record ClearReference(int id, String owner, int index) implements Operation {}
+  record ClearReference(int id, String owner, int index, boolean receiver) implements Operation {
+    public ClearReference {
+      if (receiver && index != -1) throw new IllegalArgumentException("Invalid receiver encoding");
+    }
+
+    public ClearReference(int id, String owner, int index) {
+      this(id, owner, index, false);
+    }
+  }
 
   /**
-   * Binds scalar 1 if refersTo(null) reports cleared, else 0, without acquiring a strong referent.
+   * Binds scalar 1 if refersTo(null) reports cleared for the slot wrapper or first-class receiver,
+   * else 0, without acquiring a strong referent.
    */
-  record ReferenceState(int id, String name, String owner, int index) implements Operation {}
+  record ReferenceState(int id, String name, String owner, int index, boolean receiver)
+      implements Operation {
+    public ReferenceState {
+      if (receiver && index != -1) throw new IllegalArgumentException("Invalid receiver encoding");
+    }
+
+    public ReferenceState(int id, String name, String owner, int index) {
+      this(id, name, owner, index, false);
+    }
+  }
 
   /**
    * Polls the case's reference queue once without acquiring a referent. Records the delivered

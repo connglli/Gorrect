@@ -10,16 +10,42 @@ public sealed interface Value {
     WEAK
   }
 
-  /** A null target preserves the slot's kind, allowing verification to detect strength changes. */
-  record Reference(ReferenceKind kind, ObjectId target, WrapperId wrapper) implements Value {
+  /**
+   * Ordinary and wrapper target components are mutually exclusive; use heapTarget for generic
+   * nullness/identity. The wrapper component names a legacy soft/weak edge incarnation, not a
+   * strong pointer target. Both target components absent mean null, preserving the edge kind.
+   */
+  record Reference(ReferenceKind kind, ObjectId target, WrapperId wrapper, WrapperId wrapperTarget)
+      implements Value {
     public static final Reference NULL = new Reference(ReferenceKind.STRONG, null);
 
     public Reference {
       Objects.requireNonNull(kind);
+      if (target != null && wrapperTarget != null)
+        throw new IllegalArgumentException("Reference has two target namespaces");
     }
 
     public Reference(ReferenceKind kind, ObjectId target) {
-      this(kind, target, null);
+      this(kind, target, null, null);
+    }
+
+    public Reference(ReferenceKind kind, ObjectId target, WrapperId wrapper) {
+      this(kind, target, wrapper, null);
+    }
+
+    /** Logical target without conflating an absent object target with a wrapper pointer. */
+    public HeapId heapTarget() {
+      return wrapperTarget == null ? HeapId.object(target) : HeapId.wrapper(wrapperTarget);
+    }
+
+    public static Reference toWrapper(WrapperId id) {
+      return id == null ? NULL : new Reference(ReferenceKind.STRONG, null, null, id);
+    }
+
+    public static Reference strongHeap(HeapId id) {
+      return id == null
+          ? NULL
+          : id.object() != null ? strong(id.object()) : toWrapper(id.wrapper());
     }
 
     public static Reference strong(ObjectId target) {

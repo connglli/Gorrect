@@ -39,6 +39,12 @@ public final class ObservationCapabilities {
   /** Reasons the selected profile cannot faithfully execute/check this combination. */
   public static List<String> unsupported(GirProgram program, ObservationProfile profile) {
     var reasons = new ArrayList<String>();
+    if (ReferenceProgram.usesFirstClass(program)) {
+      reasons.addAll(ReferenceProgram.firstClassGaps(program));
+      if (!profile.controlled()) reasons.add("First-class wrappers require controlled observation");
+      if (ReferenceProgram.hasParallel(program))
+        reasons.add("First-class wrapper concurrency is unsupported");
+    }
     boolean history =
         ReferenceProgram.usesReferences(program) || HistoryProgram.usesConcurrentHistory(program);
     if (HistoryProgram.hasWorkerCheckpoints(program) && !profile.bindings())
@@ -48,7 +54,7 @@ public final class ObservationCapabilities {
     if (!profile.controlled()) {
       var arrays =
           program.shapes().stream()
-              .filter(shape -> shape.kind() != Shape.Kind.OBJECT)
+              .filter(shape -> shape.array())
               .map(Shape::name)
               .collect(Collectors.toSet());
       if (program.objects().stream().anyMatch(object -> arrays.contains(object.shape()))

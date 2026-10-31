@@ -67,6 +67,8 @@ public final class GirParser {
                 case "object" -> new Shape(name, Shape.Kind.OBJECT, integer(), integer());
                 case "refs" -> new Shape(name, Shape.Kind.REFERENCE_ARRAY, integer(), 0);
                 case "data" -> new Shape(name, Shape.Kind.DATA_ARRAY, 0, integer());
+                case "soft" -> new Shape(name, Shape.Kind.SOFT_REFERENCE, 0, 0);
+                case "weak" -> new Shape(name, Shape.Kind.WEAK_REFERENCE, 0, 0);
                 default -> throw error("Unsupported shape kind " + kind);
               });
           expect(";");
@@ -111,6 +113,7 @@ public final class GirParser {
       Instruction instruction =
           switch (opcode) {
             case "allocate" -> new Instruction.Allocate(id, name(), name());
+            case "allocate-ref" -> new Instruction.AllocateReference(id, name(), name(), operand());
             case "read-volatile-root" ->
                 new Instruction.ReadRoot(id, name(), name(), name(), MemoryMode.VOLATILE);
             case "write-volatile-root" ->
@@ -157,10 +160,24 @@ public final class GirParser {
             case "write-weak" ->
                 new Instruction.WriteReference(
                     id, name(), integer(), operand(), Value.ReferenceKind.WEAK);
-            case "acquire" ->
-                new Instruction.Acquire(id, name(), name(), name(), integer(), block(depth + 1));
-            case "clear-ref" -> new Instruction.ClearReference(id, name(), integer());
-            case "is-cleared" -> new Instruction.ReferenceState(id, name(), name(), integer());
+            case "acquire" -> {
+              String result = name(), shape = name(), owner = name();
+              boolean receiver = current.text().equals("{");
+              int index = receiver ? -1 : integer();
+              yield new Instruction.Acquire(
+                  id, result, shape, owner, index, block(depth + 1), receiver);
+            }
+            case "clear-ref" -> {
+              String owner = name();
+              boolean receiver = current.text().equals(";");
+              yield new Instruction.ClearReference(id, owner, receiver ? -1 : integer(), receiver);
+            }
+            case "is-cleared" -> {
+              String result = name(), owner = name();
+              boolean receiver = current.text().equals(";");
+              yield new Instruction.ReferenceState(
+                  id, result, owner, receiver ? -1 : integer(), receiver);
+            }
             case "poll-queue" -> new Instruction.PollQueue(id);
             case "read-data" -> new Instruction.ReadData(id, name(), name(), integer());
             case "same-object" -> new Instruction.SameObject(id, name(), operand(), operand());

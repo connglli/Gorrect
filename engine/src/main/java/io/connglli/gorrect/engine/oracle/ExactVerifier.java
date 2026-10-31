@@ -63,6 +63,13 @@ public final class ExactVerifier {
       slots(path + " reference", wanted.references(), actual.references(), differences);
       slots(path + " data", wanted.data(), actual.data(), differences);
     }
+    for (var id : new TreeSet<>(required.wrappers().keySet())) {
+      if (differences.size() >= MAX_DIFFERENCES) break;
+      var actual = observed.wrappers().get(id);
+      var wanted = required.wrappers().get(id);
+      if (!wanted.equals(actual))
+        add(differences, "reference " + id + ": expected " + wanted + ", observed " + actual);
+    }
     return new Result(differences.isEmpty() ? Verdict.SATISFIED : Verdict.VIOLATED, differences);
   }
 

@@ -36,6 +36,8 @@ public final class GirFormatter {
             case OBJECT -> "object " + shape.references() + " " + shape.data();
             case REFERENCE_ARRAY -> "refs " + shape.references();
             case DATA_ARRAY -> "data " + shape.data();
+            case SOFT_REFERENCE -> "soft";
+            case WEAK_REFERENCE -> "weak";
           };
       line(0, "shape " + shape.name() + " " + dimensions + ";");
     }
@@ -86,8 +88,7 @@ public final class GirFormatter {
                 + acquire.shape()
                 + " "
                 + acquire.owner()
-                + " "
-                + acquire.index()
+                + (acquire.receiver() ? "" : " " + acquire.index())
                 + " {");
         acquire.body().forEach(child -> instruction(child, indent + 1));
         line(indent, "}");
@@ -118,6 +119,8 @@ public final class GirFormatter {
   private static String operation(Instruction.Operation operation) {
     return switch (operation) {
       case Instruction.Allocate op -> "allocate " + op.name() + " " + op.shape();
+      case Instruction.AllocateReference op ->
+          "allocate-ref " + op.name() + " " + op.shape() + " " + operand(op.value());
       case Instruction.ReadRoot op ->
           (op.mode() == MemoryMode.VOLATILE ? "read-volatile-root " : "read-root ")
               + op.name()
@@ -148,9 +151,10 @@ public final class GirFormatter {
               + op.index()
               + " "
               + operand(op.value());
-      case Instruction.ClearReference op -> "clear-ref " + op.owner() + " " + op.index();
+      case Instruction.ClearReference op ->
+          "clear-ref " + op.owner() + (op.receiver() ? "" : " " + op.index());
       case Instruction.ReferenceState op ->
-          "is-cleared " + op.name() + " " + op.owner() + " " + op.index();
+          "is-cleared " + op.name() + " " + op.owner() + (op.receiver() ? "" : " " + op.index());
       case Instruction.PollQueue ignored -> "poll-queue";
       case Instruction.SameObject op ->
           "same-object " + op.name() + " " + operand(op.left()) + " " + operand(op.right());

@@ -51,12 +51,14 @@ public final class JavaEmitter {
   private final ObservationProfile observation;
   private int worker;
   private final boolean references;
+  private final boolean typedReferences;
   private final boolean concurrent;
 
   private JavaEmitter(GirProgram program, ObservationProfile observation) {
     this.program = program;
     this.observation = observation;
     references = ReferenceProgram.usesReferences(program);
+    typedReferences = ReferenceProgram.usesFirstClass(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
   }
 
@@ -114,12 +116,45 @@ public final class JavaEmitter {
       shapes.put(shape.name(), shape);
       String type =
           switch (shape.kind()) {
-            case OBJECT -> "S" + index;
+            case OBJECT, SOFT_REFERENCE, WEAK_REFERENCE -> "S" + index;
             case REFERENCE_ARRAY -> "Object[]";
             case DATA_ARRAY -> "long[]";
           };
       types.put(shape.name(), type);
       index++;
+      if (shape.wrapper()) {
+        String strength = shape.kind() == Shape.Kind.SOFT_REFERENCE ? "Soft" : "Weak";
+        line(
+            "public static final class "
+                + type
+                + " extends java.lang.ref."
+                + strength
+                + "Reference<Object> {");
+        line("public final int idWorker, idSite, idSlot = -1; public final long idOccurrence;");
+        line(
+            "public "
+                + type
+                + "(int worker, int site, long occurrence, Object target) { super(target);"
+                + " idWorker=worker; idSite=site; idOccurrence=occurrence; }");
+        line("}");
+        registrations.add(
+            "new NativeObserver.Registration("
+                + type
+                + ".class, HeapSnapshot.ClassKind."
+                + (strength.equals("Soft") ? "SOFT_REFERENCE" : "WEAK_REFERENCE")
+                + ")");
+        referenceLayouts.add(
+            new ObservationLayout.ReferenceType(
+                "LCase$" + type + ";",
+                shape.strength(),
+                "idWorker",
+                "idSite",
+                "idOccurrence",
+                "idSlot",
+                "referent",
+                shape));
+        continue;
+      }
       if (shape.kind() != Shape.Kind.OBJECT) continue;
       line("public static final class " + type + " {");
       line("public final int idWorker, idSite;");
@@ -144,6 +179,7 @@ public final class JavaEmitter {
       registrations.add(
           "new NativeObserver.Registration(" + type + ".class, HeapSnapshot.ClassKind.OBJECT)");
     }
+    if (typedReferences) typedReferenceHelper();
     registrations.add(
         "new NativeObserver.Registration(Object[].class, HeapSnapshot.ClassKind.REFERENCE_ARRAY)");
     registrations.add(
@@ -193,7 +229,7 @@ public final class JavaEmitter {
         source.toString(),
         new ObservationLayout(
             layouts,
-            program.shapes().stream().filter(shape -> shape.kind() != Shape.Kind.OBJECT).toList(),
+            program.shapes().stream().filter(Shape::array).toList(),
             new ObservationLayout.Roots("LCase$Roots;", rootFields),
             referenceLayouts,
             bindings,
@@ -234,6 +270,39 @@ public final class JavaEmitter {
     line(
         "else if (object instanceof WeakSlot r) session.reference(operation, kind, value, 2,"
             + " r.idWorker, r.idSite, r.idOccurrence, r.idSlot, tw, ts, occurrence);");
+    line("else throw new IllegalStateException(\"Unregistered reference object\");");
+    line("}");
+  }
+
+  private void typedReferenceHelper() {
+    line(
+        "private static void typedReference(ObservationRecorder session, int operation, int kind,"
+            + " long value, java.lang.ref.Reference<?> object, int tw, int ts, long occurrence, int"
+            + " tk, int slot) {");
+    line(
+        "if (object == null) session.referenceTyped(operation, kind, value, 0, 0, 0, 0L, 0, tw, ts,"
+            + " occurrence, tk, slot);");
+    var descriptors = new ArrayList<String>();
+    descriptors.add("SoftSlot");
+    descriptors.add("WeakSlot");
+    for (var shape : program.shapes())
+      if (shape.wrapper()) descriptors.add(types.get(shape.name()));
+    for (String type : descriptors) {
+      boolean soft =
+          type.equals("SoftSlot")
+              || program.shapes().stream()
+                  .anyMatch(
+                      shape ->
+                          shape.wrapper()
+                              && types.get(shape.name()).equals(type)
+                              && shape.kind() == Shape.Kind.SOFT_REFERENCE);
+      line(
+          "else if (object instanceof "
+              + type
+              + " r) session.referenceTyped(operation, kind, value, "
+              + (soft ? 1 : 2)
+              + ", r.idWorker, r.idSite, r.idOccurrence, r.idSlot, tw, ts, occurrence, tk, slot);");
+    }
     line("else throw new IllegalStateException(\"Unregistered reference object\");");
     line("}");
   }
@@ -345,6 +414,8 @@ public final class JavaEmitter {
             instruction -> {
               switch (instruction) {
                 case Instruction.Allocate op -> line("private static long a" + op.id() + ";");
+                case Instruction.AllocateReference op ->
+                    line("private static long a" + op.id() + ";");
                 case Instruction.WriteReference op -> {
                   if (op.kind() != Value.ReferenceKind.STRONG)
                     line("private static long w" + op.id() + ";");
@@ -466,7 +537,9 @@ public final class JavaEmitter {
             "java.lang.ref.Reference<?> "
                 + ref
                 + " = (java.lang.ref.Reference<?>) "
-                + slot(owner.name(), owner.shape(), op.index(), true)
+                + (op.receiver()
+                    ? owner.name()
+                    : slot(owner.name(), owner.shape(), op.index(), true))
                 + ";");
         line(
             types.get(op.shape())
@@ -557,7 +630,9 @@ public final class JavaEmitter {
             "java.lang.ref.Reference<?> "
                 + ref
                 + " = (java.lang.ref.Reference<?>) "
-                + slot(owner.name(), owner.shape(), op.index(), true)
+                + (op.receiver()
+                    ? owner.name()
+                    : slot(owner.name(), owner.shape(), op.index(), true))
                 + ";");
         line(ref + ".clear();");
         reference(op.id(), "CLEAR", "0L", ref, null);
@@ -572,7 +647,9 @@ public final class JavaEmitter {
             "java.lang.ref.Reference<?> "
                 + ref
                 + " = (java.lang.ref.Reference<?>) "
-                + slot(owner.name(), owner.shape(), op.index(), true)
+                + (op.receiver()
+                    ? owner.name()
+                    : slot(owner.name(), owner.shape(), op.index(), true))
                 + ";");
         String name = declare(op.name(), null, op.id());
         line("long " + name + " = " + ref + ".refersTo(null) ? 1L : 0L;");
@@ -596,6 +673,29 @@ public final class JavaEmitter {
 
       case Instruction.Collect ignored ->
           line((worker == 0 ? "session" : "worker") + ".collect(" + ignored.id() + ");");
+      case Instruction.AllocateReference op -> {
+        var shape = shapes.get(op.shape());
+        String name = declare(op.name(), shape, op.id());
+        line(
+            types.get(op.shape())
+                + " "
+                + name
+                + " = new "
+                + types.get(op.shape())
+                + "("
+                + worker
+                + ", "
+                + op.id()
+                + ", ++a"
+                + op.id()
+                + ", "
+                + operand(op.value())
+                + ");");
+        String target =
+            op.value() instanceof Operand.Name value ? binding(value.name()).name() : null;
+        reference(op.id(), "CREATE", "0L", name, target);
+        return;
+      }
       case Instruction.Allocate op -> {
         var shape = shapes.get(op.shape());
         String name = declare(op.name(), shape, op.id());
@@ -622,7 +722,7 @@ public final class JavaEmitter {
                 + ") "
                 + read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode())
                 + ";");
-        if (concurrent) {
+        if (concurrent || typedReferences) {
           reference(op.id(), "STRONG_READ", "0L", null, name);
           return;
         }
@@ -641,7 +741,7 @@ public final class JavaEmitter {
                 + ") "
                 + read(new Location(Location.Kind.REFERENCE, op.owner(), op.index()), op.mode())
                 + ";");
-        if (concurrent) {
+        if (concurrent || typedReferences) {
           reference(op.id(), "STRONG_READ", "0L", null, name);
           return;
         }
@@ -832,7 +932,7 @@ public final class JavaEmitter {
                 + " == null ? 0L : "
                 + target
                 + ".idOccurrence)";
-    if (target != null && referenceShapes.get(target).kind() != Shape.Kind.OBJECT)
+    if (target != null && referenceShapes.get(target).array())
       identity =
           "("
               + target
@@ -847,6 +947,35 @@ public final class JavaEmitter {
               + " == null ? 0L : NativeObserver.arrayIdentity("
               + target
               + ", 2))";
+    if (typedReferences) {
+      String tag =
+          target != null && referenceShapes.get(target).wrapper()
+              ? "(" + target + " == null ? 0 : 1)"
+              : "0";
+      String targetSlot =
+          target != null && referenceShapes.get(target).wrapper()
+              ? "(" + target + " == null ? 0 : " + target + ".idSlot)"
+              : "0";
+      line(
+          "typedReference("
+              + recorder()
+              + ", "
+              + operation
+              + ", ReferenceHistory.Kind."
+              + kind
+              + ".ordinal(), "
+              + (kind.equals("STRONG_READ") ? "(" + target + " == null ? 0L : 1L)" : value)
+              + ", "
+              + wrapper
+              + ", "
+              + identity
+              + ", "
+              + tag
+              + ", "
+              + targetSlot
+              + ");");
+      return;
+    }
     if (kind.equals("STRONG_READ")) {
       line(
           recorder()
@@ -902,7 +1031,7 @@ public final class JavaEmitter {
     if (shape != null && observation.bindings()) {
       String type =
           switch (shape.kind()) {
-            case OBJECT -> "LCase$" + types.get(shape.name()) + ";";
+            case OBJECT, SOFT_REFERENCE, WEAK_REFERENCE -> "LCase$" + types.get(shape.name()) + ";";
             case REFERENCE_ARRAY -> "[Ljava/lang/Object;";
             case DATA_ARRAY -> "[J";
           };
@@ -938,11 +1067,13 @@ public final class JavaEmitter {
           "new " + types.get(shape.name()) + "(" + worker + ", " + site + ", " + occurrence + ")";
       case REFERENCE_ARRAY -> "new Object[" + shape.references() + "]";
       case DATA_ARRAY -> "new long[" + shape.data() + "]";
+      case SOFT_REFERENCE, WEAK_REFERENCE ->
+          throw new IllegalArgumentException("Wrapper construction needs a referent");
     };
   }
 
   private void bindArray(String name, Shape shape, int site, String occurrence) {
-    if (shape.kind() != Shape.Kind.OBJECT)
+    if (shape.array())
       line(
           "NativeObserver.bindArrayIdentity("
               + name

@@ -6,16 +6,26 @@ import java.util.Map;
 
 /**
  * Immutable heap and reference roots. Named root slots remain present when null; live handles are
- * indexed by their declaring instruction IDs. Objects may include unreachable garbage.
+ * indexed by their declaring instruction IDs. Ordinary allocations and canonical first-class
+ * wrapper vertices use separate identity maps; either may include unreachable garbage.
  */
 public record Graph(
     Map<ObjectId, HeapObject> objects,
     Map<String, Value.Reference> roots,
-    Map<Integer, Value.Reference> handles) {
+    Map<Integer, Value.Reference> handles,
+    Map<WrapperId, HeapReference> wrappers) {
   public Graph {
     objects = Map.copyOf(objects);
     roots = Map.copyOf(roots);
     handles = Map.copyOf(handles);
+    wrappers = Map.copyOf(wrappers);
+  }
+
+  public Graph(
+      Map<ObjectId, HeapObject> objects,
+      Map<String, Value.Reference> roots,
+      Map<Integer, Value.Reference> handles) {
+    this(objects, roots, handles, Map.of());
   }
 
   /**
@@ -34,36 +44,42 @@ public record Graph(
   }
 
   private Graph reachable(boolean includeReferences) {
-    var queue = new ArrayDeque<ObjectId>();
+    var queue = new ArrayDeque<HeapId>();
     roots.values().forEach(value -> enqueue(value, queue));
     handles.values().forEach(value -> enqueue(value, queue));
     var required = new HashMap<ObjectId, HeapObject>();
+    var referenceObjects = new HashMap<WrapperId, HeapReference>();
     while (!queue.isEmpty()) {
       var id = queue.removeFirst();
-      if (required.containsKey(id)) continue;
-      var object = objects.get(id);
+      if (id.wrapper() != null) {
+        if (referenceObjects.containsKey(id.wrapper())) continue;
+        var wrapper = wrappers.get(id.wrapper());
+        if (wrapper == null) throw new IllegalArgumentException("Missing model wrapper " + id);
+        if (!includeReferences)
+          throw new IllegalArgumentException("Expected model requires strong references");
+        referenceObjects.put(id.wrapper(), wrapper);
+        if (wrapper.referent() != null) queue.add(wrapper.referent());
+        continue;
+      }
+      if (required.containsKey(id.object())) continue;
+      var object = objects.get(id.object());
       if (object == null) throw new IllegalArgumentException("Missing model object " + id);
       if (object.references().size() != object.shape().references()
-          || object.data().size() != object.shape().data()) {
+          || object.data().size() != object.shape().data())
         throw new IllegalArgumentException("Invalid model slots for " + id);
+      required.put(id.object(), object);
+      for (var value : object.references()) {
+        if (includeReferences && value.kind() != Value.ReferenceKind.STRONG) {
+          if (value.heapTarget() != null) queue.add(value.heapTarget());
+        } else enqueue(value, queue);
       }
-      required.put(id, object);
-      object
-          .references()
-          .forEach(
-              value -> {
-                if (includeReferences && value.kind() != Value.ReferenceKind.STRONG) {
-                  if (value.target() != null) queue.addLast(value.target());
-                } else enqueue(value, queue);
-              });
     }
-    return new Graph(required, roots, handles);
+    return new Graph(required, roots, handles, referenceObjects);
   }
 
-  private static void enqueue(Value.Reference value, ArrayDeque<ObjectId> queue) {
-    if (value.kind() != Value.ReferenceKind.STRONG) {
+  private static void enqueue(Value.Reference value, ArrayDeque<HeapId> queue) {
+    if (value.kind() != Value.ReferenceKind.STRONG)
       throw new IllegalArgumentException("Expected model requires strong references");
-    }
-    if (value.target() != null) queue.addLast(value.target());
+    if (value.heapTarget() != null) queue.addLast(value.heapTarget());
   }
 }

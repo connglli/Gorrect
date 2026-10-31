@@ -12,7 +12,9 @@ final class ReferenceRecorder {
       sites,
       slots,
       targetWorkers,
-      targetSites;
+      targetSites,
+      targetKinds,
+      targetSlots;
   private final long[] occurrences, targetOccurrences;
   private final int worker;
   private int count;
@@ -27,6 +29,8 @@ final class ReferenceRecorder {
     slots = new int[capacity];
     targetWorkers = new int[capacity];
     targetSites = new int[capacity];
+    targetKinds = new int[capacity];
+    targetSlots = new int[capacity];
     occurrences = new long[capacity];
     targetOccurrences = new long[capacity];
   }
@@ -42,6 +46,34 @@ final class ReferenceRecorder {
       int targetWorker,
       int targetSite,
       long targetOccurrence) {
+    recordTyped(
+        sequence,
+        kind,
+        strength,
+        wrapperWorker,
+        wrapperSite,
+        wrapperOccurrence,
+        wrapperSlot,
+        targetWorker,
+        targetSite,
+        targetOccurrence,
+        0,
+        0);
+  }
+
+  void recordTyped(
+      int sequence,
+      int kind,
+      int strength,
+      int wrapperWorker,
+      int wrapperSite,
+      long wrapperOccurrence,
+      int wrapperSlot,
+      int targetWorker,
+      int targetSite,
+      long targetOccurrence,
+      int targetKind,
+      int targetSlot) {
     if (count == sequences.length)
       throw new IllegalStateException("Reference history capacity exhausted");
     sequences[count] = sequence;
@@ -53,6 +85,8 @@ final class ReferenceRecorder {
     slots[count] = wrapperSlot;
     targetWorkers[count] = targetWorker;
     targetSites[count] = targetSite;
+    targetKinds[count] = targetKind;
+    targetSlots[count] = targetSlot;
     targetOccurrences[count++] = targetOccurrence;
   }
 
@@ -68,7 +102,11 @@ final class ReferenceRecorder {
           targetOccurrences[index] == 0
               ? null
               : new ReferenceHistory.Target(
-                  targetWorkers[index], targetSites[index], targetOccurrences[index]);
+                  targetWorkers[index],
+                  targetSites[index],
+                  targetOccurrences[index],
+                  targetKinds[index],
+                  targetSlots[index]);
       events.add(
           new ReferenceHistory.Event(
               worker, sequences[index], types[kinds[index]], strengths[index], wrapper, target));

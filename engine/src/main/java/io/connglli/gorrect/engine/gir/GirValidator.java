@@ -30,6 +30,20 @@ public final class GirValidator {
   private int nextWorker = 1;
   private int workerDepth = -1;
   private int conditionalDepth;
+  private boolean collectReferenceTypes;
+  private final Map<Integer, Shape> referenceOwners = new HashMap<>();
+  private final Map<Integer, Shape> referenceValues = new HashMap<>();
+
+  record ReferenceTypes(Map<Integer, Shape> owners, Map<Integer, Shape> values) {}
+
+  /** Reuses lexical validation to resolve exact source types for the conservative support proof. */
+  static ReferenceTypes referenceTypes(GirProgram program) {
+    var validator = new GirValidator();
+    validator.collectReferenceTypes = true;
+    validator.validateProgram(program);
+    return new ReferenceTypes(
+        Map.copyOf(validator.referenceOwners), Map.copyOf(validator.referenceValues));
+  }
 
   private record Binding(Shape shape, boolean live, boolean pinned) {
     Binding(Shape shape, boolean live) {
@@ -67,6 +81,7 @@ public final class GirValidator {
         fail("Invalid or duplicate initial object " + object.id());
       }
       var shape = shape(object.shape());
+      if (shape.wrapper()) fail("Wrapper types require allocate-ref");
       if (object.references().size() != shape.references()
           || object.data().size() != shape.data()) {
         fail("Wrong slot count for initial object " + object.id());
@@ -94,7 +109,8 @@ public final class GirValidator {
   }
 
   private static void initialReference(Value.Reference value, Set<ObjectId> ids) {
-    if (value.wrapper() != null) fail("Wrapper identities are assigned by the implementation");
+    if (value.wrapper() != null || value.wrapperTarget() != null)
+      fail("Wrapper identities are assigned by the implementation");
     if (value.target() != null && !ids.contains(value.target())) {
       fail("Unknown initial reference target " + value.target());
     }
@@ -134,7 +150,10 @@ public final class GirValidator {
             conditionalDepth--;
           }
           case Instruction.Acquire acquire -> {
-            slot(acquire.owner(), acquire.index(), true);
+            if (acquire.receiver()) {
+              if (acquire.index() != -1) fail("Invalid receiver encoding");
+              wrapper(acquire.owner());
+            } else slot(acquire.owner(), acquire.index(), true);
             var shape = shape(acquire.shape());
             conditionalDepth++;
             block(acquire.body(), depth + 1, acquire.name(), shape);
@@ -202,7 +221,16 @@ public final class GirValidator {
 
   private void operation(Instruction.Operation operation) {
     switch (operation) {
-      case Instruction.Allocate op -> declare(op.name(), shape(op.shape()));
+      case Instruction.Allocate op -> {
+        if (shape(op.shape()).wrapper()) fail("Wrapper types require allocate-ref");
+        declare(op.name(), shape(op.shape()));
+      }
+      case Instruction.AllocateReference op -> {
+        var shape = shape(op.shape());
+        if (!shape.wrapper()) fail("allocate-ref requires a wrapper type");
+        operand(op.value(), true);
+        declare(op.name(), shape);
+      }
       case Instruction.ReadRoot op -> {
         if (op.mode() == null) fail("Missing memory mode");
         root(op.root());
@@ -216,12 +244,18 @@ public final class GirValidator {
       }
 
       case Instruction.ReadReference op -> {
+        if (collectReferenceTypes) referenceOwners.put(op.id(), binding(op.owner()).shape());
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
         declare(op.name(), shape(op.shape()));
       }
 
       case Instruction.WriteReference op -> {
+        if (collectReferenceTypes) {
+          referenceOwners.put(op.id(), binding(op.owner()).shape());
+          if (op.value() instanceof Operand.Name name && binding(name.name()).shape() != null)
+            referenceValues.put(op.id(), binding(name.name()).shape());
+        }
         if (op.mode() == null) fail("Missing memory mode");
         slot(op.owner(), op.index(), true);
         operand(op.value(), true);
@@ -230,9 +264,17 @@ public final class GirValidator {
           fail("Wrapped stores use ordinary accesses");
       }
 
-      case Instruction.ClearReference op -> slot(op.owner(), op.index(), true);
+      case Instruction.ClearReference op -> {
+        if (op.receiver()) {
+          if (op.index() != -1) fail("Invalid receiver encoding");
+          wrapper(op.owner());
+        } else slot(op.owner(), op.index(), true);
+      }
       case Instruction.ReferenceState op -> {
-        slot(op.owner(), op.index(), true);
+        if (op.receiver()) {
+          if (op.index() != -1) fail("Invalid receiver encoding");
+          wrapper(op.owner());
+        } else slot(op.owner(), op.index(), true);
         declare(op.name(), null);
       }
 
@@ -289,6 +331,11 @@ public final class GirValidator {
       root(location.owner());
       if (location.index() != 0) fail("Root location has no index");
     } else slot(location.owner(), location.index(), location.reference());
+  }
+
+  private void wrapper(String owner) {
+    var shape = binding(owner).shape();
+    if (shape == null || !shape.wrapper()) fail("Expected wrapper handle " + owner);
   }
 
   private void slot(String owner, int index, boolean reference) {

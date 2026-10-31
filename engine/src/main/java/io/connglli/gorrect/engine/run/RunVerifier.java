@@ -161,7 +161,7 @@ final class RunVerifier {
               new HistoryOracle.Observation(projection.graph(), projection.problems()));
         }
 
-        var history = ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run);
+        var history = referenceHistory(directory, run, program);
         if (!history.complete()) throw new IOException("Reference history is incomplete");
 
         // Coverage checks below may use the path only after its choices and observations match.
@@ -617,7 +617,7 @@ final class RunVerifier {
           HistoryOracle.checkFailure(
               program,
               trace,
-              ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run),
+              referenceHistory(directory, run, program),
               observations,
               new HistoryLimits(
                   profile.limits().historyStates(), profile.limits().historyTransitions()));
@@ -713,6 +713,13 @@ final class RunVerifier {
     if (profile.requirements().contains("compilation-events")
         && (snapshot.capabilities() & HeapSnapshot.COMPILATION_OVERFLOW) != 0
         && !unmet.contains("compilation-events")) unmet.add("compilation-events");
+  }
+
+  private static ReferenceHistory referenceHistory(Path directory, long run, GirProgram program)
+      throws IOException {
+    return ReferenceProgram.usesFirstClass(program)
+        ? ReferenceHistory.readTyped(directory.resolve("traces/references.gtyped"), run)
+        : ReferenceHistory.read(directory.resolve("traces/references.ghistory"), run);
   }
 
   static HistoryLimits historyLimits(TargetProfile profile) {

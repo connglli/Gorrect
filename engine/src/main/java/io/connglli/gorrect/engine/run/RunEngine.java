@@ -372,6 +372,9 @@ public final class RunEngine {
 
     if (recordReferences)
       Files.writeString(directory.resolve("generated/references.properties"), "enabled=true\n");
+    if (ReferenceProgram.usesFirstClass(program))
+      Files.writeString(
+          directory.resolve("generated/typed-references.properties"), "enabled=true\n");
 
     Files.writeString(
         directory.resolve("generated/gc.properties"),
