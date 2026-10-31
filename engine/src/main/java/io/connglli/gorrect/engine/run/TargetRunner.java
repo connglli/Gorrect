@@ -11,6 +11,7 @@ import static io.connglli.gorrect.engine.run.ProcessSupport.terminate;
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.oracle.CheckpointPlan;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.OracleResult;
@@ -71,9 +72,16 @@ final class TargetRunner {
       manifest.addProperty("controlTransport", "unix");
       manifest.addProperty("controlSocket", control.address().toString());
 
+      RetainedMetadata.selection(
+          directory,
+          profile,
+          JsonFiles.GSON.fromJson(
+              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class));
+      ControlledLaunch.check(directory, profile, savedEnvironment);
       var resolution = VmProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
       if (resolution.failure() != null) return resolution.failure();
       profile = resolution.profile();
+      if (profile.retainedMetadata()) profile = profile.withJava(VmDriver.executable(profile));
       manifest.add("profile", JsonFiles.GSON.toJsonTree(profile));
 
       var command = new ArrayList<>(VmDriver.launchArguments(profile, directory, OBSERVER));
@@ -95,7 +103,8 @@ final class TargetRunner {
               .directory(directory.toFile())
               .redirectOutput(directory.resolve("logs/stdout.log").toFile())
               .redirectError(directory.resolve("logs/stderr.log").toFile());
-      if (savedEnvironment == null) cleanEnvironment(builder, profile.environment());
+      if (savedEnvironment == null)
+        cleanEnvironment(builder, profile.environment(), profile.retainedMetadata());
       else {
         builder.environment().clear();
         builder.environment().putAll(savedEnvironment);
@@ -113,11 +122,17 @@ final class TargetRunner {
       var out = control.output();
       var first = ControlMessage.read(in, run);
       messages.add(first);
+      if (first.kind() == ControlMessage.Kind.FAILED
+          && first.sequence() == 0
+          && first.operation() == 0
+          && first.occurrence() == 0)
+        return startupFailure(profile.retainedMetadata(), first.detail());
       if (first.kind() != ControlMessage.Kind.HELLO || first.sequence() != 0)
         return RunReport.failure(RunReport.Outcome.PROTOCOL_ERROR, "Missing startup handshake");
 
       hello = true;
-      var target = target(directory);
+      var target =
+          profile.retainedMetadata() ? ControlledLaunch.targetFacts(directory) : target(directory);
       List<String> unmet;
       try {
         unmet = VmDriver.requirements(profile, target);
@@ -126,6 +141,16 @@ final class TargetRunner {
             RunReport.Outcome.PROTOCOL_ERROR, "Invalid target capability report: " + exception);
       }
 
+      if (profile.retainedMetadata()) {
+        try {
+          ControlledLaunch.evidence(profile, manifest, target);
+          RetainedMetadata.startup(directory, run);
+        } catch (IOException | RuntimeException failure) {
+          unmet.add("retained-class startup certification failed: " + failure);
+        }
+      }
+      if (profile.retainedMetadata())
+        manifest.addProperty("bindingMetadataAdapter", profile.vm() + "-retained-v1");
       manifest.add("target", JsonFiles.GSON.toJsonTree(target));
       if (manifest.has("referenceHistory")
           && manifest.get("referenceHistory").getAsBoolean()
@@ -212,6 +237,8 @@ final class TargetRunner {
             RunReport.Outcome.CRASH,
             "Target exited with " + process.exitValue() + ": " + exception);
       return RunReport.failure(RunReport.Outcome.PROTOCOL_ERROR, exception.toString());
+    } catch (IllegalArgumentException unsupported) {
+      return RunReport.failure(RunReport.Outcome.UNSUPPORTED, unsupported.getMessage());
     } catch (UnsupportedOperationException exception) {
       return new RunReport(
           RunReport.Outcome.UNSUPPORTED,
@@ -230,6 +257,13 @@ final class TargetRunner {
       transcript.add("messages", JsonFiles.GSON.toJsonTree(messages));
       JsonFiles.write(directory.resolve("traces/control.json"), transcript);
     }
+  }
+
+  /** Only the explicit provider setup marker changes a startup failure into unsupported. */
+  static RunReport startupFailure(boolean retained, String detail) {
+    boolean unsupported = retained && detail.startsWith(ControlMessage.RETAINED_UNSUPPORTED);
+    return RunReport.failure(
+        unsupported ? RunReport.Outcome.UNSUPPORTED : RunReport.Outcome.STARTUP_FAILURE, detail);
   }
 
   private static void acknowledge(DataOutputStream out, long run, long sequence)

@@ -7,6 +7,9 @@ import java.io.IOException;
 /** Small synchronous control frames; snapshots and traces travel as files. */
 public record ControlMessage(
     Kind kind, long run, long sequence, int operation, long occurrence, String detail) {
+  /** Initial FAILED detail marker for a recognized retained-provider setup/certification gap. */
+  public static final String RETAINED_UNSUPPORTED = "retained-unsupported: ";
+
   private static final int MAGIC = 0x47524331;
 
   // Ordinals are wire values; the writer and reader must use the same ordering.

@@ -10,6 +10,7 @@ import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
+import io.connglli.gorrect.protocol.FrameEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
@@ -214,6 +215,91 @@ class BindingProjectionTest {
         SnapshotProjector.projectCandidates(snapshot(), LAYOUT, empty, Set.of(7))
             .graph()
             .isEmpty());
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {"complete", "wrong-target", "missing", "slot", "method", "bci", "thread", "depth"})
+  void retainedScopesRecoverOnlyBciAndStillRequireActualPhysicalCoordinates(String damage) {
+    var root =
+        root(
+            damage.equals("wrong-target") ? 200 : 100,
+            damage.equals("thread") ? 12 : 11,
+            damage.equals("slot") ? 3 : 2,
+            damage.equals("method") ? 902 : 901,
+            damage.equals("bci") ? 21 : -1);
+    if (damage.equals("depth"))
+      root =
+          new HeapSnapshot.Record(
+              root.kind(), root.a(), root.b(), root.c(), 4, root.e(), root.f(), root.g());
+    var original = damage.equals("missing") ? snapshot() : snapshot(root);
+    var raw =
+        new HeapSnapshot(
+            original.run(),
+            original.checkpoint(),
+            original.status(),
+            0,
+            HeapSnapshot.TAGGING,
+            0,
+            0,
+            0,
+            0,
+            original.classes(),
+            original.arrays(),
+            original.methods().stream()
+                .map(
+                    method ->
+                        new HeapSnapshot.MethodInfo(
+                            method.token(), method.owner(), method.name(), method.descriptor()))
+                .toList(),
+            original.records());
+    var scopes =
+        new RetainedBindings(
+            Map.of(901L, original.methods().getFirst()),
+            Map.of(
+                0,
+                new RetainedBindings.Participant(
+                    11, new FrameEvidence.Frame(901, 3, 20), FrameEvidence.Role.EXECUTE)));
+    var projection = SnapshotProjector.projectRetained(raw, LAYOUT, List.of(PRESENT), scopes);
+    assertEquals(
+        damage.equals("complete")
+            ? ExactVerifier.Verdict.SATISFIED
+            : damage.equals("wrong-target")
+                ? ExactVerifier.Verdict.VIOLATED
+                : ExactVerifier.Verdict.INCONCLUSIVE,
+        projection.verify(expected(Value.Reference.strong(new ObjectId(0, 7, 1)))).verdict());
+    assertEquals(HeapSnapshot.TAGGING, raw.capabilities());
+    assertEquals(List.of(), raw.methods().getFirst().locals());
+    if (!damage.equals("missing"))
+      assertEquals(damage.equals("bci") ? 21 : -1, raw.records().getLast().g());
+  }
+
+  @Test
+  void zeroMethodMetadataCannotInventAMissingOrigin() {
+    var raw = snapshot(root(100, 11, 2, 0, 20));
+    var method = raw.methods().getFirst();
+    var damaged =
+        new HeapSnapshot(
+            raw.run(),
+            raw.checkpoint(),
+            raw.status(),
+            raw.jvmtiError(),
+            raw.capabilities(),
+            0,
+            0,
+            0,
+            0,
+            raw.classes(),
+            raw.arrays(),
+            List.of(
+                new HeapSnapshot.MethodInfo(
+                    0, method.owner(), method.name(), method.descriptor(), method.locals())),
+            raw.records());
+    assertEquals(
+        ExactVerifier.Verdict.INCONCLUSIVE,
+        SnapshotProjector.project(damaged, LAYOUT, PRESENT)
+            .verify(expected(Value.Reference.strong(new ObjectId(0, 7, 1))))
+            .verdict());
   }
 
   private static Graph expected(Value.Reference binding) {

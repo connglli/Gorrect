@@ -1,6 +1,6 @@
-# Retained metadata observation proposal
+# Retained metadata observation design
 
-Status: unaccepted implementation design for the remaining [stage 13](../implementations/2026-10-30-stage13.md) metadata integration. The [retained reader](../../../engine/src/main/java/io/connglli/gorrect/engine/observe/RetainedLocalMetadata.java) exists; this proposal gives it a complete launch/evidence/projection consumer. It changes no production behavior. GIR and evidence remain version 1.
+Status: completed design record for the first retained metadata slice. The [implementation record](../implementations/completed-2026-10-31-retained-provider.md) holds validation and remaining limits; [observation](../../../docs/observation.md#binding-metadata) and [usage](../../../docs/usage.md#profiles) own the implemented contracts. The sections below preserve the proposed boundaries and enabling checks.
 
 ## First supported unit
 

@@ -14,11 +14,19 @@ final class ProcessSupport {
    * Removes ambient Java-option/classpath injection, then applies already validated profile values.
    */
   static void cleanEnvironment(ProcessBuilder builder, Map<String, String> additions) {
+    cleanEnvironment(builder, additions, false);
+  }
+
+  /** Retained code certification additionally removes native-library and loader injection. */
+  static void cleanEnvironment(
+      ProcessBuilder builder, Map<String, String> additions, boolean retained) {
     builder
         .environment()
         .keySet()
         .removeIf(
-            name -> TargetProfile.ENVIRONMENT_OPTIONS.contains(name.toUpperCase(Locale.ROOT)));
+            name ->
+                TargetProfile.ENVIRONMENT_OPTIONS.contains(name.toUpperCase(Locale.ROOT))
+                    || retained && ControlledLaunch.injection(name));
     builder.environment().putAll(additions);
   }
 

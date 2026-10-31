@@ -86,3 +86,84 @@ dependencies {
     }
     tasks.named('check') { dependsOn workerCheck }
 }
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    ['success', 'wrong-mirror', 'duplicate', 'abort', 'truncated'].each { mode ->
+        def taskName = "retainedObserver${mode.split('-').collect { it.capitalize() }.join('')}${javaVersion}"
+        def retainedTest = tasks.register(taskName, JavaExec) {
+            group = 'verification'
+            description = "Checks retained code/frame certification (${mode}) on Java ${javaVersion}."
+            dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
+            classpath = sourceSets.smoke.runtimeClasspath
+            mainClass = 'Case'
+            javaLauncher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(javaVersion)
+            }
+            timeout = Duration.ofSeconds(60)
+            doFirst {
+                def library = configurations.nativeObserver.singleFile.absolutePath
+                setJvmArgs(["-agentpath:${library}=retained-class", '-Xint', '-Xmx128m'])
+                setArgs([library, layout.buildDirectory.dir("retained/java${javaVersion}/${mode}").get().asFile.absolutePath, mode])
+            }
+        }
+        tasks.named('check') { dependsOn retainedTest }
+    }
+}
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    ['intended', 'legacy', 'mismatch'].each { overload ->
+        def sessionTest = tasks.register("retainedSession${overload.capitalize()}${javaVersion}", JavaExec) {
+            group = 'verification'
+            description = "Checks retained startup failure delivery (${overload}) on Java ${javaVersion}."
+            dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
+            classpath = sourceSets.smoke.runtimeClasspath
+            mainClass = 'io.connglli.gorrect.runtime.RetainedSessionCheck'
+            javaLauncher = javaToolchains.launcherFor {
+                languageVersion = JavaLanguageVersion.of(javaVersion)
+            }
+            timeout = Duration.ofSeconds(30)
+            doFirst {
+                def library = configurations.nativeObserver.singleFile.absolutePath
+                def mode = overload == 'mismatch' ? '' : '=retained-class'
+                setJvmArgs(["-agentpath:${library}${mode}"])
+                setArgs([library, layout.buildDirectory.dir("session/java${javaVersion}/${overload}").get().asFile.absolutePath, overload])
+            }
+        }
+        tasks.named('check') { dependsOn sessionTest }
+    }
+}
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    def weakTest = tasks.register("retainedWeakCheck${javaVersion}", JavaExec) {
+        group = 'verification'
+        description = "Checks weak class/loader ownership after rejected retained binding on Java ${javaVersion}."
+        dependsOn tasks.named('smokeClasses'), configurations.nativeObserver
+        classpath = sourceSets.smoke.runtimeClasspath
+        mainClass = 'io.connglli.gorrect.runtime.RetainedWeakCheck'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(javaVersion)
+        }
+        timeout = Duration.ofSeconds(30)
+        doFirst {
+            def library = configurations.nativeObserver.singleFile.absolutePath
+            setJvmArgs(["-agentpath:${library}=retained-class", '-Xint', '-Xmx128m'])
+            setArgs([library, layout.buildDirectory.dir("retained-weak/java${javaVersion}").get().asFile.absolutePath])
+        }
+    }
+    tasks.named('check') { dependsOn weakTest }
+}
+
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { javaVersion ->
+    def parkingTest = tasks.register("retainedParkingCheck${javaVersion}", JavaExec) {
+        group = 'verification'
+        description = "Checks interrupted retained parking and failure publication on Java ${javaVersion}."
+        dependsOn tasks.named('smokeClasses')
+        classpath = sourceSets.smoke.runtimeClasspath
+        mainClass = 'io.connglli.gorrect.runtime.RetainedParkingCheck'
+        javaLauncher = javaToolchains.launcherFor {
+            languageVersion = JavaLanguageVersion.of(javaVersion)
+        }
+        timeout = Duration.ofSeconds(30)
+    }
+    tasks.named('check') { dependsOn parkingTest }
+}

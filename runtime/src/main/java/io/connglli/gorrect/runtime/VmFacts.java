@@ -18,9 +18,23 @@ public final class VmFacts {
     var properties = new Properties();
     for (String name :
         new String[] {
-          "java.version", "java.vm.name", "java.vm.version", "java.vendor", "os.name", "os.arch"
+          "java.version",
+          "java.vm.name",
+          "java.vm.version",
+          "java.vendor",
+          "java.home",
+          "os.name",
+          "os.arch"
         }) properties.setProperty(name, System.getProperty(name));
     properties.setProperty("process.pid", Long.toString(ProcessHandle.current().pid()));
+    ProcessHandle.current()
+        .info()
+        .command()
+        .ifPresent(command -> properties.setProperty("process.command", command));
+    var arguments = ManagementFactory.getRuntimeMXBean().getInputArguments();
+    properties.setProperty("vm.arguments.count", Integer.toString(arguments.size()));
+    for (int index = 0; index < arguments.size(); index++)
+      properties.setProperty("vm.argument." + index, arguments.get(index));
     properties.setProperty(
         "vm.start", Long.toString(ManagementFactory.getRuntimeMXBean().getStartTime()));
     properties.setProperty("java.feature", Integer.toString(Runtime.version().feature()));
@@ -37,6 +51,17 @@ public final class VmFacts {
   public static Properties read() {
     if (!isOpenJ9()) return HotSpotFacts.read();
     var properties = common();
+    properties.setProperty(
+        "attach.disabled",
+        Boolean.toString("no".equals(System.getProperty("com.ibm.tools.attach.enable"))));
+    var arguments = ManagementFactory.getRuntimeMXBean().getInputArguments();
+    properties.setProperty(
+        "shared.cache.disabled", Boolean.toString(arguments.contains("-Xshareclasses:none")));
+    properties.setProperty("aot.disabled", Boolean.toString(arguments.contains("-Xnoaot")));
+    properties.setProperty(
+        "reuse.disabled",
+        Boolean.toString(
+            arguments.contains("-Xshareclasses:none") && arguments.contains("-Xnoaot")));
     try {
       // Query the public MBean attribute without a compile-time dependency on IBM classes.
       var server = ManagementFactory.getPlatformMBeanServer();

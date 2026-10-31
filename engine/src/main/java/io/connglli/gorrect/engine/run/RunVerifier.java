@@ -44,6 +44,7 @@ import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Properties;
 import java.util.Set;
 import java.util.stream.Collectors;
 
@@ -104,8 +105,20 @@ final class RunVerifier {
         throw new IOException("Conditional natural capture requires lexical candidate selection");
       var problems = new ArrayList<String>();
       var unmet = new ArrayList<String>();
-      var captures = new CaptureReader(directory, run, profile, layout);
-      unmet.addAll(VmDriver.requirements(profile, target(directory)));
+      var captures = new CaptureReader(directory, run, profile, layout, manifest);
+      Properties facts;
+      if (profile.retainedMetadata()) {
+        facts = new Properties();
+        try {
+          facts = ControlledLaunch.targetFacts(directory);
+          unmet.addAll(VmDriver.requirements(profile, facts));
+        } catch (IOException | RuntimeException failure) {
+          captures.error("Target capability evidence failed: " + failure);
+        }
+      } else {
+        facts = target(directory);
+        unmet.addAll(VmDriver.requirements(profile, facts));
+      }
 
       ExecutionTrace trace;
       try {
@@ -119,7 +132,7 @@ final class RunVerifier {
         if (!lexicalNatural) throw new IOException("Execution trace is incomplete");
         captures.error("Execution trace is incomplete");
       }
-      boolean workerEvidenceFailed = false;
+      boolean workerEvidenceFailed = profile.retainedMetadata() && !captures.trustedLaunch();
       try {
         StressVerifier.checkEnvelope(directory, run, program, trace);
       } catch (IOException | RuntimeException failure) {
@@ -156,9 +169,11 @@ final class RunVerifier {
                   expectedBindings,
                   cuts.get(
                       new CheckpointPlan.Visit(
-                          messages[index].operation(), messages[index].occurrence())));
+                          messages[index].operation(), messages[index].occurrence())),
+                  messages[index].operation() == 0);
           observations.add(
-              new HistoryOracle.Observation(projection.graph(), projection.problems()));
+              new HistoryOracle.Observation(
+                  projection.covered(), projection.problems(), projection.graph().isPresent()));
         }
 
         var history = referenceHistory(directory, run, program);
@@ -181,8 +196,8 @@ final class RunVerifier {
         var completion =
             result.execution() != null && !workerEvidenceFailed
                 ? CollectionVerifier.verify(
-                    directory, run, program, result.execution(), profile, target(directory))
-                : CollectionVerifier.withoutExecution(directory, run, profile, target(directory));
+                    directory, run, program, result.execution(), profile, facts)
+                : CollectionVerifier.withoutExecution(directory, run, profile, facts);
         for (String requirement : completion.unmet())
           if (!unmet.contains(requirement)) unmet.add(requirement);
         problems.addAll(completion.problems());
@@ -211,7 +226,7 @@ final class RunVerifier {
         }
         requiredObservations(profile, exercised, unmet, problems);
         report = new RunReport(report.execution(), report.verdict(), unmet, problems);
-        observationReport(directory, program, observation, exercised, verified);
+        observationReport(directory, program, observation, facts, exercised, verified);
         JsonFiles.write(directory.resolve("result.json"), report);
         return report;
       }
@@ -230,9 +245,8 @@ final class RunVerifier {
             !stressCoverage(directory, run, program, oracle, profile, unmet, problems);
       var completion =
           trustedCoverage && !workerEvidenceFailed
-              ? CollectionVerifier.verify(
-                  directory, run, program, oracle, profile, target(directory))
-              : CollectionVerifier.withoutExecution(directory, run, profile, target(directory));
+              ? CollectionVerifier.verify(directory, run, program, oracle, profile, facts)
+              : CollectionVerifier.withoutExecution(directory, run, profile, facts);
       for (String requirement : completion.unmet())
         if (!unmet.contains(requirement)) unmet.add(requirement);
       problems.addAll(completion.problems());
@@ -286,7 +300,9 @@ final class RunVerifier {
                       + presence.getKey()
                       + " nullness differs from the modeled value");
             }
-        } else projection = captures.read(i + 1L, expected.handles().keySet());
+        } else
+          projection =
+              captures.read(i + 1L, expected.handles().keySet(), null, visit.operation() == 0);
         if (projection.covered().isPresent()) exercised.add("named-roots");
         var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
@@ -296,6 +312,8 @@ final class RunVerifier {
       }
 
       captures.merge(exercised, unmet, problems);
+
+      inconclusive |= captures.failed();
 
       // Extraction gaps cannot become a pass, even when another checkpoint is fully covered.
       var verdict =
@@ -312,7 +330,7 @@ final class RunVerifier {
               verdict,
               unmet,
               problems);
-      observationReport(directory, program, observation, exercised, verified);
+      observationReport(directory, program, observation, facts, exercised, verified);
     } catch (OracleLimitException | HistoryLimitException exception) {
       report = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
     } catch (UnsupportedHistoryException exception) {
@@ -417,22 +435,41 @@ final class RunVerifier {
     private final ObservationLayout layout;
     private final Set<String> exercised = new HashSet<>();
     private final List<String> unmet = new ArrayList<>(), errors = new ArrayList<>();
+    private String launchProblem;
 
-    CaptureReader(Path directory, long run, TargetProfile profile, ObservationLayout layout) {
+    CaptureReader(
+        Path directory,
+        long run,
+        TargetProfile profile,
+        ObservationLayout layout,
+        JsonObject manifest) {
       this.directory = directory;
       this.run = run;
       this.profile = profile;
       this.layout = layout;
-    }
-
-    SnapshotProjector.Projection read(long sequence, Set<Integer> declarations) {
-      return read(sequence, declarations, null);
+      if (profile.retainedMetadata()) {
+        try {
+          ControlledLaunch.evidence(profile, manifest, ControlledLaunch.targetFacts(directory));
+        } catch (IOException | RuntimeException failure) {
+          launchProblem = "Controlled launch evidence failed: " + failure;
+          errors.add(launchProblem);
+        }
+      }
+      try {
+        RetainedMetadata.selection(directory, profile, layout);
+        if (profile.retainedMetadata()) RetainedMetadata.completion(directory, run);
+      } catch (IOException | RuntimeException failure) {
+        errors.add("Metadata certification failed: " + failure);
+      }
     }
 
     SnapshotProjector.Projection read(
-        long sequence, Set<Integer> declarations, CheckpointPlan.Cut cut) {
+        long sequence, Set<Integer> declarations, CheckpointPlan.Cut cut, boolean terminal) {
+      HeapSnapshot capture = null;
       try {
-        var capture = snapshot(directory, run, sequence);
+        capture = snapshot(directory, run, sequence);
+        if (launchProblem != null) throw new IOException(launchProblem);
+        RetainedMetadata.selection(directory, profile, layout);
         compilationCoverage(capture, profile, unmet);
         return projection(
             directory,
@@ -441,11 +478,16 @@ final class RunVerifier {
             ObservationProfile.parse(profile.observation()),
             declarations,
             exercised,
-            cut);
+            cut,
+            terminal);
       } catch (IOException | RuntimeException failure) {
         String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
         errors.add(problem);
-        return new SnapshotProjector.Projection(Optional.empty(), List.of(problem));
+        var named =
+            capture == null
+                ? Optional.<Graph>empty()
+                : SnapshotProjector.project(capture, layout).graph();
+        return new SnapshotProjector.Projection(Optional.empty(), List.of(problem), named);
       }
     }
 
@@ -489,6 +531,10 @@ final class RunVerifier {
       errors.add(problem);
     }
 
+    boolean trustedLaunch() {
+      return launchProblem == null;
+    }
+
     boolean failed() {
       return !errors.isEmpty();
     }
@@ -509,7 +555,8 @@ final class RunVerifier {
       Set<Integer> expectedBindings,
       Set<String> exercised)
       throws IOException {
-    return projection(directory, snapshot, layout, profile, expectedBindings, exercised, null);
+    return projection(
+        directory, snapshot, layout, profile, expectedBindings, exercised, null, false);
   }
 
   private static SnapshotProjector.Projection projection(
@@ -519,7 +566,8 @@ final class RunVerifier {
       ObservationProfile profile,
       Set<Integer> expectedBindings,
       Set<String> exercised,
-      CheckpointPlan.Cut cut)
+      CheckpointPlan.Cut cut,
+      boolean terminal)
       throws IOException {
     if (cut != null)
       return WorkerCaptureVerifier.project(
@@ -548,6 +596,14 @@ final class RunVerifier {
     } else if (!expectedBindings.isEmpty())
       return new SnapshotProjector.Projection(
           Optional.empty(), List.of("Named-root profile does not cover live bindings"));
+    if (layout.bindingMetadata().equals("retained-class")) {
+      var participants = bindings == null ? List.<BindingEvidence>of() : List.of(bindings);
+      return SnapshotProjector.projectRetained(
+          snapshot,
+          layout,
+          participants,
+          RetainedMetadata.capture(directory, snapshot, participants, terminal));
+    }
     return SnapshotProjector.project(snapshot, layout, bindings);
   }
 
@@ -555,12 +611,13 @@ final class RunVerifier {
       Path directory,
       GirProgram program,
       ObservationProfile profile,
+      Properties facts,
       Set<String> exercised,
       Set<String> verified)
       throws IOException {
     JsonFiles.write(
         directory.resolve("observation-capabilities.json"),
-        ObservationCapabilities.describe(program, profile, target(directory), exercised, verified));
+        ObservationCapabilities.describe(program, profile, facts, exercised, verified));
   }
 
   private static void requiredObservations(
@@ -584,6 +641,8 @@ final class RunVerifier {
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
+      if (profile.retainedMetadata())
+        ControlledLaunch.evidence(profile, manifest, ControlledLaunch.targetFacts(directory));
       var layout =
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
@@ -610,7 +669,9 @@ final class RunVerifier {
                 ObservationProfile.parse(profile.observation()),
                 expectedBindings,
                 new HashSet<>());
-        observations.add(new HistoryOracle.Observation(projection.graph(), projection.problems()));
+        observations.add(
+            new HistoryOracle.Observation(
+                projection.covered(), projection.problems(), projection.graph().isPresent()));
       }
 
       var result =

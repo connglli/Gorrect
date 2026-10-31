@@ -28,6 +28,7 @@ import io.connglli.gorrect.engine.oracle.OracleLimitException;
 import io.connglli.gorrect.engine.oracle.OracleLimits;
 import io.connglli.gorrect.engine.oracle.OracleResult;
 import io.connglli.gorrect.engine.oracle.UnsupportedHistoryException;
+import io.connglli.gorrect.protocol.ObserverPlan;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
@@ -352,9 +353,13 @@ public final class RunEngine {
       boolean recordReferences,
       JsonObject manifest)
       throws IOException {
-    var emission = JavaEmitter.emit(program, ObservationProfile.parse(profile.observation()));
+    var emission =
+        JavaEmitter.emit(
+            program, ObservationProfile.parse(profile.observation()), profile.bindingMetadata());
     Files.writeString(directory.resolve("generated/Case.java"), emission.source());
     JsonFiles.write(directory.resolve("generated/layout.json"), emission.layout());
+    new ObserverPlan(profile.bindingMetadata())
+        .write(directory.resolve("generated/observer.properties"));
 
     // Exact obligations still select one path; recorder capacity also covers the other arm.
     var storage =

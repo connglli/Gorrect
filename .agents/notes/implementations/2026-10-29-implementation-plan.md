@@ -119,7 +119,7 @@ The full build passes 316 Java tests and native/Javadoc checks. JDK 17/21 captur
 
 ## 13. Complete history and checkpoint composition
 
-Status: in progress. [Array/caller history composition](./completed-2026-10-30-stage13a.md), [conditional visits](./completed-2026-10-30-stage13b.md), and [coordinated worker capture](./completed-2026-10-30-stage13c.md) are complete. [Remaining work](./2026-10-30-stage13.md) covers natural-history liveness and production integration of retained local metadata.
+Status: in progress. [Array/caller history composition](./completed-2026-10-30-stage13a.md), [conditional visits](./completed-2026-10-30-stage13b.md), [coordinated worker capture](./completed-2026-10-30-stage13c.md), and the first [retained metadata provider](./completed-2026-10-31-retained-provider.md) slice are implemented. [Remaining work](./2026-10-30-stage13.md) covers natural-history liveness and general frame reconstruction.
 
 Compose arrays, binding profiles, reference/atomic histories, conditional checkpoints, and coordinated mid-worker capture. Natural histories need path-sensitive future-use and clearing rules; unrelated array declarations must not cause blanket rejection. Specify checkpoint phase, live-root coverage, and synchronization before extending projection or search.
 

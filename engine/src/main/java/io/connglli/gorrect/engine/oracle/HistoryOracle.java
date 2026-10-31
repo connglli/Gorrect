@@ -23,12 +23,20 @@ import java.util.Optional;
  */
 public final class HistoryOracle {
   /**
-   * One checkpoint's logical projection. Empty optional means capture coverage is unusable, not
-   * that the observed heap is empty; problems explain that gap. Present graphs still need checking.
+   * Independently covered obligations from one checkpoint. Complete is false when any required
+   * origin is missing; matching the usable graph then cannot establish a pass. An absent graph
+   * supplies no comparison, never an observed empty heap.
    */
-  public record Observation(Optional<Graph> graph, List<String> problems) {
+  public record Observation(Optional<Graph> graph, List<String> problems, boolean complete) {
     public Observation {
       problems = List.copyOf(problems);
+      if (complete && graph.isEmpty())
+        throw new IllegalArgumentException("Complete observation has no graph");
+    }
+
+    /** Legacy callers supply a full graph or no usable coverage. */
+    public Observation(Optional<Graph> graph, List<String> problems) {
+      this(graph, problems, graph.isPresent());
     }
   }
 
@@ -408,12 +416,15 @@ public final class HistoryOracle {
       return;
     }
     var observation = observations.get(checkpoint++);
-    if (observation.graph().isEmpty()) {
+    if (!observation.complete()) {
       incomplete = true;
       problems.addAll(observation.problems());
-      return;
     }
-    var mismatch = frontier.match(machine.graph(), observation.graph().orElseThrow());
+    if (observation.graph().isEmpty()) return;
+    var mismatch =
+        observation.complete()
+            ? frontier.match(machine.graph(), observation.graph().orElseThrow())
+            : frontier.matchCovered(machine.graph(), observation.graph().orElseThrow());
     require(mismatch.isEmpty(), "Checkpoint " + operation + "/" + occurrence + ": " + mismatch);
   }
 

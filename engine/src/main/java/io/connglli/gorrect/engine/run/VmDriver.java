@@ -21,10 +21,21 @@ import java.util.Set;
 final class VmDriver {
   private VmDriver() {}
 
+  static String executable(TargetProfile profile) {
+    if (!profile.retainedMetadata()) return profile.java();
+    try {
+      return Path.of(profile.java()).toRealPath().toString();
+    } catch (IOException failure) {
+      throw new IllegalArgumentException("Target executable unavailable", failure);
+    }
+  }
+
   static String observerArgument(TargetProfile profile, Path directory, String observer) {
     return "-agentpath:"
         + directory.resolve("support/" + observer)
-        + (ObservationProfile.parse(profile.observation()).bindings() ? "=locals" : "");
+        + (profile.retainedMetadata()
+            ? "=retained-class"
+            : ObservationProfile.parse(profile.observation()).bindings() ? "=locals" : "");
   }
 
   /**
@@ -36,6 +47,12 @@ final class VmDriver {
     return profile.vm().equals("hotspot")
         ? HotSpotDriver.launchArguments(profile, directory, observer)
         : OpenJ9Driver.launchArguments(profile, directory, observer);
+  }
+
+  static List<String> launchOptions(TargetProfile profile, Path directory, Properties facts) {
+    return profile.vm().equals("hotspot")
+        ? HotSpotDriver.launchOptions(profile, directory, Artifacts.OBSERVER, facts)
+        : OpenJ9Driver.launchOptions(profile, directory, Artifacts.OBSERVER);
   }
 
   /**
@@ -87,6 +104,13 @@ final class VmDriver {
   /** Known policy combinations fail before target-side controls or graph construction run. */
   static List<String> unsupported(TargetProfile profile) {
     var problems = new ArrayList<String>();
+    if (profile.retainedMetadata() && !profile.observation().equals("roots-diagnostic"))
+      problems.add("retained-class requires roots-diagnostic observation");
+    if (profile.retainedMetadata()
+        && profile.vm().equals("openj9")
+        && !profile.collector().equals("gencon"))
+      problems.add("retained-class OpenJ9 coordinate conformance covers gencon only");
+    problems.addAll(ControlledLaunch.configuration(profile));
     boolean young = profile.gc().control().equals("whitebox-young");
     if (young && !supportsYoung(profile))
       problems.add("whitebox-young is unsupported for " + profile.collector());
@@ -120,21 +144,34 @@ final class VmDriver {
       unmet.add(
           "GC control unavailable: " + target.getProperty("gc.problem", "missing control report"));
 
+    ControlledLaunch.effective(profile, target, unmet);
+    if (profile.retainedMetadata()) {
+      if (profile.vm().equals("openj9") && !OpenJ9Driver.retainedCoordinates(target))
+        unmet.add("retained-class stack coordinates need conformance for this OpenJ9 build");
+      if (profile.vm().equals("hotspot") && !HotSpotDriver.retainedCoordinates(target))
+        unmet.add("retained-class HotSpot coordinate conformance covers Linux amd64 JDK 17/21");
+    }
+
     boolean youngPolicy = profile.gc().control().equals("whitebox-young");
     boolean youngCollector = supportsYoung(profile);
 
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
+    boolean metadata =
+        profile.retainedMetadata()
+            ? target.getProperty("observer.bindingMetadata", "").equals("retained-class")
+                && target.getProperty("observer.retained.ready", "false").equals("true")
+                && (bits & HeapSnapshot.LOCAL_VARIABLES) == 0
+            : (bits & HeapSnapshot.LOCAL_VARIABLES) != 0;
     if ((bits & HeapSnapshot.TAGGING) == 0) unmet.add("tagging");
-    if (ObservationProfile.parse(profile.observation()).bindings()
-        && (bits & HeapSnapshot.LOCAL_VARIABLES) == 0) unmet.add("local-bindings");
+    if (ObservationProfile.parse(profile.observation()).bindings() && !metadata)
+      unmet.add("local-bindings");
 
     for (String requirement : profile.requirements()) {
       boolean available =
           switch (requirement) {
             case "tagging", "named-roots" -> (bits & HeapSnapshot.TAGGING) != 0;
             case "local-bindings" ->
-                ObservationProfile.parse(profile.observation()).bindings()
-                    && (bits & HeapSnapshot.LOCAL_VARIABLES) != 0;
+                ObservationProfile.parse(profile.observation()).bindings() && metadata;
             case "gc-completion" ->
                 !youngPolicy && target.getProperty("gc.evidence", "false").equals("true");
             case "young-gc" ->

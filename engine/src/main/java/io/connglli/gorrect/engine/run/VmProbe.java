@@ -132,7 +132,7 @@ final class VmProbe {
       long deadline)
       throws IOException, InterruptedException {
     var command = new ArrayList<String>();
-    command.add(profile.java());
+    command.add(VmDriver.executable(profile));
     if (profile.collector().equals("shenandoah")
         && !profile.collectorMode().equals("default")
         && !profile.collectorMode().equals("satb")) command.add("-XX:+UnlockExperimentalVMOptions");
@@ -153,7 +153,8 @@ final class VmProbe {
             .directory(directory.toFile())
             .redirectOutput(output.toFile())
             .redirectError(directory.resolve("logs/" + label + ".stderr").toFile());
-    if (savedEnvironment == null) ProcessSupport.cleanEnvironment(builder, profile.environment());
+    if (savedEnvironment == null)
+      ProcessSupport.cleanEnvironment(builder, profile.environment(), profile.retainedMetadata());
     else {
       builder.environment().clear();
       builder.environment().putAll(savedEnvironment);

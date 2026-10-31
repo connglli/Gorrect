@@ -79,6 +79,53 @@ public final class NativeObserver {
     return capture0(run, checkpoint, records);
   }
 
+  /** Whether this startup agent selected retained metadata; this is not a readiness certificate. */
+  public static boolean retainedMode() {
+    return retainedMode0();
+  }
+
+  /**
+   * Binds the intended loaded Case before construction and returns its startup code certificate.
+   * Only one binding is allowed. Native state keeps weak class/loader references and copied bytes;
+   * callers must persist and validate the result before permitting graph initialization.
+   */
+  public static byte[] bindCode(long run, Class<?> intended) {
+    return bindCode0(run, Objects.requireNonNull(intended));
+  }
+
+  /**
+   * Finalizes this run's certificate once. An aborted execution cannot return valid completion;
+   * subsequent capture/binding/finalization requests fail rather than reopening its lifetime.
+   */
+  public static byte[] codeStatus(long run, boolean complete) {
+    return codeStatus0(run, complete);
+  }
+
+  /** Raw evidence from one retained capture. Each byte array belongs to its caller. */
+  public record RetainedCapture(byte[] snapshot, byte[] frames) {
+    public RetainedCapture {
+      Objects.requireNonNull(snapshot);
+      Objects.requireNonNull(frames);
+    }
+  }
+
+  /**
+   * Brackets the heap walk with actual stack samples for caller-first, uniquely identified control
+   * threads. Arrays must remain unchanged through return; workers must remain parked through
+   * acknowledgement. Arguments contain no workload values; native temporary references expire
+   * before return. Terminal selects the caller's main role after execute returns. Failed frame
+   * evidence never becomes a native-table fallback.
+   */
+  public static RetainedCapture captureRetained(
+      long run, long checkpoint, int records, Thread[] threads, int[] workers, boolean terminal) {
+    Objects.requireNonNull(threads);
+    Objects.requireNonNull(workers);
+    byte[][] evidence = captureRetained0(run, checkpoint, records, threads, workers, terminal);
+    if (evidence == null || evidence.length != 2)
+      throw new IllegalStateException("Incomplete retained capture result");
+    return new RetainedCapture(evidence[0], evidence[1]);
+  }
+
   /** Checks wire integrity and capture identity; graph coverage is checked by the engine. */
   public static HeapSnapshot decode(byte[] bytes, long run, long checkpoint) throws IOException {
     return SnapshotCodec.read(bytes, run, checkpoint);
@@ -111,6 +158,15 @@ public final class NativeObserver {
   private static native long arrayIdentity0(Object array, int component);
 
   private static native byte[] capture0(long run, long checkpoint, int records);
+
+  private static native boolean retainedMode0();
+
+  private static native byte[] bindCode0(long run, Class<?> intended);
+
+  private static native byte[] codeStatus0(long run, boolean complete);
+
+  private static native byte[][] captureRetained0(
+      long run, long checkpoint, int records, Thread[] threads, int[] workers, boolean terminal);
 
   private static native long capabilities0();
 

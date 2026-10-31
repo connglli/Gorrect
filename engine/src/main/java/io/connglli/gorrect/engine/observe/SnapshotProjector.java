@@ -141,6 +141,47 @@ public final class SnapshotProjector {
     }
   }
 
+  /** Maps certified retained scopes while preserving independently covered roots on a local gap. */
+  public static Projection projectRetained(
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      List<BindingEvidence> participants,
+      RetainedBindings retained) {
+    var decoder = new Decoder(snapshot, layout, retained);
+    Graph graph;
+    try {
+      graph = decoder.decode();
+    } catch (IllegalArgumentException failure) {
+      return new Projection(Optional.empty(), List.of(failure.getMessage()));
+    }
+    var handles = new HashMap<Integer, Value.Reference>();
+    var problems = new ArrayList<String>();
+    var workers = new HashSet<Integer>();
+    var threads = new HashSet<Long>();
+    for (var participant : participants) {
+      try {
+        require(
+            workers.add(participant.worker()) && threads.add(participant.thread()),
+            "Duplicate capture participant");
+        var required =
+            participant.bindings().stream()
+                .map(BindingEvidence.Binding::declaration)
+                .collect(java.util.stream.Collectors.toSet());
+        for (var entry : decoder.bindings(participant, required, problems).entrySet())
+          require(
+              handles.putIfAbsent(entry.getKey(), entry.getValue()) == null,
+              "Duplicate binding participant declaration");
+      } catch (IllegalArgumentException failure) {
+        problems.add(failure.getMessage());
+      }
+    }
+    var covered = new Graph(graph.objects(), graph.roots(), handles, graph.wrappers());
+    return new Projection(
+        problems.isEmpty() ? Optional.of(covered) : Optional.empty(),
+        problems,
+        Optional.of(covered));
+  }
+
   /**
    * Validates lexical presence declarations while projecting only required natural locals. A
    * missing required origin leaves covered named roots and other mapped locals available to refute.
@@ -176,6 +217,7 @@ public final class SnapshotProjector {
   private static final class Decoder {
     private final HeapSnapshot snapshot;
     private final ObservationLayout layout;
+    private final RetainedBindings retained;
     private final Map<Integer, HeapSnapshot.ClassInfo> classes = new HashMap<>();
     private final Map<Integer, Resolved> objectTypes = new HashMap<>();
     private final Map<String, Shape> arrays = new HashMap<>();
@@ -192,8 +234,13 @@ public final class SnapshotProjector {
     private final Map<WrapperId, HeapReference> referenceObjects = new HashMap<>();
 
     Decoder(HeapSnapshot snapshot, ObservationLayout layout) {
+      this(snapshot, layout, null);
+    }
+
+    Decoder(HeapSnapshot snapshot, ObservationLayout layout, RetainedBindings retained) {
       this.snapshot = snapshot;
       this.layout = layout;
+      this.retained = retained;
     }
 
     Graph decode() {
@@ -239,7 +286,8 @@ public final class SnapshotProjector {
         if (required.isEmpty()) return Map.of();
       }
       var methods = new HashMap<Long, HeapSnapshot.MethodInfo>();
-      for (var method : snapshot.methods()) {
+      for (var method : retained == null ? snapshot.methods() : retained.methods().values()) {
+        require(method.token() != 0, "Invalid method token");
         require(methods.putIfAbsent(method.token(), method) == null, "Duplicate method token");
         var locals = new HashSet<HeapSnapshot.LocalVariable>();
         for (var local : method.locals())
@@ -283,7 +331,7 @@ public final class SnapshotProjector {
         return Value.Reference.NULL;
       }
       require(
-          (snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0,
+          retained != null || (snapshot.capabilities() & HeapSnapshot.LOCAL_VARIABLES) != 0,
           "Local-variable metadata is unavailable");
       require(
           matches.size() == 1,
@@ -303,6 +351,11 @@ public final class SnapshotProjector {
                   new LocalSlot(method.token(), local.slot()), key -> new ArrayList<>())
               .add(local);
 
+      RetainedBindings.Participant certified =
+          retained == null ? null : retained.participants().get(evidence.worker());
+      require(
+          retained == null || certified != null && certified.thread() == evidence.thread(),
+          "Missing certified participant frame");
       var result = new HashMap<LocalName, Set<HeapSnapshot.Record>>();
       var slots = new HashMap<LocalSlot, HeapSnapshot.Record>();
       Frame frame = null;
@@ -314,20 +367,26 @@ public final class SnapshotProjector {
             || root.d() < 0
             || root.e() < 0
             || root.e() > 65_535
-            || root.g() < 0) continue;
+            || retained == null && root.g() < 0) continue;
         var method = methods.get(root.f());
         String expectedMethod =
             evidence.worker() == 0 ? "execute" : ExecutionEvidence.workerMethod(evidence.worker());
-        if (method == null
-            || !method.owner().equals("LCase;")
-            || !method.name().equals(expectedMethod)) continue;
+        if (method == null || !method.owner().equals("LCase;")) continue;
+        long bci = root.g();
+        if (certified != null) {
+          if (root.f() != certified.frame().method()) continue;
+          require(root.d() == certified.frame().depth(), "Raw depth differs from certified frame");
+          require(
+              bci >= -1 && (bci == -1 || bci == certified.frame().bci()),
+              "Raw BCI differs from certified frame");
+          bci = certified.frame().bci();
+        } else if (!method.name().equals(expectedMethod)) continue;
         var current = new Frame(root.f(), root.d());
         if (frame == null) {
           frame = current;
-          location = root.g();
+          location = bci;
         }
-        require(
-            frame.equals(current) && location == root.g(), "Ambiguous generated-method activation");
+        require(frame.equals(current) && location == bci, "Ambiguous generated-method activation");
         var slot = new LocalSlot(root.f(), (int) root.e());
         var previous = slots.putIfAbsent(slot, root);
         require(
@@ -338,7 +397,7 @@ public final class SnapshotProjector {
         // Index once per physical slot, rather than scanning every root for every binding.
         boolean found = false;
         for (var local : variables.getOrDefault(slot, List.of())) {
-          if (root.g() < local.start() || root.g() - local.start() >= local.length()) continue;
+          if (bci < local.start() || bci - local.start() >= local.length()) continue;
           require(!found, "Overlapping local-variable scopes for stack slot");
           found = true;
           var key =

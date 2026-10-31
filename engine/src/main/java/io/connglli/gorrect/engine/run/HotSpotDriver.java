@@ -20,9 +20,18 @@ final class HotSpotDriver {
 
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
     var arguments = new ArrayList<String>();
-    arguments.add(profile.java());
+    arguments.add(VmDriver.executable(profile));
+    arguments.addAll(launchOptions(profile, directory, observer, targetFacts(directory)));
+    return arguments;
+  }
+
+  /** Pure owned options shared by launch and retained live/offline evidence checks. */
+  static List<String> launchOptions(
+      TargetProfile profile, Path directory, String observer, Properties facts) {
+    var arguments = new ArrayList<String>();
     arguments.addAll(profile.vmArgs());
-    arguments.addAll(collectorArguments(profile, targetFacts(directory)));
+    if (profile.retainedMetadata()) arguments.add("-XX:+DisableAttachMechanism");
+    arguments.addAll(collectorArguments(profile, facts));
     arguments.add("-XX:ErrorFile=" + directory.resolve("logs/hs_err_pid%p.log"));
     arguments.add(VmDriver.observerArgument(profile, directory, observer));
     if (profile.usesWhiteBox()) {
@@ -31,6 +40,13 @@ final class HotSpotDriver {
       arguments.add("-Xbootclasspath/a:" + directory.resolve("support/whitebox.jar"));
     }
     return arguments;
+  }
+
+  /** Initial retained coordinate qualification; every capture still needs actual matching roots. */
+  static boolean retainedCoordinates(Properties facts) {
+    return Set.of("17", "21").contains(facts.getProperty("java.feature", ""))
+        && facts.getProperty("os.name", "").equals("Linux")
+        && facts.getProperty("os.arch", "").equals("amd64");
   }
 
   static String flag(String collector) {

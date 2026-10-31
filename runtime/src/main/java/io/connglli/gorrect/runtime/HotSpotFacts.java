@@ -23,6 +23,7 @@ public final class HotSpotFacts {
             "ZGenerational",
             "ShenandoahGCMode",
             "DisableExplicitGC",
+            "DisableAttachMechanism",
             "ExplicitGCInvokesConcurrent",
             "UseCompiler",
             "TieredCompilation",
@@ -37,6 +38,9 @@ public final class HotSpotFacts {
     } catch (LinkageError | RuntimeException unavailable) {
       properties.setProperty("flags.problem", unavailable.toString());
     }
+    if (properties.containsKey("flag.DisableAttachMechanism"))
+      properties.setProperty(
+          "attach.disabled", properties.getProperty("flag.DisableAttachMechanism"));
     return properties;
   }
 

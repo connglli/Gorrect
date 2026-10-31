@@ -2,9 +2,12 @@ package io.connglli.gorrect.runtime;
 
 import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.CaptureEvidence;
+import io.connglli.gorrect.protocol.CodeEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import io.connglli.gorrect.protocol.FrameEvidence;
+import io.connglli.gorrect.protocol.ObserverPlan;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
 import java.io.DataInputStream;
@@ -22,6 +25,7 @@ import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
 import java.util.Map;
+import java.util.Objects;
 import java.util.Properties;
 import java.util.TreeMap;
 import java.util.concurrent.atomic.AtomicReference;
@@ -47,6 +51,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final List<ExecutionEvidence.Window> windows = new ArrayList<>();
   private VmControl control;
   private final boolean referenceRecording;
+  private final boolean retained;
+  private boolean codeBound, codeFinalizationAttempted;
   private final boolean typedReferences;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
@@ -55,7 +61,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private final BindingRecorder bindings;
   private final int bindingCapacity;
 
-  private TargetSession(String[] args) throws IOException {
+  private TargetSession(String[] args, Class<?> intended) throws IOException {
     if (args.length != 6) throw new IllegalArgumentException("Invalid target launch arguments");
     run = Long.parseLong(args[1]);
     directory = Path.of(args[2]);
@@ -64,6 +70,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     if (run <= 0 || capacity <= 0 || capacity > ExecutionTrace.MAX_EVENTS)
       throw new IllegalArgumentException("Invalid trace capacity or run token");
 
+    retained = retainedPlan(directory);
     referenceRecording = Files.exists(directory.resolve("generated/references.properties"));
     typedReferences = Files.exists(directory.resolve("generated/typed-references.properties"));
     boolean localBindings =
@@ -77,13 +84,29 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
 
+    boolean providerSetup = false;
     try {
       System.load(args[3]);
+      providerSetup = retained;
+      if (retained != NativeObserver.retainedMode())
+        throw new IllegalStateException("Observer plan and native metadata provider disagree");
+      if (retained) {
+        if (intended == null)
+          throw new IllegalStateException("Retained metadata requires the intended Case mirror");
+        byte[] bytes = NativeObserver.bindCode(run, intended);
+        codeBound = true;
+        Files.write(directory.resolve("traces/code.gcode"), bytes);
+        var code = CodeEvidence.read(bytes, run, CodeEvidence.Stage.STARTUP);
+        checkCodeStatus(code);
+      }
+      providerSetup = false;
       control = VmControl.open(directory, run);
 
       var properties = VmFacts.read();
       properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
+      properties.setProperty("observer.bindingMetadata", retained ? "retained-class" : "jvmti");
+      properties.setProperty("observer.retained.ready", Boolean.toString(retained && codeBound));
       properties.setProperty("jit.problem", control.problem());
       properties.setProperty("gc.control", control.collectionControl());
       properties.setProperty("gc.problem", control.gcProblem());
@@ -96,21 +119,55 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       send(ControlMessage.Kind.HELLO, 0, 0, "");
       acknowledge(0);
     } catch (Throwable failure) {
-      if (control != null) control.close();
-      socket.close();
+      try {
+        finishCode(false);
+      } catch (Throwable cleanup) {
+        failure.addSuppressed(cleanup);
+      }
+      try {
+        send(ControlMessage.Kind.FAILED, 0, 0, startupFailureDetail(providerSetup, failure));
+      } catch (Throwable cleanup) {
+        failure.addSuppressed(cleanup);
+      }
+      try {
+        if (control != null) control.close();
+      } catch (Throwable cleanup) {
+        failure.addSuppressed(cleanup);
+      }
+      try {
+        socket.close();
+      } catch (Throwable cleanup) {
+        failure.addSuppressed(cleanup);
+      }
       throw failure;
     }
   }
 
+  private static boolean retainedPlan(Path directory) throws IOException {
+    Path plan = directory.resolve("generated/observer.properties");
+    if (!Files.exists(plan)) return false;
+    return ObserverPlan.read(plan).bindingMetadata().equals("retained-class");
+  }
+
   /**
    * Loads the observer and VM bridge, writes startup facts, and waits for engine acknowledgement.
-   * Failure closes any opened endpoint and bridge. The caller owns the returned session.
+   * Failure closes any opened endpoint and bridge. The caller owns the returned session. Retained
+   * metadata requires the overload that supplies the actual generated class mirror.
    *
    * @param args socket path, positive run ID, bundle directory, observer library, capture-record
    *     limit, and total trace capacity, in that order
    */
   public static TargetSession open(String[] args) throws IOException {
-    return new TargetSession(args);
+    return new TargetSession(args, null);
+  }
+
+  /**
+   * Opens with the actual generated class mirror. Retained mode binds and persists its code
+   * certificate before HELLO; initialization remains blocked until the engine validates it. The
+   * mirror is a startup argument only and is not stored in the returned session.
+   */
+  public static TargetSession open(String[] args, Class<?> intended) throws IOException {
+    return new TargetSession(args, Objects.requireNonNull(intended));
   }
 
   /**
@@ -261,7 +318,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
     var compilations = control.prepare(round, ids, methods);
 
-    var rendezvous = new WorkerRendezvous(ids.length);
+    var rendezvous = new WorkerRendezvous(ids.length, retained);
     var failure = new AtomicReference<Throwable>();
     var contexts = new ArrayList<WorkerContext>();
     var threads = new ArrayList<Thread>();
@@ -297,8 +354,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       int cut = 0;
       while (true) {
         int kind = rendezvous.await();
-        if (kind == WorkerRendezvous.CAPTURE)
-          captureWorkers(operation, round, ++cut, ids, contexts, rendezvous);
+        if (kind == WorkerRendezvous.CAPTURE) {
+          int ordinal = ++cut;
+          if (retained)
+            rendezvous.capture(
+                () ->
+                    captureWorkers(operation, round, ordinal, ids, contexts, threads, rendezvous));
+          else captureWorkers(operation, round, ordinal, ids, contexts, threads, rendezvous);
+        }
         rendezvous.release();
         if (kind == WorkerRendezvous.END) break;
       }
@@ -340,6 +403,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       int cut,
       int[] ids,
       List<WorkerContext> contexts,
+      List<Thread> threads,
       WorkerRendezvous rendezvous)
       throws IOException {
     checkpoint++;
@@ -361,8 +425,14 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     }
     new CaptureEvidence(run, checkpoint, group, round, cut, rendezvous.phase(), participants)
         .write(directory.resolve("snapshots/" + checkpoint + ".gcut"));
-    byte[] bytes = NativeObserver.capture(run, checkpoint, records);
-    Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), bytes);
+    if (retained) {
+      var controls = new Thread[threads.size() + 1];
+      controls[0] = Thread.currentThread();
+      for (int index = 0; index < threads.size(); index++) controls[index + 1] = threads.get(index);
+      int[] workers = new int[ids.length + 1];
+      System.arraycopy(ids, 0, workers, 1, ids.length);
+      capture(controls, workers, false);
+    } else capture(null, null, false);
     var canonical = participants.get(1);
     send(ControlMessage.Kind.CHECKPOINT, canonical.operation(), canonical.occurrence(), "");
     acknowledge(checkpoint);
@@ -405,12 +475,28 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
                 run, checkpoint, Thread.currentThread().getId(), 0, 1, bindings.snapshot())
             .write(directory.resolve("snapshots/" + checkpoint + ".gbind"));
 
-      byte[] bytes = NativeObserver.capture(run, checkpoint, records);
-      Files.write(directory.resolve("snapshots").resolve(checkpoint + ".gsnap"), bytes);
+      if (retained) capture(new Thread[] {Thread.currentThread()}, new int[] {0}, operation == 0);
+      else capture(null, null, false);
       send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
       acknowledge(checkpoint);
     } finally {
       bindings.clear();
+    }
+  }
+
+  private void capture(Thread[] threads, int[] workers, boolean terminal) throws IOException {
+    byte[] snapshot;
+    if (retained) {
+      var evidence =
+          NativeObserver.captureRetained(run, checkpoint, records, threads, workers, terminal);
+      // Persist raw bytes even when later frame decoding fails, preserving independent refutations.
+      snapshot = evidence.snapshot();
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), snapshot);
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gframe"), evidence.frames());
+      FrameEvidence.read(evidence.frames(), run, checkpoint);
+    } else {
+      snapshot = NativeObserver.capture(run, checkpoint, records);
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), snapshot);
     }
   }
 
@@ -423,6 +509,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   public void complete() throws IOException {
     writeTrace(true);
     control.finish();
+    finishCode(true);
 
     send(ControlMessage.Kind.COMPLETE, 0, 0, "");
     complete = true;
@@ -434,10 +521,44 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   public void fail(Throwable failure) throws IOException {
     writeTrace(false);
     control.finish();
+    finishCode(false);
 
+    send(ControlMessage.Kind.FAILED, 0, 0, failureDetail(failure));
+  }
+
+  /** Preserves failed native resource status before classifying an unavailable provider. */
+  static void checkCodeStatus(CodeEvidence code) {
+    if (code.status() == CodeEvidence.Status.VALID) return;
+    String detail =
+        "Retained startup certificate: " + code.status() + " (error " + code.jvmtiError() + ")";
+    if (code.jvmtiError() == CodeEvidence.OUT_OF_MEMORY) throw new OutOfMemoryError(detail);
+    throw new IllegalStateException(detail);
+  }
+
+  /**
+   * Only expected provider setup rejections are unsupported; later and resource failures are not.
+   */
+  static String startupFailureDetail(boolean providerSetup, Throwable failure) {
+    boolean unsupported =
+        providerSetup
+            && (failure instanceof IllegalArgumentException
+                || failure instanceof IllegalStateException);
+    return (unsupported ? ControlMessage.RETAINED_UNSUPPORTED : "") + failureDetail(failure);
+  }
+
+  private static String failureDetail(Throwable failure) {
     // Bound failure text to the modified-UTF length used by control frames.
     String detail = failure.getClass().getName() + ": " + failure.getMessage();
-    send(ControlMessage.Kind.FAILED, 0, 0, detail.substring(0, Math.min(detail.length(), 4000)));
+    return detail.substring(0, Math.min(detail.length(), 4000));
+  }
+
+  private void finishCode(boolean finished) throws IOException {
+    if (!retained || !codeBound || codeFinalizationAttempted) return;
+    // A failed JNI return may already have finalized native state. Never retry or replace it.
+    codeFinalizationAttempted = true;
+    byte[] bytes = NativeObserver.codeStatus(run, finished);
+    Files.write(directory.resolve("traces/code-final.gcode"), bytes);
+    CodeEvidence.read(bytes, run, CodeEvidence.Stage.FINAL);
   }
 
   private void writeTrace(boolean finished) throws IOException {
@@ -473,11 +594,22 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    */
   @Override
   public void close() throws IOException {
-    try {
-      if (!complete) writeTrace(false);
-    } finally {
-      if (control != null) control.close();
-      socket.close();
+    var bridge = control;
+    try (socket;
+        bridge) {
+      if (!complete) {
+        try {
+          writeTrace(false);
+        } catch (Throwable failure) {
+          try {
+            finishCode(false);
+          } catch (Throwable cleanup) {
+            failure.addSuppressed(cleanup);
+          }
+          throw failure;
+        }
+        finishCode(false);
+      }
     }
   }
 }

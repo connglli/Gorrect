@@ -22,8 +22,15 @@ final class OpenJ9Driver {
   private OpenJ9Driver() {}
 
   static List<String> launchArguments(TargetProfile profile, Path directory, String observer) {
+    var arguments = new ArrayList<String>();
+    arguments.add(VmDriver.executable(profile));
+    arguments.addAll(launchOptions(profile, directory, observer));
+    return arguments;
+  }
+
+  /** Pure owned options; VM-reported launcher defaults are checked separately. */
+  static List<String> launchOptions(TargetProfile profile, Path directory, String observer) {
     var args = new ArrayList<String>();
-    args.add(profile.java());
     if (profile.jit() != null) {
       // Compile actual modeled worker calls, with no extra invocation or graph mutation.
       if (profile.vmArgs().stream()
@@ -35,7 +42,8 @@ final class OpenJ9Driver {
         args.add("-Xjit:count=0,limit={Case.worker*}");
     }
     args.addAll(profile.vmArgs());
-    if (profile.jit() != null) {
+    if (profile.retainedMetadata()) args.add("-Dcom.ibm.tools.attach.enable=no");
+    if (profile.jit() != null || profile.retainedMetadata()) {
       args.add("-Xshareclasses:none");
       args.add("-Xnoaot");
     }
@@ -43,6 +51,16 @@ final class OpenJ9Driver {
     args.add("-Xdump:directory=" + directory.resolve("logs"));
     args.add(VmDriver.observerArgument(profile, directory, observer));
     return args;
+  }
+
+  /**
+   * Other revisions must pass generated caller/worker/slot conformance before enabling recovery.
+   */
+  static boolean retainedCoordinates(Properties facts) {
+    return facts.getProperty("java.feature", "").equals("21")
+        && facts.getProperty("java.vm.version", "").equals("master-6e16eb1a4f")
+        && facts.getProperty("os.name", "").equals("Linux")
+        && facts.getProperty("os.arch", "").equals("amd64");
   }
 
   static boolean selected(String collector, Properties facts) {
@@ -115,6 +133,7 @@ final class OpenJ9Driver {
 
   static Map<String, Path> installations(Path home) throws IOException {
     var paths = new LinkedHashMap<String, Path>();
+    paths.put("target/lib/options.default", home.resolve("lib/options.default"));
     // OpenJ9 splits VM, GC, JIT, and JVMTI code across libraries; libjvm alone is insufficient.
     for (String name :
         List.of(

@@ -15,11 +15,11 @@ import java.util.Objects;
 import java.util.Optional;
 
 /**
- * Prototype reader for local metadata in retained Java 17 compiler output. This does not establish
+ * Bounded reader for local metadata in retained Java 17 compiler output. This does not establish
  * runtime class-loader identity, bytecode provenance, frame activation, or physical root coverage.
  */
 public final class RetainedLocalMetadata {
-  /** Prototype resource ceiling, independent of the classfile format's limits. */
+  /** Resource ceiling, independent of the classfile format's limits. */
   public static final int MAX_BYTES = 16 * 1024 * 1024;
 
   /** Aggregate metadata ceiling across all methods in one class. */

@@ -65,7 +65,7 @@ Start, barrier, checkpoint, phase-start, end, and join markers establish worker 
 
 JNI exposes capture requests; JVMTI heap callbacks fill bounded native buffers using VM field metadata and emitted layout roles. They receive no expected graph, perform no JNI calls, allocation, or locking, and retain no persistent strong references to workload objects. C++ exceptions are contained at JNI boundaries.
 
-Requested local-variable metadata is copied after heap callbacks; the observer never acquires the local objects. Compiler debug tables supply actual names and scopes. The engine projects captures and primitive binding evidence under the [observation contract](./observation.md), preserving raw bytes and reporting unsupported or incomplete coverage.
+The native metadata provider copies requested VM debug tables after heap callbacks. The retained provider certifies loaded class bytes and brackets captures with stack samples, then the engine reads scopes from those exact bytes. Neither provider acquires local objects; the [metadata contract](./observation.md#binding-metadata) defines their proof boundaries. The engine projects captures and primitive binding evidence under the [observation contract](./observation.md), preserving raw bytes and reporting unsupported or incomplete coverage.
 
 ## JVM integration
 
@@ -105,7 +105,7 @@ runs/<run-id>/
 
 The manifest records input/resolved profiles, seeds, compiler/target identities, command, environment, and provenance hashes. `collector.properties` retains preflight facts; `target.properties` records actual options and VM identity. Generated source, classes, layouts, and support libraries preserve the executable case. Replay reuses those bytes and settings; offline verification needs no target installation.
 
-`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for legacy reference cases or `references.gtyped` for first-class wrapper targets, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
+`traces/` holds the control transcript, scalar trace, worker evidence, `references.ghistory` for legacy reference cases or `references.gtyped` for first-class wrapper targets, and enabled VM witnesses (`workers.jfr` or OpenJ9 `workers.gstacks`). `snapshots/` preserves native captures and retained-provider frame samples. Retained code certificates and final status live in `traces/`. Records carry run identities and completion evidence. `execution.json` records process outcome; `result.json` adds the verdict and unmet requirements defined in [usage](./usage.md#artifacts-and-results).
 
 ## Checks
 

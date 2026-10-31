@@ -1,4 +1,5 @@
 #include "openj9_stack.hpp"
+#include "retained_observer.hpp"
 #include "snapshot_wire.hpp"
 #include <array>
 #include <atomic>
@@ -359,6 +360,45 @@ std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
   }
   return result;
 }
+// Frames bracket the heap walk itself. All metadata queries and byte encoding follow the walk.
+Snapshot capture_snapshot(JNIEnv *env, jlong run, jlong checkpoint, jint capacity,
+                          FrameEvidence *frames = nullptr, jobjectArray threads = nullptr) {
+  Capture capture(run, checkpoint, capacity);
+  capture.snapshot.starts_before = gc_starts.load();
+  capture.snapshot.finishes_before = gc_finishes.load();
+  jvmtiHeapCallbacks callbacks{};
+  callbacks.heap_reference_callback = reference_callback;
+  callbacks.primitive_field_callback = primitive_callback;
+  callbacks.array_primitive_value_callback = array_callback;
+  // Filtering by target class would hide unexpected references to foreign objects.
+  // No GC is requested here; the VM may still collect or materialize objects to perform the walk.
+  auto error = jvmti->FollowReferences(0, nullptr, nullptr, &callbacks, &capture);
+  capture.snapshot.starts_after = gc_starts.load();
+  capture.snapshot.finishes_after = gc_finishes.load();
+  if (frames)
+    retained::after(env, *frames, threads);
+  capture.snapshot.status = error != JVMTI_ERROR_NONE ? CaptureStatus::jvmti_error
+                            : capture.full            ? CaptureStatus::record_limit
+                                                      : CaptureStatus::complete;
+  capture.snapshot.error = error;
+  capture.snapshot.capabilities =
+      capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
+  // Allocate metadata, encoded bytes, and the Java result only after callbacks have finished.
+  capture.snapshot.classes = classes;
+  capture.snapshot.arrays.assign(arrays.begin(),
+                                 arrays.begin() + array_count.load(std::memory_order_acquire));
+  capture.snapshot.methods = methods(env, capture.snapshot);
+  return std::move(capture.snapshot);
+}
+jbyteArray java_bytes(JNIEnv *env, const std::vector<std::uint8_t> &bytes) {
+  if (bytes.size() > 128U * 1024 * 1024)
+    throw std::runtime_error("Observer byte capacity exhausted");
+  auto result = env->NewByteArray(static_cast<jsize>(bytes.size()));
+  if (result)
+    env->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()),
+                            reinterpret_cast<const jbyte *>(bytes.data()));
+  return result;
+}
 } // namespace
 
 extern "C" JNIEXPORT jint JNICALL JNI_OnLoad(JavaVM *, void *) { return JNI_VERSION_1_8; }
@@ -383,10 +423,17 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
     if (!available.can_tag_objects)
       return JNI_ERR;
     desired.can_tag_objects = 1;
-    bool locals = options && std::string(options) == "locals";
+    std::string mode = options ? options : "";
+    if (!mode.empty() && mode != "locals" && mode != "retained-class")
+      return JNI_ERR;
+    bool locals = mode == "locals";
+    bool retained_mode = mode == "retained-class";
     jvmtiJlocationFormat location_format = JVMTI_JLOCATION_OTHER;
     bool bytecode_locations = jvmti->GetJLocationFormat(&location_format) == JVMTI_ERROR_NONE &&
                               location_format == JVMTI_JLOCATION_JVMBCI;
+    if (retained_mode && !available.can_generate_all_class_hook_events)
+      return JNI_ERR;
+    desired.can_generate_all_class_hook_events = retained_mode;
     desired.can_access_local_variables =
         locals && bytecode_locations && available.can_access_local_variables;
     desired.can_generate_garbage_collection_events =
@@ -394,6 +441,14 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
     desired.can_generate_compiled_method_load_events =
         available.can_generate_compiled_method_load_events;
     check(jvmti->AddCapabilities(&desired));
+    if (retained_mode) {
+      jvmtiCapabilities actual{};
+      check(jvmti->GetCapabilities(&actual));
+      if (!actual.can_generate_all_class_hook_events || actual.can_access_local_variables ||
+          actual.can_get_bytecodes || actual.can_redefine_classes || actual.can_retransform_classes)
+        return JNI_ERR;
+      retained::initialize(jvmti, bytecode_locations);
+    }
     capabilities =
         capability::tagging | capability::reference_fields |
         (desired.can_access_local_variables ? capability::local_variables : 0) |
@@ -404,7 +459,16 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
     callbacks.GarbageCollectionFinish = gc_finish;
     callbacks.CompiledMethodLoad = compiled_load;
     callbacks.CompiledMethodUnload = compiled_unload;
+    if (retained_mode) {
+      callbacks.ClassFileLoadHook = retained::loaded;
+      callbacks.ClassPrepare = retained::prepared;
+    }
     check(jvmti->SetEventCallbacks(&callbacks, sizeof(callbacks)));
+    if (retained_mode) {
+      check(
+          jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_FILE_LOAD_HOOK, nullptr));
+      check(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_CLASS_PREPARE, nullptr));
+    }
     if (desired.can_generate_garbage_collection_events) {
       check(jvmti->SetEventNotificationMode(JVMTI_ENABLE, JVMTI_EVENT_GARBAGE_COLLECTION_START,
                                             nullptr));
@@ -617,38 +681,65 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_capture0(JNIEnv *env, jc
     std::lock_guard<std::mutex> lock(control_mutex);
     if (classes.empty() || run <= 0 || checkpoint <= 0 || capacity <= 0 || capacity > max_records)
       throw std::runtime_error("Invalid capture request");
-    Capture capture(run, checkpoint, capacity);
-    capture.snapshot.starts_before = gc_starts.load();
-    capture.snapshot.finishes_before = gc_finishes.load();
-    jvmtiHeapCallbacks callbacks{};
-    callbacks.heap_reference_callback = reference_callback;
-    callbacks.primitive_field_callback = primitive_callback;
-    callbacks.array_primitive_value_callback = array_callback;
-    // Filtering by target class would hide unexpected references to foreign objects.
-    // No GC is requested here; the VM may still collect or materialize objects to perform the walk.
-    auto error = jvmti->FollowReferences(0, nullptr, nullptr, &callbacks, &capture);
-    capture.snapshot.starts_after = gc_starts.load();
-    capture.snapshot.finishes_after = gc_finishes.load();
-    capture.snapshot.status = error != JVMTI_ERROR_NONE ? CaptureStatus::jvmti_error
-                              : capture.full            ? CaptureStatus::record_limit
-                                                        : CaptureStatus::complete;
-    capture.snapshot.error = error;
-    capture.snapshot.capabilities =
-        capabilities | (compilation_overflow ? capability::compilation_overflow : 0);
-    // Allocate metadata, encoded bytes, and the Java result only after callbacks have finished.
-    capture.snapshot.classes = classes;
-    capture.snapshot.arrays.assign(arrays.begin(),
-                                   arrays.begin() + array_count.load(std::memory_order_acquire));
-    capture.snapshot.methods = methods(env, capture.snapshot);
-    auto bytes = encode(capture.snapshot);
-    if (bytes.size() > 128U * 1024 * 1024)
-      throw std::runtime_error("Snapshot byte capacity exhausted");
-    auto result = env->NewByteArray(static_cast<jsize>(bytes.size()));
+    if (retained::enabled())
+      throw std::runtime_error("Retained capture requires participant frame evidence");
+    return java_bytes(env, encode(capture_snapshot(env, run, checkpoint, capacity)));
+  });
+}
+extern "C" JNIEXPORT jboolean JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_retainedMode0(JNIEnv *env, jclass) {
+  return entry(env, []() -> jboolean {
+    require_agent();
+    return retained::enabled() ? JNI_TRUE : JNI_FALSE;
+  });
+}
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_bindCode0(JNIEnv *env, jclass, jlong run,
+                                                                  jclass intended) {
+  return entry(env, [&]() -> jbyteArray {
+    require_agent();
+    return java_bytes(env, encode(retained::bind(env, run, intended)));
+  });
+}
+extern "C" JNIEXPORT jbyteArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_codeStatus0(JNIEnv *env, jclass, jlong run,
+                                                                    jboolean complete) {
+  return entry(env, [&]() -> jbyteArray {
+    require_agent();
+    return java_bytes(env, encode(retained::finish(env, run, complete == JNI_TRUE)));
+  });
+}
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureRetained0(
+    JNIEnv *env, jclass, jlong run, jlong checkpoint, jint capacity, jobjectArray threads,
+    jintArray workers, jboolean terminal) {
+  return entry(env, [&]() -> jobjectArray {
+    require_agent();
+    std::lock_guard<std::mutex> lock(control_mutex);
+    if (classes.empty() || capacity <= 0 || capacity > max_records)
+      throw std::runtime_error("Invalid retained capture request");
+    auto frames = retained::before(env, run, checkpoint, threads, workers, terminal == JNI_TRUE);
+    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, &frames, threads);
+    auto byte_array_type = env->FindClass("[B");
+    if (!byte_array_type)
+      return nullptr;
+    auto result = env->NewObjectArray(2, byte_array_type, nullptr);
+    env->DeleteLocalRef(byte_array_type);
     if (!result)
       return nullptr;
-    env->SetByteArrayRegion(result, 0, static_cast<jsize>(bytes.size()),
-                            reinterpret_cast<const jbyte *>(bytes.data()));
-    return result;
+    auto raw = java_bytes(env, encode(snapshot));
+    if (!raw)
+      return nullptr;
+    env->SetObjectArrayElement(result, 0, raw);
+    env->DeleteLocalRef(raw);
+    if (env->ExceptionCheck())
+      return nullptr;
+    auto sample = java_bytes(env, encode(frames));
+    if (!sample)
+      return nullptr;
+    env->SetObjectArrayElement(result, 1, sample);
+    env->DeleteLocalRef(sample);
+    return env->ExceptionCheck() ? nullptr : result;
   });
 }
 extern "C" JNIEXPORT jlong JNICALL

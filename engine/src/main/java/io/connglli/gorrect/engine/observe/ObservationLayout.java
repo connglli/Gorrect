@@ -5,14 +5,15 @@ import io.connglli.gorrect.engine.model.Value;
 import java.util.List;
 import java.util.Map;
 
-/** Emitted field descriptions only; this contains no predicted targets or payload values. */
+/** Structural graph/local roles and metadata selection, with no predicted targets or payloads. */
 public record ObservationLayout(
     List<ObjectType> objects,
     List<Shape> arrays,
     Roots roots,
     List<ReferenceType> references,
     List<LocalBinding> bindings,
-    String bindingSelection) {
+    String bindingSelection,
+    String bindingMetadata) {
   public static final String REQUIRED = "required";
   public static final String LEXICAL_CANDIDATES = "lexical-candidates";
 
@@ -21,10 +22,24 @@ public record ObservationLayout(
     arrays = List.copyOf(arrays);
     references = references == null ? List.of() : List.copyOf(references);
     bindings = bindings == null ? List.of() : List.copyOf(bindings);
+    bindingMetadata = bindingMetadata == null ? "jvmti" : bindingMetadata;
+    if (!bindingMetadata.equals("jvmti") && !bindingMetadata.equals("retained-class"))
+      throw new IllegalArgumentException("Unknown binding metadata provider");
     if (bindingSelection != null
         && !bindingSelection.equals(REQUIRED)
         && !bindingSelection.equals(LEXICAL_CANDIDATES))
       throw new IllegalArgumentException("Unknown binding-selection rule");
+  }
+
+  /** Legacy layouts select VM tables; provider selection is explicit in new retained layouts. */
+  public ObservationLayout(
+      List<ObjectType> objects,
+      List<Shape> arrays,
+      Roots roots,
+      List<ReferenceType> references,
+      List<LocalBinding> bindings,
+      String bindingSelection) {
+    this(objects, arrays, roots, references, bindings, bindingSelection, "jvmti");
   }
 
   /** Missing selection metadata denotes the original required-binding emission rule. */

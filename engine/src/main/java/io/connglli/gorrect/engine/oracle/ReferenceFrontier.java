@@ -262,18 +262,41 @@ final class ReferenceFrontier {
    * Neither input graph is changed; unreachable retained objects are permitted by the verifier.
    */
   List<String> match(Graph model, Graph observed) {
+    return match(model, observed, true);
+  }
+
+  /** Compares covered obligations without changing semantic roots or introducing GC transitions. */
+  List<String> matchCovered(Graph model, Graph observed) {
+    return match(model, observed, false);
+  }
+
+  private List<String> match(Graph model, Graph observed, boolean complete) {
     var next = new LinkedHashSet<State>();
     List<String> problems = List.of("No legal clearing history matches the snapshot");
 
     for (var state : states) {
       spend();
-      var result = ExactVerifier.verifyAccessible(view(model, state), observed, true);
+      var candidate = view(model, state);
+      if (!complete) candidate = covered(candidate, observed);
+      var result = ExactVerifier.verifyAccessible(candidate, observed, true);
       if (result.verdict() == ExactVerifier.Verdict.SATISFIED) next.add(state);
       else problems = result.differences();
     }
 
     states = next;
     return next.isEmpty() ? problems : List.of();
+  }
+
+  private Graph covered(Graph candidate, Graph observed) {
+    spend(1L + observed.roots().size() + observed.handles().size());
+    var roots = new HashMap<String, Value.Reference>();
+    for (String name : observed.roots().keySet())
+      if (candidate.roots().containsKey(name)) roots.put(name, candidate.roots().get(name));
+    var handles = new HashMap<Integer, Value.Reference>();
+    for (int id : observed.handles().keySet())
+      if (candidate.handles().containsKey(id)) handles.put(id, candidate.handles().get(id));
+    // This graph is used only by comparison; expansion/acquisition always see the full model.
+    return new Graph(candidate.objects(), roots, handles, candidate.wrappers());
   }
 
   private Graph view(Graph graph, State state) {

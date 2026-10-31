@@ -23,6 +23,7 @@ public record TargetProfile(
     String collector,
     String collectorMode,
     String observation,
+    String bindingMetadata,
     List<String> vmArgs,
     Map<String, String> environment,
     Support support,
@@ -51,6 +52,11 @@ public record TargetProfile(
   /** Collection request policy; completion still requires independently decoded VM events. */
   public record Gc(String control) {}
 
+  /** Whether this profile explicitly requests loaded-class metadata certification. */
+  public boolean retainedMetadata() {
+    return bindingMetadata.equals("retained-class");
+  }
+
   /** Whether launching this parsed profile requires the bundled HotSpot WhiteBox API. */
   public boolean usesWhiteBox() {
     return vm.equals("hotspot") && (jit != null || whiteBoxControl(gc.control()));
@@ -73,6 +79,26 @@ public record TargetProfile(
         collector,
         mode,
         observation,
+        bindingMetadata,
+        vmArgs,
+        environment,
+        support,
+        requirements,
+        limits,
+        jit,
+        gc);
+  }
+
+  /** Freezes the direct executable selected by controlled launch; offline checks perform no I/O. */
+  public TargetProfile withJava(String executable) {
+    return new TargetProfile(
+        version,
+        vm,
+        executable,
+        collector,
+        collectorMode,
+        observation,
+        bindingMetadata,
         vmArgs,
         environment,
         support,
@@ -95,6 +121,9 @@ public record TargetProfile(
     vmArgs = List.copyOf(vmArgs);
     environment = Map.copyOf(environment);
     requirements = List.copyOf(requirements);
+    bindingMetadata = bindingMetadata == null ? "jvmti" : bindingMetadata;
+    if (!Set.of("jvmti", "retained-class").contains(bindingMetadata))
+      throw new IllegalArgumentException("Unknown binding metadata provider " + bindingMetadata);
   }
 
   /**
@@ -124,6 +153,7 @@ public record TargetProfile(
         "collector",
         "collectorMode",
         "observation",
+        "bindingMetadata",
         "vmArgs",
         "environment",
         "support",
@@ -162,6 +192,8 @@ public record TargetProfile(
       throw new IllegalArgumentException("Invalid collector mode " + mode + " for " + collector);
     String observation = text(object, "observation");
     ObservationProfile.parse(observation);
+    String bindingMetadata =
+        object.has("bindingMetadata") ? text(object, "bindingMetadata") : "jvmti";
     var args = strings(object.get("vmArgs"));
     for (String argument : args) {
       // The driver owns the main class, classpath, observer, collector, and crash destination.
@@ -201,6 +233,7 @@ public record TargetProfile(
         collector,
         mode,
         observation,
+        bindingMetadata,
         args,
         environment,
         artifacts,

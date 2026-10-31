@@ -22,6 +22,10 @@ public final class WorkerCaptureCheck {
 
   public static void main(String[] args) throws Exception {
     pausedCapture();
+    retainedParking();
+    retainedFailure(false, false);
+    retainedFailure(true, false);
+    retainedFailure(false, true);
     mismatchedCuts(false);
     mismatchedCuts(true);
     omittedCompletion();
@@ -99,6 +103,96 @@ public final class WorkerCaptureCheck {
     check(
         harness.contexts.stream().allMatch(context -> context.windows().size() == 4),
         "Missing phase windows");
+  }
+
+  private static void retainedParking() throws Exception {
+    var resumed = new AtomicInteger();
+    var harness = new Harness(2, 1, true);
+    Task task =
+        worker -> {
+          worker.begin();
+          worker.checkpoint(21);
+          resumed.incrementAndGet();
+          worker.checkpoint(31);
+          resumed.incrementAndGet();
+          worker.end();
+        };
+    harness.start(task, task);
+    try {
+      check(harness.rendezvous.await() == WorkerRendezvous.START, "Missing retained startup");
+      harness.rendezvous.release();
+      for (int round = 0; round < 2; round++) {
+        check(harness.rendezvous.await() == WorkerRendezvous.CAPTURE, "Missing retained cut");
+        int expected = round * 2;
+        harness.rendezvous.capture(
+            () -> {
+              check(resumed.get() == expected, "Retained worker resumed before acknowledgement");
+              for (var thread : harness.threads) {
+                int before = checkpointDepth(thread.getStackTrace());
+                int after = checkpointDepth(thread.getStackTrace());
+                check(before >= 0 && before == after, "Worker checkpoint depth was not stable");
+              }
+            });
+        harness.rendezvous.release();
+      }
+      check(harness.rendezvous.await() == WorkerRendezvous.END, "Missing retained completion");
+      harness.rendezvous.release();
+      harness.join();
+      check(resumed.get() == 4 && harness.failure.get() == null, "Retained worker cuts failed");
+    } finally {
+      harness.close();
+    }
+  }
+
+  private static int checkpointDepth(StackTraceElement[] frames) {
+    for (int index = 0; index < frames.length; index++)
+      if (frames[index].getClassName().equals(WorkerContext.class.getName())
+          && frames[index].getMethodName().equals("checkpoint")) return index;
+    return -1;
+  }
+
+  private static void retainedFailure(boolean interruptWorker, boolean interruptCaller)
+      throws Exception {
+    var resumed = new AtomicInteger();
+    var harness = new Harness(2, 1, true);
+    Task task =
+        worker -> {
+          worker.begin();
+          worker.checkpoint(21);
+          resumed.incrementAndGet();
+          worker.end();
+        };
+    harness.start(task, task);
+    try {
+      check(harness.rendezvous.await() == WorkerRendezvous.START, "Missing retained startup");
+      harness.rendezvous.release();
+      check(harness.rendezvous.await() == WorkerRendezvous.CAPTURE, "Missing retained cut");
+      if (interruptCaller) {
+        Thread.currentThread().interrupt();
+        expect(InterruptedException.class, () -> harness.rendezvous.capture(() -> {}));
+      } else if (interruptWorker) {
+        harness.rendezvous.capture(() -> harness.threads.get(0).interrupt());
+        expect(IllegalStateException.class, harness.rendezvous::release);
+      } else {
+        expect(
+            IOException.class,
+            () ->
+                harness.rendezvous.capture(
+                    () -> {
+                      throw new IOException("Failed retained acknowledgement");
+                    }));
+      }
+    } finally {
+      Thread.interrupted();
+      harness.close();
+    }
+    check(
+        resumed.get() == 0 && harness.failure.get() != null,
+        "Failed retained capture resumed mutations");
+    if (interruptWorker)
+      check(
+          harness.failure.get().getCause() instanceof InterruptedException,
+          "Retained worker interruption cause was lost");
   }
 
   private static void mismatchedCuts(boolean omittedCut) throws Exception {
@@ -443,7 +537,11 @@ public final class WorkerCaptureCheck {
     final AtomicReference<Throwable> failure = new AtomicReference<>();
 
     Harness(int workers, int bindingCapacity) {
-      rendezvous = new WorkerRendezvous(workers);
+      this(workers, bindingCapacity, false);
+    }
+
+    Harness(int workers, int bindingCapacity, boolean retained) {
+      rendezvous = new WorkerRendezvous(workers, retained);
       for (int index = 0; index < workers; index++) {
         var recorder = new TraceRecorder(index + 1, 100);
         recorders.add(recorder);

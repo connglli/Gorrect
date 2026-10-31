@@ -85,7 +85,12 @@ public final class ObservationCapabilities {
       if ((bits & HeapSnapshot.TAGGING) == 0) reasons.add("Object tagging unavailable");
       if (mechanism.equals("local-bindings")) {
         if (!profile.bindings()) reasons.add("Profile does not map local bindings");
-        if ((bits & HeapSnapshot.LOCAL_VARIABLES) == 0)
+        boolean retained =
+            target.getProperty("observer.bindingMetadata", "jvmti").equals("retained-class");
+        if (retained
+            ? !target.getProperty("observer.retained.ready", "false").equals("true")
+                || (bits & HeapSnapshot.LOCAL_VARIABLES) != 0
+            : (bits & HeapSnapshot.LOCAL_VARIABLES) == 0)
           reasons.add("Local-variable metadata unavailable");
       }
       boolean local = mechanism.equals("local-bindings");
@@ -130,9 +135,11 @@ public final class ObservationCapabilities {
                       : "future-use obligations; no lifetime fences",
                   "primitive recording",
                   "JVMTI tagging and heap-walk optimization/timing effects",
-                  profile.bindings()
-                      ? "local-variable metadata capability"
-                      : "no local-variable access capability",
+                  target.getProperty("observer.bindingMetadata", "jvmti").equals("retained-class")
+                      ? "retained-class metadata and bounded stack inspection; no local access"
+                      : profile.bindings()
+                          ? "local-variable metadata capability"
+                          : "no local-variable access capability",
                   profile.controlled()
                       ? "diagnostic array binding and identity reads when used"
                       : "no diagnostic array binding")));

@@ -204,7 +204,7 @@ public final class ConcurrentHistory {
       if (observations.size() != found.checkpoint)
         problems.add("Missing or extra graph observations for the validated path");
       for (var observation : observations)
-        if (observation.graph().isEmpty()) problems.addAll(observation.problems());
+        if (!observation.complete()) problems.addAll(observation.problems());
 
       return new HistoryOracle.Result(
           found.incomplete ? ExactVerifier.Verdict.INCONCLUSIVE : ExactVerifier.Verdict.SATISFIED,
@@ -754,11 +754,12 @@ public final class ConcurrentHistory {
         return;
       }
       var observation = observations.get(checkpoint++);
-      if (observation.graph().isEmpty()) {
-        incomplete = true;
-        return;
-      }
-      var mismatch = frontier.match(graph(), observation.graph().orElseThrow());
+      if (!observation.complete()) incomplete = true;
+      if (observation.graph().isEmpty()) return;
+      var mismatch =
+          observation.complete()
+              ? frontier.match(graph(), observation.graph().orElseThrow())
+              : frontier.matchCovered(graph(), observation.graph().orElseThrow());
       require(mismatch.isEmpty(), "Checkpoint " + checkpoint + ": " + mismatch);
     }
 

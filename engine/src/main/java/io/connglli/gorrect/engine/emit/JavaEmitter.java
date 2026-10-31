@@ -49,14 +49,16 @@ public final class JavaEmitter {
   private final List<Instruction.Worker> workers = new ArrayList<>();
   private final List<ObservationLayout.LocalBinding> bindings = new ArrayList<>();
   private final ObservationProfile observation;
+  private final String bindingMetadata;
   private int worker;
   private final boolean references;
   private final boolean typedReferences;
   private final boolean concurrent;
 
-  private JavaEmitter(GirProgram program, ObservationProfile observation) {
+  private JavaEmitter(GirProgram program, ObservationProfile observation, String bindingMetadata) {
     this.program = program;
     this.observation = observation;
+    this.bindingMetadata = bindingMetadata;
     references = ReferenceProgram.usesReferences(program);
     typedReferences = ReferenceProgram.usesFirstClass(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
@@ -73,10 +75,18 @@ public final class JavaEmitter {
 
   /** Selects lifetime and binding evidence without changing ordinary graph accesses. */
   public static Emission emit(GirProgram program, ObservationProfile observation) {
+    return emit(program, observation, "jvmti");
+  }
+
+  /** Selects metadata provenance without embedding values or predicting physical local slots. */
+  public static Emission emit(
+      GirProgram program, ObservationProfile observation, String bindingMetadata) {
+    if (!bindingMetadata.equals("jvmti") && !bindingMetadata.equals("retained-class"))
+      throw new IllegalArgumentException("Unknown binding metadata provider");
     GirValidator.validate(program);
     var unsupported = ObservationCapabilities.unsupported(program, observation);
     if (!unsupported.isEmpty()) throw new GirException(String.join("; ", unsupported));
-    return new JavaEmitter(program, observation).emit();
+    return new JavaEmitter(program, observation, bindingMetadata).emit();
   }
 
   private Emission emit() {
@@ -195,7 +205,7 @@ public final class JavaEmitter {
     line("}");
     allocationCounters();
     line("public static void main(String[] args) throws Exception {");
-    line("try (TargetSession session = TargetSession.open(args)) {");
+    line("try (TargetSession session = TargetSession.open(args, Case.class)) {");
     line("try {");
     line("NativeObserver.configure(java.util.List.of(" + String.join(",", registrations) + "));");
     line("initialize(); execute(session); session.checkpoint(0); session.complete();");
@@ -235,7 +245,8 @@ public final class JavaEmitter {
             bindings,
             observation.controlled()
                 ? ObservationLayout.REQUIRED
-                : ObservationLayout.LEXICAL_CANDIDATES));
+                : ObservationLayout.LEXICAL_CANDIDATES,
+            bindingMetadata));
   }
 
   private void referenceClasses() {

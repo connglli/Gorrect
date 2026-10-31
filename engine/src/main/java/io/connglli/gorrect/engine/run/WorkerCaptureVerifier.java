@@ -109,6 +109,12 @@ final class WorkerCaptureVerifier {
       return new SnapshotProjector.Projection(
           Optional.empty(), List.of("Incomplete coordinated binding declaration coverage"));
     if (!declarations.isEmpty()) exercised.add("local-bindings");
+    if (layout.bindingMetadata().equals("retained-class"))
+      return SnapshotProjector.projectRetained(
+          snapshot,
+          layout,
+          participants,
+          RetainedMetadata.capture(directory, snapshot, participants, false));
     return SnapshotProjector.projectParticipants(snapshot, layout, participants);
   }
 }
