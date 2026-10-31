@@ -58,7 +58,7 @@ Profiles are versioned JSON objects. Unknown fields, duplicate keys, invalid typ
 | `requirements` | Optional capabilities: `tagging`, `named-roots`, `gc-events`, `gc-completion`, `young-gc`, `compilation-events`, `local-bindings`, `semantic-reads`, `alias-checks`, `contended-histories`, `reference-histories`, `reference-queues`, and the [GIR stress requirements](./gir.md#stress-requirements). `local-bindings`, `semantic-reads`, and `alias-checks` must be exercised, not merely available. `reference-reclamation` remains unsupported. |
 | `limits` | Optional positive bounds: `startupSeconds`, `runSeconds`, `compileSeconds`, `records`, `traceEvents`, `historyStates`, and `historyTransitions`. History limits bound live search/memo states and cumulative work across forks. Startup fits within the run deadline; compilation has a separate deadline. |
 | `jit` | Optional `level`, `warmupRounds`, and `deadlineMillis`. HotSpot levels 1–4 require `support.whitebox`. OpenJ9 accepts only level 1, meaning installed code without an optimization-tier claim; it needs no WhiteBox client. |
-| `gc` | Optional `control`: `system` requests `System.gc()`; HotSpot `whitebox-full` and `whitebox-young` require a matching `support.whitebox` client. The young policy supports Serial, Parallel, and G1. The default is `whitebox-full` for HotSpot JIT profiles, `system` otherwise. GC controls work independently of JIT. |
+| `gc` | Optional `control`: `system` requests `System.gc()`; HotSpot `whitebox-full` and `whitebox-young` require a matching `support.whitebox` client. The young policy supports Serial, Parallel, G1, and ZGC with explicit `collectorMode: "generational"` on JDK 21+. The default is `whitebox-full` for HotSpot JIT profiles, `system` otherwise. GC controls work independently of JIT. |
 
 Defaults and bounds are defined by [TargetProfile](../engine/src/main/java/io/connglli/gorrect/engine/config/TargetProfile.java). Recognized but unimplemented selections or requirements return unsupported.
 
@@ -86,7 +86,9 @@ Set `support.whitebox` to the JAR path. Each bundle records its checksum and the
 
 ## Artifacts and results
 
-Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements. `observation-capabilities.json` records supported combinations, preconditions, effects, evidence requirements, and separate availability, exercise, and verification facts. This derived report is never an input to verification.
+Each [run bundle](./implementation.md#artifacts-and-results) retains inputs, executables, observations, and diagnostics, including partial evidence after failure. Results separate execution outcome, semantic verdict, and unmet requirements.
+
+`observation-capabilities.json` records supported combinations, effects, required evidence, and separate availability, exercise, and verification facts. Unusable target capability facts produce an empty capability list; the result retains the extraction diagnostic and unverified requirements. This derived report is never an input to verification.
 
 A conflicting graph, scalar read, or impossible reference choice is a violation. A confirmed violation remains visible alongside later incomplete coverage or extraction errors. Incomplete coverage or exhausted search is inconclusive.
 

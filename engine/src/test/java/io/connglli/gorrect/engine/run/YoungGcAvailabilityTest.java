@@ -48,7 +48,58 @@ class YoungGcAvailabilityTest {
     assertEquals("system", profile("serial", "system", "young-gc").gc().control());
   }
 
+  @Test
+  void generationalZgcNeedsExplicitModeAndConfirmedModernTargetFacts() {
+    var selected = profile("zgc", "generational", "whitebox-young", "young-gc");
+    var target = generationalFacts();
+    assertTrue(VmDriver.unsupported(selected).isEmpty());
+    assertTrue(VmDriver.requirements(selected, target).isEmpty());
+
+    for (String mode : List.of("default", "non-generational")) {
+      var requested = profile("zgc", mode, "whitebox-young", "young-gc");
+      assertFalse(VmDriver.unsupported(requested).isEmpty());
+      assertTrue(VmDriver.requirements(requested, target).contains("young-gc"));
+    }
+    target.setProperty("java.feature", "17");
+    assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+    assertTrue(
+        VmDriver.requirements(selected, target).stream().anyMatch(gap -> gap.contains("JDK 21+")));
+
+    target = facts("zgc", "whitebox-young");
+    assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+    for (String flag : List.of("false", "unknown", "TRUE")) {
+      target = generationalFacts();
+      target.setProperty("flag.ZGenerational", flag);
+      assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+    }
+    target = generationalFacts();
+    target.remove("flag.ZGenerational");
+    assertTrue(VmDriver.requirements(selected, target).isEmpty());
+    target = generationalFacts();
+    target.setProperty("java.vm.name", "Eclipse OpenJ9 VM");
+    assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+    target = generationalFacts();
+    target.setProperty("flag.UseZGC", "false");
+    assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+    target = generationalFacts();
+    target.setProperty("collectors", "ZGC Minor Cycles,ZGC Minor Pauses");
+    assertTrue(VmDriver.requirements(selected, target).contains("young-gc"));
+  }
+
+  private static Properties generationalFacts() {
+    var result = facts("zgc", "whitebox-young");
+    result.setProperty("flag.ZGenerational", "true");
+    result.setProperty(
+        "collectors", "ZGC Minor Cycles,ZGC Minor Pauses,ZGC Major Cycles,ZGC Major Pauses");
+    return result;
+  }
+
   private static TargetProfile profile(String collector, String control, String requirement) {
+    return profile(collector, "default", control, requirement);
+  }
+
+  private static TargetProfile profile(
+      String collector, String mode, String control, String requirement) {
     var raw =
         JsonFiles.GSON.fromJson(
             """
@@ -58,6 +109,7 @@ class YoungGcAvailabilityTest {
             """,
             JsonObject.class);
     raw.addProperty("collector", collector);
+    raw.addProperty("collectorMode", mode);
     var gc = new JsonObject();
     gc.addProperty("control", control);
     raw.add("gc", gc);

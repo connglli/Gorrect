@@ -162,13 +162,15 @@ class CollectionVerifierTest {
             "serial"));
   }
 
-  @Test
-  void youngCoverageChecksEveryRequestAgainstIndependentExpectedContext() {
-    var profile = youngProfile();
+  @ParameterizedTest
+  @CsvSource({"serial,default,DefNew", "zgc,generational,ZGC Minor"})
+  void youngCoverageChecksEveryRequestAgainstIndependentExpectedContext(
+      String collector, String mode, String name) {
+    var profile = youngProfile(collector, mode);
     var key = new CollectionVerifier.Key(0, 0, 0, 1);
     var expected = Map.of(key, new CollectionVerifier.Expected(1, 0, 1));
     var valid = request("whitebox-young", 10, 100);
-    var event = cycle("DefNew", "WhiteBox Initiated Young GC", 20, 90);
+    var event = cycle(name, "WhiteBox Initiated Young GC", 20, 90);
     assertTrue(
         CollectionVerifier.compare(
                 expected, new CollectionEvidence(List.of(valid), List.of(event)), profile)
@@ -213,8 +215,10 @@ class CollectionVerifierTest {
             .unmet());
   }
 
-  @Test
-  void coalescedYoungRequestsRetainWorkerContextsWithoutUsingFileOrder() {
+  @ParameterizedTest
+  @CsvSource({"serial,default,DefNew", "zgc,generational,ZGC Minor"})
+  void coalescedYoungRequestsRetainWorkerContextsWithoutUsingFileOrder(
+      String collector, String mode, String name) {
     var first =
         new CollectionEvidence.Request(
             1, 11, 3, 2, 4, 1, 101, "whitebox-young", true, time(10), time(100));
@@ -227,12 +231,78 @@ class CollectionVerifierTest {
             new CollectionVerifier.Key(2, 3, 2, 1), new CollectionVerifier.Expected(12, 4, 102));
     var evidence =
         new CollectionEvidence(
-            List.of(second, first),
-            List.of(cycle("DefNew", "WhiteBox Initiated Young GC", 30, 80)));
-    assertTrue(CollectionVerifier.compare(expected, evidence, youngProfile()).unmet().isEmpty());
+            List.of(second, first), List.of(cycle(name, "WhiteBox Initiated Young GC", 30, 80)));
+    assertTrue(
+        CollectionVerifier.compare(expected, evidence, youngProfile(collector, mode))
+            .unmet()
+            .isEmpty());
   }
 
-  private static TargetProfile youngProfile() {
+  @Test
+  void zgcMinorCertificateNeedsExplicitGenerationalModeAndItsOwnCause() {
+    var request = request("whitebox-young", 10, 100);
+    var minor = cycle("ZGC Minor", "WhiteBox Initiated Young GC", 20, 90);
+    assertTrue(CollectionVerifier.youngWithin(request, minor, "zgc", "generational"));
+    assertFalse(CollectionVerifier.youngWithin(request, minor, "zgc"));
+    for (String mode : List.of("default", "non-generational", "unknown"))
+      assertFalse(CollectionVerifier.youngWithin(request, minor, "zgc", mode));
+    for (String name : List.of("Z", "ZGC Major", "ZGC Minor Pauses", "G1New"))
+      assertFalse(
+          CollectionVerifier.youngWithin(
+              request, cycle(name, "WhiteBox Initiated Young GC", 20, 90), "zgc", "generational"));
+    for (String cause : List.of("System.gc()", "WhiteBox Initiated Full GC", "Allocation Rate"))
+      assertFalse(
+          CollectionVerifier.youngWithin(
+              request, cycle("ZGC Minor", cause, 20, 90), "zgc", "generational"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle("ZGC Minor", minor.cause(), 9, 90), "zgc", "generational"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle("ZGC Minor", minor.cause(), 20, 101), "zgc", "generational"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request, cycle("ZGC Minor", minor.cause(), 20, 20), "zgc", "generational"));
+    assertFalse(
+        CollectionVerifier.youngWithin(
+            request("whitebox-full", 10, 100), minor, "zgc", "generational"));
+    assertFalse(
+        CollectionVerifier.completedWithin(
+            request("whitebox-full", 10, 100), minor, "zgc", "generational"));
+  }
+
+  @Test
+  void nestedMajorOrUnrelatedMinorEventsDoNotStandInForTheYoungRequest() {
+    var profile = youngProfile("zgc", "generational");
+    var expected =
+        Map.of(new CollectionVerifier.Key(0, 0, 0, 1), new CollectionVerifier.Expected(1, 0, 1));
+    var request = request("whitebox-young", 10, 100);
+    var major = cycle("ZGC Major", "WhiteBox Initiated Young GC", 20, 90);
+    var wrongMinor = cycle("ZGC Minor", "WhiteBox Initiated Full GC", 30, 80);
+    assertEquals(
+        List.of("young-gc"),
+        CollectionVerifier.compare(
+                expected,
+                new CollectionEvidence(List.of(request), List.of(major, wrongMinor)),
+                profile)
+            .unmet());
+
+    // A qualifying minor proves the young path even if another major also runs; this is not a
+    // claim that the interval contains young-only work.
+    var minor = cycle("ZGC Minor", "WhiteBox Initiated Young GC", 30, 80);
+    assertTrue(
+        CollectionVerifier.compare(
+                expected, new CollectionEvidence(List.of(request), List.of(major, minor)), profile)
+            .unmet()
+            .isEmpty());
+    assertEquals(
+        List.of("young-gc"),
+        CollectionVerifier.compare(
+                Map.of(), new CollectionEvidence(List.of(), List.of(minor)), profile)
+            .unmet());
+  }
+
+  private static TargetProfile youngProfile(String collector, String mode) {
     var raw =
         JsonFiles.GSON.fromJson(
             """
@@ -242,6 +312,8 @@ class CollectionVerifierTest {
              "support":{"runtime":"runtime.jar","protocol":"protocol.jar","observer":"observer.so","whitebox":"client.jar"}}
             """,
             JsonObject.class);
+    raw.addProperty("collector", collector);
+    raw.addProperty("collectorMode", mode);
     return TargetProfile.parse(raw, Path.of("."));
   }
 }

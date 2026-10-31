@@ -106,18 +106,22 @@ final class RunVerifier {
       var problems = new ArrayList<String>();
       var unmet = new ArrayList<String>();
       var captures = new CaptureReader(directory, run, profile, layout, manifest);
-      Properties facts;
-      if (profile.retainedMetadata()) {
-        facts = new Properties();
-        try {
-          facts = ControlledLaunch.targetFacts(directory);
-          unmet.addAll(VmDriver.requirements(profile, facts));
-        } catch (IOException | RuntimeException failure) {
-          captures.error("Target capability evidence failed: " + failure);
-        }
-      } else {
-        facts = target(directory);
+      var facts = new Properties();
+      boolean capabilityEvidenceUsable = false;
+      try {
+        facts =
+            profile.retainedMetadata()
+                ? ControlledLaunch.targetFacts(directory)
+                : target(directory);
         unmet.addAll(VmDriver.requirements(profile, facts));
+        capabilityEvidenceUsable = true;
+      } catch (IOException | RuntimeException failure) {
+        captures.error("Target capability evidence failed: " + failure);
+        // Unknown target facts supply no capability proof, but readable graphs can still refute.
+        var requirements = new ArrayList<>(profile.requirements());
+        requirements.addAll(program.requirements().stream().sorted().toList());
+        for (String requirement : requirements)
+          if (!unmet.contains(requirement)) unmet.add(requirement);
       }
 
       ExecutionTrace trace;
@@ -132,7 +136,8 @@ final class RunVerifier {
         if (!lexicalNatural) throw new IOException("Execution trace is incomplete");
         captures.error("Execution trace is incomplete");
       }
-      boolean workerEvidenceFailed = profile.retainedMetadata() && !captures.trustedLaunch();
+      boolean workerEvidenceFailed =
+          !capabilityEvidenceUsable || profile.retainedMetadata() && !captures.trustedLaunch();
       try {
         StressVerifier.checkEnvelope(directory, run, program, trace);
       } catch (IOException | RuntimeException failure) {
@@ -226,7 +231,8 @@ final class RunVerifier {
         }
         requiredObservations(profile, exercised, unmet, problems);
         report = new RunReport(report.execution(), report.verdict(), unmet, problems);
-        observationReport(directory, program, observation, facts, exercised, verified);
+        observationReport(
+            directory, program, observation, facts, exercised, verified, capabilityEvidenceUsable);
         JsonFiles.write(directory.resolve("result.json"), report);
         return report;
       }
@@ -330,7 +336,8 @@ final class RunVerifier {
               verdict,
               unmet,
               problems);
-      observationReport(directory, program, observation, facts, exercised, verified);
+      observationReport(
+          directory, program, observation, facts, exercised, verified, capabilityEvidenceUsable);
     } catch (OracleLimitException | HistoryLimitException exception) {
       report = RunReport.failure(RunReport.Outcome.CHECKING_LIMIT, exception.getMessage());
     } catch (UnsupportedHistoryException exception) {
@@ -607,17 +614,21 @@ final class RunVerifier {
     return SnapshotProjector.project(snapshot, layout, bindings);
   }
 
+  /** Replaces stale availability claims when the target capability facts cannot be used. */
   private static void observationReport(
       Path directory,
       GirProgram program,
       ObservationProfile profile,
       Properties facts,
       Set<String> exercised,
-      Set<String> verified)
+      Set<String> verified,
+      boolean capabilityEvidenceUsable)
       throws IOException {
     JsonFiles.write(
         directory.resolve("observation-capabilities.json"),
-        ObservationCapabilities.describe(program, profile, facts, exercised, verified));
+        capabilityEvidenceUsable
+            ? ObservationCapabilities.describe(program, profile, facts, exercised, verified)
+            : List.of());
   }
 
   private static void requiredObservations(

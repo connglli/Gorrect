@@ -1,6 +1,6 @@
 # Stage 16 GC control proposal
 
-Status: accepted design basis for the [young-request implementation](../implementations/completed-2026-10-31-stage16a.md); later request-kind, phase and placement slices remain proposals. This note scopes [stage 16](../implementations/2026-10-29-implementation-plan.md#16-add-collection-and-phase-controls-with-evidence) while scalar/frame/exception work continues independently. GIR and artifacts remain version 1.
+Status: accepted design basis for the [young-request implementation](../implementations/completed-2026-10-31-stage16a.md) and [generational-ZGC extension](../implementations/completed-2026-10-31-stage16b.md). OpenJ9 request certificates, per-site kinds, phases and placement remain proposals. This note scopes [stage 16](../implementations/2026-10-29-implementation-plan.md#16-add-collection-and-phase-controls-with-evidence) while scalar/frame/exception work continues independently. GIR and artifacts remain version 1.
 
 ## First slice
 
@@ -43,7 +43,7 @@ Generation, region, and size observations need logical-object identity, sampling
 | Unit | Ownership and completion |
 | --- | --- |
 | 16a: young requests and certificates | Update `TargetProfile`, VM launch/capability handling, `VmControl`/`HotSpotControl`, and `CollectionVerifier`; reuse existing collection records. Update profile/usage documentation and focused tests. No GIR, graph/oracle, emitter, or frame-protocol changes are needed, so this can proceed beside stage 14. |
-| 16b: request-kind extensions | Add generational-ZGC minor evidence and investigated OpenJ9 controls as separately gated capabilities. Per-site young/full selection needs an agreed GIR control contract and emitter/trace updates; the first slice does not preselect that syntax. |
+| 16b: request-kind extensions | [Generational-ZGC minor evidence](../implementations/completed-2026-10-31-stage16b.md) extends the existing profile policy. OpenJ9 controls remain separately gated. Per-site young/full selection needs its own GIR control contract and emitter/trace updates. |
 | 16c: concurrent phases and placement | Agree lease/cycle/phase/cleanup and sampling contracts, then integrate with the finished worker rendezvous. Add independent mutation/phase and placement certificates before enabling their stress requirements. |
 
 For 16a, test normal requests on Serial/Parallel/G1 with and without JIT settings; repeated, conditional, and worker requests; JDK17/21 compatibility; offline verification and exact-class replay. Independent evidence fixtures must reject absent/duplicate/wrong-context requests, incorrect causes/kinds/VM identities, incomplete/outside intervals, full-only fallback, ignored or unavailable controls, missing JFR, and exhausted evidence bounds. Preserve old version 1 bundles and the whole/major completion tests. Failure injection must retain graph refutations, timeout behavior, and usable diagnostics. No new CLI switches belong to this work.

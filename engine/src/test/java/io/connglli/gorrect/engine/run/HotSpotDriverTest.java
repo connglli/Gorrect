@@ -56,6 +56,26 @@ class HotSpotDriverTest {
   }
 
   @Test
+  void presentZgcGenerationFlagsMustAgreeWithBeans() {
+    var facts = new Properties();
+    facts.setProperty(
+        "collectors", "ZGC Minor Cycles,ZGC Minor Pauses,ZGC Major Cycles,ZGC Major Pauses");
+    for (String flag : List.of("false", "unknown", "TRUE", "")) {
+      facts.setProperty("flag.ZGenerational", flag);
+      assertThrows(IllegalArgumentException.class, () -> HotSpotDriver.mode("zgc", facts));
+    }
+    facts.setProperty("flag.ZGenerational", "true");
+    assertEquals("generational", HotSpotDriver.mode("zgc", facts));
+    facts.remove("flag.ZGenerational");
+    assertEquals("generational", HotSpotDriver.mode("zgc", facts));
+    facts.setProperty("collectors", "ZGC Cycles,ZGC Pauses");
+    facts.setProperty("flag.ZGenerational", "true");
+    assertThrows(IllegalArgumentException.class, () -> HotSpotDriver.mode("zgc", facts));
+    facts.setProperty("flag.ZGenerational", "false");
+    assertEquals("non-generational", HotSpotDriver.mode("zgc", facts));
+  }
+
+  @Test
   void g1AllowsTheBackportedConcurrentBeanButNotAnotherCollector() {
     var facts = new Properties();
     for (String name : List.of("serial", "parallel", "g1", "zgc", "shenandoah"))

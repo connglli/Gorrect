@@ -1,6 +1,6 @@
 # Stage 16a young collection requests and certificates
 
-Status: implementation, two independent reviews and coordinator integration complete; awaiting user review. This slice follows the [accepted stage 16 design](../designs/2026-10-30-stage16-gc-controls.md), using the existing collect instruction and version 1 evidence. The [usage contract](../../../docs/usage.md#profiles) owns configuration and supported combinations.
+Status: complete for the initial Serial/Parallel/G1 young-policy slice. This slice follows the [accepted stage 16 design](../designs/2026-10-30-stage16-gc-controls.md), using the existing collect instruction and version 1 evidence. The [usage contract](../../../docs/usage.md#profiles) owns configuration and supported combinations.
 
 ## Scope
 
@@ -21,4 +21,4 @@ Six selected HotSpot fastdebug Serial/Parallel/G1 plain/JIT configurations pass 
 
 ## Limits
 
-Concurrent coalesced calls may leave the strict per-request interval requirement unmet; positive fixtures use ordered worker phases. Request return never establishes promotion, young-only execution, clearing or reclamation. Generational-ZGC/OpenJ9 certificates, per-site selection, concurrent phases and placement remain later slices. No new GIR syntax, CLI override, evidence version or global budget is introduced.
+Concurrent coalesced calls may leave the strict per-request interval requirement unmet; positive fixtures use ordered worker phases. Request return never establishes promotion, young-only execution, clearing or reclamation. The [generational-ZGC extension](./completed-2026-10-31-stage16b.md) is a separate completed slice; OpenJ9 certificates, per-site selection, concurrent phases and placement remain later work. No new GIR syntax, CLI override, evidence version or global budget is introduced.

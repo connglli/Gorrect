@@ -123,7 +123,8 @@ final class VmDriver {
 
   private static boolean supportsYoung(TargetProfile profile) {
     return profile.vm().equals("hotspot")
-        && Set.of("serial", "parallel", "g1").contains(profile.collector());
+        && (Set.of("serial", "parallel", "g1").contains(profile.collector())
+            || profile.collector().equals("zgc") && profile.collectorMode().equals("generational"));
   }
 
   /**
@@ -133,8 +134,8 @@ final class VmDriver {
    */
   static List<String> requirements(TargetProfile profile, Properties target) {
     var unmet = new ArrayList<>(unsupported(profile));
-    if (Integer.parseInt(target.getProperty("java.feature")) < 17)
-      unmet.add("Target JDK is older than 17");
+    int feature = Integer.parseInt(target.getProperty("java.feature"));
+    if (feature < 17) unmet.add("Target JDK is older than 17");
 
     if (profile.vm().equals("hotspot")) HotSpotDriver.identity(profile, target, unmet);
     else OpenJ9Driver.identity(profile, target, unmet);
@@ -154,6 +155,16 @@ final class VmDriver {
 
     boolean youngPolicy = profile.gc().control().equals("whitebox-young");
     boolean youngCollector = supportsYoung(profile);
+    if (youngCollector && profile.collector().equals("zgc")) {
+      // The requested mode and a callable method do not prove that this target has generations.
+      youngCollector =
+          feature >= 21
+              && matches(profile, target)
+              && selected(profile, target)
+              && mode(profile, target).equals("generational");
+      if (youngPolicy && !youngCollector)
+        unmet.add("Generational ZGC young policy was not confirmed on a JDK 21+ target");
+    }
 
     long bits = Long.parseLong(target.getProperty("observer.capabilities"));
     boolean metadata =

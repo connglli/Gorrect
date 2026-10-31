@@ -149,7 +149,7 @@ final class CollectionVerifier {
         var cycle = cycles.get(index);
         if (cycle.begin().isAfter(request.end())) break;
         if (young
-            ? youngWithin(request, cycle, profile.collector())
+            ? youngWithin(request, cycle, profile.collector(), profile.collectorMode())
             : completedWithin(request, cycle, profile.collector(), profile.collectorMode())) {
           completed = true;
           break;
@@ -179,11 +179,23 @@ final class CollectionVerifier {
   /** A young-path certificate supplies no whole-heap, promotion, or reclamation guarantee. */
   static boolean youngWithin(
       CollectionEvidence.Request request, CollectionEvidence.Cycle cycle, String collector) {
+    return youngWithin(request, cycle, collector, "default");
+  }
+
+  /**
+   * ZGC minor events certify young work only under an independently confirmed generational mode.
+   */
+  static boolean youngWithin(
+      CollectionEvidence.Request request,
+      CollectionEvidence.Cycle cycle,
+      String collector,
+      String mode) {
     String name =
         switch (collector) {
           case "serial" -> "DefNew";
           case "parallel" -> "ParallelScavenge";
           case "g1" -> "G1New";
+          case "zgc" -> mode.equals("generational") ? "ZGC Minor" : null;
           default -> null;
         };
     return request.returned()

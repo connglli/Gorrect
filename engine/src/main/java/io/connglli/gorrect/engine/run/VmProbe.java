@@ -68,12 +68,21 @@ final class VmProbe {
       }
 
       var actual = family.facts();
-      if (!VmDriver.matches(profile, actual)
-          || Integer.parseInt(actual.getProperty("java.feature")) < 17)
+      int feature = Integer.parseInt(actual.getProperty("java.feature"));
+      if (!VmDriver.matches(profile, actual) || feature < 17)
         return new Result(
             profile,
             RunReport.failure(
                 RunReport.Outcome.UNSUPPORTED, "Expected " + profile.vm() + " JDK 17+"));
+
+      if (feature < 21
+          && profile.collector().equals("zgc")
+          && profile.collectorMode().equals("generational")
+          && profile.gc().control().equals("whitebox-young"))
+        return new Result(
+            profile,
+            RunReport.failure(
+                RunReport.Outcome.UNSUPPORTED, "Generational ZGC young policy requires JDK 21+"));
 
       String mode =
           profile.collectorMode().equals("default")

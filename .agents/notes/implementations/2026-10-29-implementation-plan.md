@@ -145,7 +145,7 @@ Complete when independently enumerated wrapper/queue histories match execution, 
 
 ## 16. Add collection and phase controls with evidence
 
-Status: in progress. [Young request/certification](./completed-2026-10-31-stage16a.md) implements the first slice; concurrent phase controls, placement and further VM certificates remain separate work.
+Status: in progress. [Young request/certification](./completed-2026-10-31-stage16a.md) and [generational ZGC minor certificates](./completed-2026-10-31-stage16b.md) are implemented. Concurrent phase controls, placement, OpenJ9 certificates and per-site request kinds remain separate work.
 
 Goal: exercise young, full, and concurrent collector paths deliberately.
 

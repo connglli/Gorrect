@@ -83,11 +83,18 @@ final class HotSpotDriver {
     // Bean identities distinguish pre-generational and generational-only VMs when the toggle
     // itself is absent; the engine JDK version cannot resolve the selected target mode.
     if (collector.equals("zgc")) {
-      if (beans.equals(Set.of("ZGC Cycles", "ZGC Pauses"))) return "non-generational";
-      if (beans.equals(
+      String mode;
+      if (beans.equals(Set.of("ZGC Cycles", "ZGC Pauses"))) mode = "non-generational";
+      else if (beans.equals(
           Set.of("ZGC Minor Cycles", "ZGC Minor Pauses", "ZGC Major Cycles", "ZGC Major Pauses")))
-        return "generational";
-      throw new IllegalArgumentException("Unrecognized ZGC mode/beans: " + beans);
+        mode = "generational";
+      else throw new IllegalArgumentException("Unrecognized ZGC mode/beans: " + beans);
+
+      // Gen-only VMs can omit the toggle, but a present flag must agree with the bean identity.
+      String toggle = facts.getProperty("flag.ZGenerational");
+      if (toggle != null && !toggle.equals(Boolean.toString(mode.equals("generational"))))
+        throw new IllegalArgumentException("ZGC generation flag disagrees with collector beans");
+      return mode;
     }
     if (collector.equals("shenandoah")) {
       String mode = facts.getProperty("flag.ShenandoahGCMode", "");

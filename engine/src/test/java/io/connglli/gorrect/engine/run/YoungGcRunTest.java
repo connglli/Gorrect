@@ -8,10 +8,12 @@ import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import java.io.IOException;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
@@ -24,6 +26,7 @@ import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.Arguments;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.MethodSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
@@ -42,18 +45,20 @@ class YoungGcRunTest {
       """;
 
   static Stream<Arguments> collectors() {
-    return Stream.of(17, 21)
-        .flatMap(
-            feature ->
-                Stream.of("serial", "parallel", "g1")
-                    .map(collector -> Arguments.of(feature, collector)));
+    var established =
+        Stream.of(17, 21)
+            .flatMap(
+                feature ->
+                    Stream.of("serial", "parallel", "g1")
+                        .map(collector -> Arguments.of(feature, collector, "default")));
+    return Stream.concat(established, Stream.of(Arguments.of(21, "zgc", "generational")));
   }
 
   @ParameterizedTest
   @MethodSource("collectors")
-  void certifiesMainRepeatedConditionalAndWorkerYoungRequests(int feature, String collector)
-      throws IOException {
-    Path selected = profile(feature, collector, client("native"));
+  void certifiesMainRepeatedConditionalAndWorkerYoungRequests(
+      int feature, String collector, String mode) throws IOException {
+    Path selected = profile(feature, collector, mode, client("native"));
     Path run = directory.resolve("run");
     // A prior in-flight cycle may satisfy a coalesced native call without lying inside its span.
     // Separate worker phases make the per-request certificate premise deterministic.
@@ -61,13 +66,15 @@ class YoungGcRunTest {
     assertEquals(0, report.exitStatus(), report.toString());
     assertPass(RunEngine.verify(run));
     assertEquals("whitebox-young", Artifacts.target(run).getProperty("gc.control"));
-    if (feature == 21 && collector.equals("g1"))
+    if (feature == 21 && (collector.equals("g1") || collector.equals("zgc")))
       assertPass(RunEngine.replay(run, directory.resolve("replay")));
   }
 
-  @Test
-  void youngControlAndCertificatesWorkWithJitSettings() throws IOException {
-    Path selected = profile(21, "g1", client("native"));
+  @ParameterizedTest
+  @CsvSource({"g1,default", "zgc,generational"})
+  void youngControlAndCertificatesWorkWithJitSettings(String collector, String mode)
+      throws IOException {
+    Path selected = profile(21, collector, mode, client("native"));
     var raw = JsonFiles.read(selected);
     var jit = new JsonObject();
     jit.addProperty("level", 1);
@@ -82,9 +89,11 @@ class YoungGcRunTest {
     assertPass(RunEngine.run(input(directory, PROGRAM), selected, directory.resolve("jit")));
   }
 
-  @Test
-  void combinedProbeActuallyExercisesTheRequestedYoungPolicy() throws IOException {
-    Path selected = profile(21, "serial", client("native"));
+  @ParameterizedTest
+  @CsvSource({"serial,default", "zgc,generational"})
+  void combinedProbeActuallyExercisesTheRequestedYoungPolicy(String collector, String mode)
+      throws IOException {
+    Path selected = profile(21, collector, mode, client("native"));
     var raw = JsonFiles.read(selected);
     raw.add(
         "requirements",
@@ -94,9 +103,11 @@ class YoungGcRunTest {
     assertPass(RunEngine.probe(selected, directory.resolve("probe")));
   }
 
-  @Test
-  void startupExerciseCannotSatisfyAWorkloadWithoutCollection() throws IOException {
-    Path selected = profile(21, "serial", client("native"));
+  @ParameterizedTest
+  @CsvSource({"serial,default", "zgc,generational"})
+  void startupExerciseCannotSatisfyAWorkloadWithoutCollection(String collector, String mode)
+      throws IOException {
+    Path selected = profile(21, collector, mode, client("native"));
     var report =
         RunEngine.run(
             input(directory, "gir 1; program { checkpoint; }"),
@@ -111,9 +122,15 @@ class YoungGcRunTest {
   }
 
   @ParameterizedTest
-  @ValueSource(strings = {"noop", "full"})
-  void ignoredCallsAndFullOnlyFallbackCannotCertifyYoungCoverage(String mode) throws IOException {
-    Path selected = profile(21, "serial", client(mode));
+  @CsvSource({
+    "serial,default,noop",
+    "serial,default,full",
+    "zgc,generational,noop",
+    "zgc,generational,full"
+  })
+  void ignoredCallsAndFullOnlyFallbackCannotCertifyYoungCoverage(
+      String collector, String collectorMode, String clientMode) throws IOException {
+    Path selected = profile(21, collector, collectorMode, client(clientMode));
     var report = RunEngine.run(input(directory, PROGRAM), selected, directory.resolve("ignored"));
     assertEquals(RunReport.Outcome.COMPLETED, report.execution(), report.toString());
     assertEquals(ExactVerifier.Verdict.SATISFIED, report.verdict());
@@ -216,6 +233,94 @@ class YoungGcRunTest {
         report.toString());
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void malformedTargetCapabilitiesPreserveGraphRefutationsAndUnverifiedRequirements(boolean history)
+      throws IOException {
+    String program =
+        history
+            ? "gir 1; shape N object 1 1; object 1 N [weak(1)] [7]; root main = 1; program { scope"
+                + " { read-root owner N main; collect; is-cleared value owner 0; } checkpoint; }"
+            : PROGRAM;
+    Path selected = profile(21, "serial", client("native"));
+    Path original = directory.resolve("original");
+    assertPass(RunEngine.run(input(directory, program), selected, original));
+    for (String key : List.of("java.feature", "observer.capabilities"))
+      for (boolean missing : List.of(false, true))
+        for (boolean violation : List.of(false, true)) {
+          Path changed = copy(directory, original, key + "-" + missing + "-" + violation);
+          var facts = Artifacts.target(changed);
+          if (missing) facts.remove(key);
+          else facts.setProperty(key, "unknown");
+          try (var output = Files.newOutputStream(changed.resolve("target.properties"))) {
+            facts.store(output, "Malformed capability evidence");
+          }
+          if (violation) RunTestSupport.rewriteSnapshot(changed, false);
+
+          var report = RunEngine.verify(changed);
+          assertEquals(RunReport.Outcome.EXTRACTION_ERROR, report.execution(), report.toString());
+          assertEquals(
+              violation ? ExactVerifier.Verdict.VIOLATED : ExactVerifier.Verdict.INCONCLUSIVE,
+              report.verdict(),
+              report.toString());
+          assertTrue(report.unmetRequirements().contains("young-gc"), report.toString());
+          assertTrue(
+              report.problems().stream()
+                  .anyMatch(problem -> problem.contains("Target capability evidence failed")),
+              report.toString());
+          assertTrue(
+              JsonParser.parseString(
+                      Files.readString(changed.resolve("observation-capabilities.json")))
+                  .getAsJsonArray()
+                  .isEmpty());
+        }
+  }
+
+  @Test
+  void malformedTargetCapabilitiesRetainGirOnlyStressRequirements() throws IOException {
+    String program =
+        PROGRAM.replace(
+            "program {", "require compiled-execution; require gc-during-workers; program {");
+    Path selected = profile(21, "serial", client("native"));
+    var raw = JsonFiles.read(selected);
+    var jit = new JsonObject();
+    jit.addProperty("level", 1);
+    jit.addProperty("warmupRounds", 0);
+    raw.add("jit", jit);
+    raw.add(
+        "requirements",
+        JsonFiles.GSON.toJsonTree(
+            List.of("tagging", "named-roots", "young-gc", "gc-during-workers")));
+    JsonFiles.write(selected, raw);
+    Path original = directory.resolve("gir-requirement");
+    assertPass(RunEngine.run(input(directory, program), selected, original));
+    for (boolean violation : List.of(false, true)) {
+      Path changed = copy(directory, original, "gir-requirement-" + violation);
+      var facts = Artifacts.target(changed);
+      facts.setProperty("java.feature", "unknown");
+      try (var output = Files.newOutputStream(changed.resolve("target.properties"))) {
+        facts.store(output, "Malformed capability evidence");
+      }
+      if (violation) RunTestSupport.rewriteSnapshot(changed, false);
+
+      var report = RunEngine.verify(changed);
+      assertEquals(RunReport.Outcome.EXTRACTION_ERROR, report.execution(), report.toString());
+      assertEquals(
+          violation ? ExactVerifier.Verdict.VIOLATED : ExactVerifier.Verdict.INCONCLUSIVE,
+          report.verdict(),
+          report.toString());
+      assertTrue(
+          report
+              .unmetRequirements()
+              .containsAll(List.of("young-gc", "compiled-execution", "gc-during-workers")),
+          report.toString());
+      assertEquals(
+          1L,
+          report.unmetRequirements().stream().filter("gc-during-workers"::equals).count(),
+          report.toString());
+    }
+  }
+
   @Test
   void malformedWorkerStructureCannotHideAGraphViolationOrUnverifiedCertificate()
       throws IOException {
@@ -239,9 +344,72 @@ class YoungGcRunTest {
         report.toString());
   }
 
+  @Test
+  void generationalZgcIsUnavailableOnJdk17BeforeWorkloadStartup() throws IOException {
+    Path selected = profile(17, "zgc", "generational", client("native"));
+    Path run = directory.resolve("jdk17");
+    var report = RunEngine.run(input(directory, PROGRAM), selected, run);
+    assertEquals(RunReport.Outcome.UNSUPPORTED, report.execution(), report.toString());
+    assertTrue(report.problems().stream().anyMatch(problem -> problem.contains("JDK 21+")));
+    assertFalse(Files.exists(run.resolve("target.properties")));
+    assertFalse(Files.exists(run.resolve("traces/execution.gtrace")));
+  }
+
+  @Test
+  void readableMinorKindAndModeCorruptionsLeaveCoverageUnmetWithoutHidingRefutations()
+      throws IOException {
+    Path selected = profile(21, "zgc", "generational", client("native"));
+    Path original = directory.resolve("generational");
+    assertPass(RunEngine.run(input(directory, PROGRAM), selected, original));
+    for (String variant : List.of("major-kind", "non-generational", "feature17")) {
+      Path changed = copy(directory, original, variant);
+      if (variant.equals("major-kind")) {
+        Path file = changed.resolve("traces/workers.jfr");
+        // Equal-width ASCII replacement preserves JFR framing, so this tests readable wrong-kind
+        // events rather than relying on an unrelated parse failure.
+        String bytes = new String(Files.readAllBytes(file), StandardCharsets.ISO_8859_1);
+        assertTrue(bytes.contains("ZGC Minor"));
+        Files.write(
+            file, bytes.replace("ZGC Minor", "ZGC Major").getBytes(StandardCharsets.ISO_8859_1));
+        var manifest = JsonFiles.read(changed.resolve("manifest.json"));
+        var target = Artifacts.target(changed);
+        var evidence =
+            HotSpotCollections.read(
+                file,
+                manifest.get("run").getAsLong(),
+                Long.parseLong(target.getProperty("process.pid")),
+                Long.parseLong(target.getProperty("vm.start")));
+        assertFalse(evidence.cycles().isEmpty());
+        assertTrue(evidence.cycles().stream().noneMatch(cycle -> cycle.name().equals("ZGC Minor")));
+      } else {
+        var target = Artifacts.target(changed);
+        if (variant.equals("feature17")) target.setProperty("java.feature", "17");
+        else {
+          target.setProperty("flag.ZGenerational", "false");
+          target.setProperty("collectors", "ZGC Cycles,ZGC Pauses");
+        }
+        try (var output = Files.newOutputStream(changed.resolve("target.properties"))) {
+          target.store(output, "Deliberately contradictory selected-VM facts");
+        }
+      }
+      var report = RunEngine.verify(changed);
+      assertEquals(ExactVerifier.Verdict.SATISFIED, report.verdict(), report.toString());
+      assertTrue(report.unmetRequirements().contains("young-gc"), report.toString());
+      RunTestSupport.rewriteSnapshot(changed, false);
+      report = RunEngine.verify(changed);
+      assertEquals(ExactVerifier.Verdict.VIOLATED, report.verdict(), report.toString());
+      assertTrue(report.unmetRequirements().contains("young-gc"), report.toString());
+    }
+  }
+
   private Path profile(int feature, String collector, Path client) throws IOException {
+    return profile(feature, collector, "default", client);
+  }
+
+  private Path profile(int feature, String collector, String mode, Path client) throws IOException {
     var raw =
         TestProfiles.create("hotspot", System.getProperty("gorrect.java" + feature), collector);
+    raw.addProperty("collectorMode", mode);
     raw.getAsJsonObject("support").addProperty("whitebox", client.toString());
     raw.add("vmArgs", JsonFiles.GSON.toJsonTree(List.of("-Xmx128m", "-Xbatch")));
     var gc = new JsonObject();
