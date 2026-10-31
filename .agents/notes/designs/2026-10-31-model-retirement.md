@@ -1,0 +1,33 @@
+# Checkpoint model retirement proposal
+
+Status: unaccepted design-only [stage 17](../implementations/2026-10-29-implementation-plan.md#17-scale-allocation-and-checking) slice, based on committed a78f84b. No production behavior or allocation-pressure workload is implemented.
+
+## Necessity and scope
+
+[GraphMachine](../../../engine/src/main/java/io/connglli/gorrect/engine/oracle/GraphMachine.java) retains every allocated object although each checkpoint already computes the required strong closure through [Graph.required()](../../../engine/src/main/java/io/connglli/gorrect/engine/model/Graph.java). Reuse that projection to retire unreachable execution records after successful explicit checkpoints. This reduces stale working records without another reachability pass or new GIR/CLI syntax. Retirement does not force target reclamation.
+
+Enable retirement only inside exact Oracle interpretation after a positive whole-source eligibility check, including skipped bodies: ordinary objects and supported reference/data arrays; plain strong operations, scalar branches/scopes/repeats, collection, checkpoints, same-object, supported array clone/copy and opaque identity hashes. Exclude wrappers, soft/weak operations, queues, parallel/atomic/volatile histories, native roots, loaders and finalization/resurrection. Unknown instructions/shapes remain ineligible until reviewed. Ineligible programs keep existing execution and support gates; eligibility adds no unsupported result. Future frames require a fresh proof.
+
+## Transition and invariant
+
+At an eligible checkpoint, compute and validate the existing required graph, preflight its cumulative snapshot charge, then commit its visit, graph, charge, step and event. Only after acceptance remove execution objects absent from that same graph. No retirement runs before allocation/precondition checks, during rejected operations, or automatically on scope exit. Allocation and clone never retry after retirement to evade a budget rejection. Final capture keeps its existing outer-scope release and projection.
+
+The retained closure starts from every named root and every live reference binding in every enclosing scope, including aliases, then follows all strong fields and array elements through sharing, self-edges and cycles. Released bindings reserve names but retain no targets. Preserve null root slots, all bindings/scalars, full shapes/payloads, site occurrences and bookkeeping. Do not retain only the current scope or only roots.
+
+Every legal future reference originates from a retained root/handle, a slot reached from one, null, or a fresh allocation. Writes publish only these values; shallow clone/copy transfers only their reachable targets. Induction therefore prevents a legal continuation recovering a discarded object: declarations' initial IDs have no runtime lookup. Scalars, identity fields, hash subjects and array diagnostic bindings are metadata, not semantic edges. Never reuse logical identities or occurrence numbers, including when a site's previous allocations all retire.
+
+## Accounting and failure
+
+[OracleLimits](../../../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleLimits.java) retains its cumulative meanings. Replace ordinary allocation counting through shrinking map size with a monotone successful allocation total, initialized with all initial objects, including unreachable ones, and incremented for allocate/clone only on success. Combine it with existing cumulative wrapper accounting where shared code needs it; preserve the total in copies/keys. Slots never decrease. Steps, cumulative snapshotCells, rejection order and error categories remain unchanged. A rejected checkpoint leaves heap, bindings, visits, events and every counter unchanged, including objects otherwise eligible for retirement.
+
+After each checkpoint, execution records equal its live closure; between checkpoints they comprise that closure plus subsequent allocations. This bounds stale working records by allocation gaps, not solely the instantaneous live set. There is no new live-state budget. The implementation can iterate existing keys and remove absent IDs without copying slots; the existing closure still requires temporary storage.
+
+[OracleResult](../../../engine/src/main/java/io/connglli/gorrect/engine/oracle/OracleResult.java) still retains all immutable checkpoint graphs, events and hash-subject IDs. Primitive target recorders stay fixed-capacity and trace limits still apply; syntax-only conditional capacity planning stays unchanged. SnapshotCells still bounds cumulative saved obligations. No-checkpoint churn, large live checkpoints, source/initial declarations, evidence bytes and cumulative allocation/slot limits remain bottlenecks. Streaming, reusable allocation allowance, scope-exit collection and pressure generation need separate measured requirements and contracts.
+
+## Compatibility and acceptance
+
+Keep source, layout and artifact version 1 unchanged, including unused declarations and empty programs/arrays. Retirement never filters observed objects or weakens projection: actual garbage may remain, duplicate logical identities still fail, and a retired identity reachable through an observed root or required outgoing edge remains contradictory. Missing/incomplete evidence cannot pass. Existing clone/copy/hash gates and fresh identities remain intact. Any accepted typed-payload extension preserves complete Shape metadata and normalized data unchanged; it supplies no new edge or prerequisite for this slice. Old-bundle run/verify/replay verdicts must agree.
+
+An ignored independent finite topology model compares full and pruned executions for 6,283 states and 261,736 transitions, including aliases, cycles, fresh allocation and shallow copies; an outer-alias omission fails its negative control. This supports the reference-closure argument only, not production correctness or JVM reclamation.
+
+Admission requires differential production tests against retirement disabled: identical checkpoints/final graph, traces/hash subjects, failures and budget boundaries; initial garbage, nested live aliases, root/container recovery, disconnected cycles, repeated-site identities, empty states, copy/clone/hash and typed compatibility. Assert rejected checkpoint/allocation state equality and unchanged ineligible paths. A finite repeated-batch test must show execution-record removal while cumulative limits still reject at identical thresholds. Run relevant hooks, regression tests and bounded run/verify/replay before implementation acceptance; promote accepted contracts to their owning source/docs then.

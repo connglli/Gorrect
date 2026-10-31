@@ -155,7 +155,7 @@ Complete when independent VM evidence establishes each requested path and negati
 
 ## 17. Scale allocation and checking
 
-Status: in progress. [Strong-reference phase-boundary reuse](./completed-2026-10-31-stage17a.md) completes the first audit-scaling slice. Bounded-live-set churn and the wider allocation/evidence work remain separate.
+Status: in progress. [Strong-reference phase-boundary reuse](./completed-2026-10-31-stage17a.md) completes the first audit-scaling slice. [Checkpoint model retirement](../designs/2026-10-31-model-retirement.md) is proposed; bounded-live-set churn and wider allocation/evidence work remain separate.
 
 Retire provably unrecoverable garbage with sound summaries, bound evidence growth, and add explicit allocation-pressure workloads with actual-allocation evidence. Extend checking through incremental obligations, exact state merging, and sound partial-order reduction where measured bottlenecks justify them. Preserve wrapper, pending-cleanup, and future-resurrection constraints.
 
