@@ -115,6 +115,11 @@ public final class GirFormatter {
         }
         line(indent, "}");
       }
+      case Instruction.Monitor monitor -> {
+        line(indent, prefix + "monitor " + monitor.owner() + " {");
+        monitor.body().forEach(child -> instruction(child, indent + 1));
+        line(indent, "}");
+      }
       case Instruction.Scope scope -> {
         line(indent, prefix + "scope {");
         scope.body().forEach(child -> instruction(child, indent + 1));

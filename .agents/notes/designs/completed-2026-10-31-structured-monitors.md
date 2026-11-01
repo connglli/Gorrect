@@ -1,6 +1,6 @@
 # Structured monitors
 
-Status: proposed first slice of [stage 19](../implementations/2026-10-29-implementation-plan.md#19-add-monitors-and-targeted-jit-transitions), based on `a05425a`. This note proposes behavior; no monitor implementation or runtime-lock certificate exists.
+Status: implemented first slice of [stage 19](../implementations/2026-10-29-implementation-plan.md#19-add-monitors-and-targeted-jit-transitions). [Instruction.Monitor](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) owns the execution contract; this note retains the agreed design and limits. No runtime-lock certificate exists.
 
 ## Smallest useful block
 

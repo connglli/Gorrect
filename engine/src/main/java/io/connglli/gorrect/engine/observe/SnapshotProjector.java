@@ -115,30 +115,14 @@ public final class SnapshotProjector {
     return projectParticipants(snapshot, layout, bindings == null ? List.of() : List.of(bindings));
   }
 
-  /** Projects every required participant against its own physical thread and generated method. */
+  /**
+   * Projects participants whose rendezvous context the caller has validated. Snapshot identities
+   * and participant uniqueness are checked here. An individual local-origin gap retains decoded
+   * named facts and other mapped locals, without supplying the missing binding.
+   */
   public static Projection projectParticipants(
       HeapSnapshot snapshot, ObservationLayout layout, List<BindingEvidence> participants) {
-    try {
-      var decoder = new Decoder(snapshot, layout);
-      var graph = decoder.decode();
-      var handles = new HashMap<Integer, Value.Reference>();
-      var workers = new HashSet<Integer>();
-      var threads = new HashSet<Long>();
-      for (var participant : participants) {
-        require(
-            workers.add(participant.worker()) && threads.add(participant.thread()),
-            "Duplicate capture participant");
-        for (var binding : decoder.bindings(participant).entrySet())
-          require(
-              handles.putIfAbsent(binding.getKey(), binding.getValue()) == null,
-              "Duplicate binding participant declaration");
-      }
-      return new Projection(
-          Optional.of(new Graph(graph.objects(), graph.roots(), handles, graph.wrappers())),
-          List.of());
-    } catch (IllegalArgumentException exception) {
-      return new Projection(Optional.empty(), List.of(exception.getMessage()));
-    }
+    return projectControlled(snapshot, layout, participants, null);
   }
 
   /** Maps certified retained scopes while preserving independently covered roots on a local gap. */
@@ -147,27 +131,27 @@ public final class SnapshotProjector {
       ObservationLayout layout,
       List<BindingEvidence> participants,
       RetainedBindings retained) {
+    return projectControlled(snapshot, layout, participants, retained);
+  }
+
+  private static Projection projectControlled(
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      List<BindingEvidence> participants,
+      RetainedBindings retained) {
     var decoder = new Decoder(snapshot, layout, retained);
     Graph graph;
     try {
+      participantContexts(snapshot, participants, retained);
       graph = decoder.decode();
     } catch (IllegalArgumentException failure) {
       return new Projection(Optional.empty(), List.of(failure.getMessage()));
     }
     var handles = new HashMap<Integer, Value.Reference>();
     var problems = new ArrayList<String>();
-    var workers = new HashSet<Integer>();
-    var threads = new HashSet<Long>();
     for (var participant : participants) {
       try {
-        require(
-            workers.add(participant.worker()) && threads.add(participant.thread()),
-            "Duplicate capture participant");
-        var required =
-            participant.bindings().stream()
-                .map(BindingEvidence.Binding::declaration)
-                .collect(java.util.stream.Collectors.toSet());
-        for (var entry : decoder.bindings(participant, required, problems).entrySet())
+        for (var entry : decoder.bindings(participant, null, problems).entrySet())
           require(
               handles.putIfAbsent(entry.getKey(), entry.getValue()) == null,
               "Duplicate binding participant declaration");
@@ -180,6 +164,33 @@ public final class SnapshotProjector {
         problems.isEmpty() ? Optional.of(covered) : Optional.empty(),
         problems,
         Optional.of(covered));
+  }
+
+  private static void participantContexts(
+      HeapSnapshot snapshot, List<BindingEvidence> participants, RetainedBindings retained) {
+    var workers = new HashSet<Integer>();
+    var threads = new HashSet<Long>();
+    var declarations = new HashSet<Integer>();
+    for (var participant : participants) {
+      require(
+          participant.run() == snapshot.run() && participant.checkpoint() == snapshot.checkpoint(),
+          "Binding capture identity mismatch");
+      require(
+          participant.worker() != 0 || participant.activation() == 1,
+          "Unsupported caller binding activation");
+      require(
+          workers.add(participant.worker()) && threads.add(participant.thread()),
+          "Duplicate capture participant");
+      for (var binding : participant.bindings())
+        require(
+            declarations.add(binding.declaration()), "Duplicate binding participant declaration");
+      if (retained != null) {
+        var certified = retained.participants().get(participant.worker());
+        require(
+            certified != null && certified.thread() == participant.thread(),
+            "Missing certified participant frame");
+      }
+    }
   }
 
   /**
@@ -260,10 +271,6 @@ public final class SnapshotProjector {
       return buildGraph();
     }
 
-    private Map<Integer, Value.Reference> bindings(BindingEvidence evidence) {
-      return bindings(evidence, null, null);
-    }
-
     private Map<Integer, Value.Reference> bindings(
         BindingEvidence evidence, Set<Integer> required, List<String> problems) {
       require(
@@ -316,7 +323,6 @@ public final class SnapshotProjector {
         try {
           result.put(binding.declaration(), binding(binding, declaration, origins));
         } catch (IllegalArgumentException exception) {
-          if (problems == null) throw exception;
           problems.add(exception.getMessage());
         }
       }

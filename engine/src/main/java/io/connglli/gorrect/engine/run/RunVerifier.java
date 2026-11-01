@@ -13,6 +13,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.observe.NaturalLiveness;
@@ -64,10 +65,7 @@ final class RunVerifier {
     RunReport report;
     try {
       var manifest = manifest(directory);
-      var execution =
-          JsonFiles.GSON.fromJson(
-              JsonFiles.read(directory.resolve("execution.json")), RunReport.class);
-
+      var execution = execution(directory, manifest);
       if (execution.execution() != RunReport.Outcome.COMPLETED) {
         // Failed-execution prefix diagnosis currently covers reference histories only.
         report = diagnoseReferenceFailure(directory, manifest, execution);
@@ -76,15 +74,13 @@ final class RunVerifier {
       }
 
       Artifacts.check(directory, manifest);
-      long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
       var observation = ObservationProfile.parse(profile.observation());
-      var unsupported = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
-      unsupported.addAll(VmDriver.unsupported(profile));
-      if (!unsupported.isEmpty())
-        throw new UnsupportedHistoryException(String.join("; ", unsupported));
-      boolean identityHashes = IdentityHashProgram.usesIdentityHash(program);
+      requireSupported(program, profile, observation);
+      long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
+      boolean independentEvidence =
+          IdentityHashProgram.usesIdentityHash(program) || MonitorProgram.usesMonitors(program);
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -133,12 +129,12 @@ final class RunVerifier {
       try {
         trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       } catch (IOException | RuntimeException failure) {
-        if (!lexicalNatural && !identityHashes) throw failure;
+        if (!lexicalNatural && !independentEvidence) throw failure;
         captures.error("Scalar trace extraction failed: " + failure);
         trace = new ExecutionTrace(run, false, List.of());
       }
       if (!trace.complete()) {
-        if (!lexicalNatural && !identityHashes)
+        if (!lexicalNatural && !independentEvidence)
           throw new IOException("Execution trace is incomplete");
         captures.error("Execution trace is incomplete");
       }
@@ -254,7 +250,7 @@ final class RunVerifier {
       boolean violated = traceVerdict == ExactVerifier.Verdict.VIOLATED;
       boolean matchedPath = trace.complete() && !violated;
       var controlCoverage =
-          lexicalNatural || identityHashes ? exactControls(directory, run, oracle) : null;
+          lexicalNatural || independentEvidence ? exactControls(directory, run, oracle) : null;
       if (controlCoverage != null && !controlCoverage.complete()) {
         captures.error(controlCoverage.problem());
         matchedPath = false;
@@ -278,7 +274,7 @@ final class RunVerifier {
       var verified = new HashSet<String>();
       if (!violated) verified.addAll(exercised);
 
-      if (!lexicalNatural && !identityHashes)
+      if (!lexicalNatural && !independentEvidence)
         controls(directory, run, oracle, program, trace, false);
       boolean inconclusive = workerEvidenceFailed || !trace.complete();
       if (controlCoverage != null && !controlCoverage.complete()) inconclusive = true;
@@ -367,6 +363,38 @@ final class RunVerifier {
     }
     JsonFiles.write(directory.resolve("result.json"), report);
     return report;
+  }
+
+  /** Only authenticated, valid monitor source can refine a missing execution report. */
+  private static RunReport execution(Path directory, JsonObject manifest) throws IOException {
+    try {
+      var report =
+          JsonFiles.GSON.fromJson(
+              JsonFiles.read(directory.resolve("execution.json")), RunReport.class);
+      if (report == null) throw new IOException("Missing execution report");
+      return report;
+    } catch (IOException | RuntimeException failure) {
+      Artifacts.check(directory, manifest);
+      try {
+        var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
+        var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+        if (MonitorProgram.usesMonitors(program))
+          requireSupported(program, profile, ObservationProfile.parse(profile.observation()));
+      } catch (UnsupportedHistoryException unsupported) {
+        throw unsupported;
+      } catch (IOException | RuntimeException invalidSource) {
+        // Invalid or unavailable source cannot manufacture a workload verdict from missing
+        // evidence.
+      }
+      throw failure;
+    }
+  }
+
+  private static void requireSupported(
+      GirProgram program, TargetProfile profile, ObservationProfile observation) {
+    var reasons = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
+    reasons.addAll(VmDriver.unsupported(profile));
+    if (!reasons.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", reasons));
   }
 
   /** Keeps malformed worker structure from bypassing independent graph comparisons. */
@@ -483,10 +511,9 @@ final class RunVerifier {
     SnapshotProjector.Projection read(
         long sequence, Set<Integer> declarations, CheckpointPlan.Cut cut, boolean terminal) {
       HeapSnapshot capture = null;
+      boolean contextTrusted = false;
       try {
         capture = snapshot(directory, run, sequence);
-        if (launchProblem != null) throw new IOException(launchProblem);
-        RetainedMetadata.selection(directory, profile, layout);
         compilationCoverage(capture, profile, unmet);
         var projection =
             projection(
@@ -498,17 +525,24 @@ final class RunVerifier {
                 exercised,
                 cut,
                 terminal);
-        return queueProjection(capture, projection);
+        // Local gaps retain covered facts. An empty global projection cannot establish capture
+        // context or justify recovering named facts after a later metadata/envelope error.
+        contextTrusted = projection.covered().isPresent();
+        if (launchProblem != null) throw new IOException(launchProblem);
+        RetainedMetadata.selection(directory, profile, layout);
+        return contextTrusted ? queueProjection(capture, projection) : projection;
       } catch (IOException | RuntimeException failure) {
         String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
         errors.add(problem);
         var named =
-            capture == null
+            !contextTrusted || capture == null
                 ? Optional.<Graph>empty()
                 : SnapshotProjector.project(capture, layout).graph();
         var projection =
             new SnapshotProjector.Projection(Optional.empty(), List.of(problem), named);
-        return capture == null ? projection : queueProjection(capture, projection);
+        return contextTrusted && capture != null
+            ? queueProjection(capture, projection)
+            : projection;
       }
     }
 

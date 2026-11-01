@@ -175,7 +175,7 @@ Complete when independent normal/exceptional models check copies and clones, byt
 
 Goal: exercise lock/header behavior and roots through compiler transitions.
 
-Start with [structured monitors](../designs/2026-10-31-structured-monitors.md). Add capability-gated OSR, deoptimization, uncommon-trap, inlining, and spill-oriented workloads with relevant execution witnesses. Cover hash/lock interactions and caller/callee roots using the established frame contracts.
+Start with [structured monitors](../designs/completed-2026-10-31-structured-monitors.md). Add capability-gated OSR, deoptimization, uncommon-trap, inlining, and spill-oriented workloads with relevant execution witnesses. Cover hash/lock interactions and caller/callee roots using the established frame contracts.
 
 Complete when independent synchronization models match execution and evidence identifies the requested transition or interior compiled operation. Installation and entry/exit witnesses alone cannot certify continuous compiled execution. Missing target control remains an unmet capability.
 

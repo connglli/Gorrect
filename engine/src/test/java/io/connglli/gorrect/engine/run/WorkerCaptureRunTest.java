@@ -220,6 +220,132 @@ class WorkerCaptureRunTest {
         List.of(1, 1), evidence.participants().stream().map(p -> p.bindings().size()).toList());
   }
 
+  @ParameterizedTest
+  @ValueSource(strings = {"jvmti", "retained-class"})
+  void onlyValidatedWorkerCutsCanExposeSameCaptureNamedPayloadRefutations(String metadata)
+      throws IOException {
+    String program =
+        """
+        gir 1; shape N object 0 1; object 1 N [] [7]; root main=1;
+        program { checkpoint; parallel {
+          worker first { read-root owner N main; checkpoint; }
+          worker second { read-root alias N main; checkpoint; }
+        } checkpoint; }
+        """;
+    Path profile = selected(21);
+    var settings = JsonFiles.read(profile);
+    settings.addProperty("bindingMetadata", metadata);
+    JsonFiles.write(profile, settings);
+    Path original = directory.resolve("context-original");
+    assertPass(RunEngine.run(input(directory, program), profile, original));
+    long runToken = token(original);
+    var cut = CaptureEvidence.read(original.resolve("snapshots/2.gcut"), runToken, 2);
+    Path gap = copy(directory, original, "worker-origin-gap");
+    Path snapshot = gap.resolve("snapshots/2.gsnap");
+    var raw = SnapshotCodec.read(Files.readAllBytes(snapshot));
+    long workerThread = cut.participants().get(1).thread();
+    var records =
+        raw.records().stream()
+            .filter(r -> r.kind() != HeapSnapshot.Kind.ROOT || r.b() != 24 || r.c() != workerThread)
+            .toList();
+    Files.write(snapshot, SnapshotCodec.write(replaceRecords(raw, records)));
+    assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, RunEngine.verify(gap).verdict());
+    corruptPayload(gap, 2);
+    assertEquals(ExactVerifier.Verdict.VIOLATED, RunEngine.verify(gap).verdict());
+    for (String context :
+        List.of(
+            "missing",
+            "run",
+            "checkpoint",
+            "cut",
+            "phase",
+            "thread",
+            "activation",
+            "duplicate-worker",
+            "duplicate-thread",
+            "participant",
+            "site")) {
+      Path changed = copy(directory, gap, "invalid-cut-" + context);
+      Path path = changed.resolve("snapshots/2.gcut");
+      if (context.equals("missing")) Files.delete(path);
+      else if (context.equals("participant"))
+        new CaptureEvidence(
+                cut.run(),
+                cut.checkpoint(),
+                cut.group(),
+                cut.round(),
+                cut.cut(),
+                cut.phase(),
+                cut.participants().subList(0, 2))
+            .write(path);
+      else {
+        var bytes = ByteBuffer.wrap(Files.readAllBytes(path));
+        int first = 48 + 36 + cut.participants().getFirst().bindings().size() * 8;
+        int second = first + 36 + cut.participants().get(1).bindings().size() * 8;
+        switch (context) {
+          case "run" -> bytes.putLong(8, cut.run() + 1);
+          case "checkpoint" -> bytes.putLong(16, 3);
+          case "cut" -> bytes.putInt(36, cut.cut() + 1);
+          case "phase" -> bytes.putInt(40, cut.phase() + 1);
+          case "thread" -> bytes.putLong(first + 16, workerThread + 1000);
+          case "activation" -> bytes.putLong(first + 24, cut.round() + 1);
+          case "duplicate-worker" -> bytes.putInt(second, 1);
+          case "duplicate-thread" -> bytes.putLong(second + 16, workerThread);
+          case "site" -> bytes.putInt(first + 4, cut.participants().get(1).operation() + 1);
+          default -> throw new AssertionError(context);
+        }
+        Files.write(path, bytes.array());
+      }
+      var report = RunEngine.verify(changed);
+      assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, report.verdict(), context + ": " + report);
+      corruptPayload(changed, 1);
+      assertEquals(ExactVerifier.Verdict.VIOLATED, RunEngine.verify(changed).verdict(), context);
+    }
+  }
+
+  private static void corruptPayload(Path run, int checkpoint) throws IOException {
+    Path path = run.resolve("snapshots/" + checkpoint + ".gsnap");
+    var raw = SnapshotCodec.read(Files.readAllBytes(path));
+    int field =
+        raw.classes().stream()
+            .filter(c -> c.signature().equals("LCase$S0;"))
+            .findFirst()
+            .orElseThrow()
+            .fields()
+            .stream()
+            .filter(f -> f.name().equals("d0"))
+            .findFirst()
+            .orElseThrow()
+            .index();
+    var records =
+        raw.records().stream()
+            .map(
+                r ->
+                    r.kind() == HeapSnapshot.Kind.PRIMITIVE_FIELD && r.b() == field
+                        ? new HeapSnapshot.Record(
+                            r.kind(), r.a(), r.b(), r.c(), 99, r.e(), r.f(), r.g())
+                        : r)
+            .toList();
+    Files.write(path, SnapshotCodec.write(replaceRecords(raw, records)));
+  }
+
+  private static HeapSnapshot replaceRecords(HeapSnapshot raw, List<HeapSnapshot.Record> records) {
+    return new HeapSnapshot(
+        raw.run(),
+        raw.checkpoint(),
+        raw.status(),
+        raw.jvmtiError(),
+        raw.capabilities(),
+        raw.gcStartsBefore(),
+        raw.gcFinishesBefore(),
+        raw.gcStartsAfter(),
+        raw.gcFinishesAfter(),
+        raw.classes(),
+        raw.arrays(),
+        raw.methods(),
+        records);
+  }
+
   @Test
   void profilesWithoutControlledBindingCoverageRejectWorkerCuts() throws IOException {
     assertEquals(

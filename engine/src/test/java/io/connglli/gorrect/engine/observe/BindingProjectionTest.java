@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.observe;
 
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.HeapObject;
@@ -300,6 +301,103 @@ class BindingProjectionTest {
         SnapshotProjector.project(damaged, LAYOUT, PRESENT)
             .verify(expected(Value.Reference.strong(new ObjectId(0, 7, 1))))
             .verdict());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"jvmti", "retained-class"})
+  void missingOwnerOriginRetainsSameCaptureNamedPayloadRefutations(String metadata) {
+    var raw = namedSnapshot(false);
+    var expected = namedExpected();
+    assertEquals(
+        ExactVerifier.Verdict.INCONCLUSIVE,
+        controlled(raw, List.of(PRESENT), metadata).verify(expected).verdict());
+    var projection = controlled(namedSnapshot(true), List.of(PRESENT), metadata);
+    assertEquals(ExactVerifier.Verdict.VIOLATED, projection.verify(expected).verdict());
+    assertEquals(Map.of(), projection.covered().orElseThrow().handles());
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"jvmti", "retained-class"})
+  void invalidParticipantContextsCannotExposeSameCaptureNamedRefutations(String metadata) {
+    var raw = namedSnapshot(true);
+    for (var participants :
+        List.of(
+            List.of(new BindingEvidence(2, 1, 11, 0, 1, PRESENT.bindings())),
+            List.of(new BindingEvidence(1, 2, 11, 0, 1, PRESENT.bindings())),
+            List.of(new BindingEvidence(1, 1, 11, 0, 2, PRESENT.bindings())),
+            List.of(PRESENT, PRESENT),
+            List.of(PRESENT, new BindingEvidence(1, 1, 11, 1, 1, List.of())),
+            List.of(PRESENT, new BindingEvidence(1, 1, 12, 1, 1, PRESENT.bindings())))) {
+      var projection = controlled(raw, participants, metadata);
+      assertTrue(projection.covered().isEmpty());
+      assertEquals(
+          ExactVerifier.Verdict.INCONCLUSIVE, projection.verify(namedExpected()).verdict());
+    }
+  }
+
+  private static Graph namedExpected() {
+    var graph = expected(Value.Reference.strong(new ObjectId(0, 7, 1)));
+    return new Graph(graph.objects(), Map.of("main", graph.handles().get(7)), graph.handles());
+  }
+
+  private static HeapSnapshot namedSnapshot(boolean corrupt) {
+    var raw = snapshot(root(100, 11, 9, 901, 20));
+    var records = new ArrayList<>(raw.records());
+    records.add(new HeapSnapshot.Record(HeapSnapshot.Kind.REFERENCE, -2, 100, 8, 0, -2, 0, 0));
+    records.add(new HeapSnapshot.Record(HeapSnapshot.Kind.ROOT, 100, 23, 0, -1, -1, 0, -1));
+    if (corrupt)
+      records.replaceAll(
+          r ->
+              r.kind() == HeapSnapshot.Kind.PRIMITIVE_FIELD && r.a() == 100 && r.b() == 3
+                  ? new HeapSnapshot.Record(r.kind(), r.a(), r.b(), r.c(), 99, r.e(), r.f(), r.g())
+                  : r);
+    return new HeapSnapshot(
+        raw.run(),
+        raw.checkpoint(),
+        raw.status(),
+        raw.jvmtiError(),
+        raw.capabilities(),
+        0,
+        0,
+        0,
+        0,
+        raw.classes(),
+        raw.arrays(),
+        raw.methods(),
+        records);
+  }
+
+  private static SnapshotProjector.Projection controlled(
+      HeapSnapshot raw, List<BindingEvidence> participants, String metadata) {
+    if (metadata.equals("jvmti"))
+      return SnapshotProjector.projectParticipants(raw, LAYOUT, participants);
+    var retained =
+        new RetainedBindings(
+            Map.of(901L, raw.methods().getFirst()),
+            Map.of(
+                0,
+                new RetainedBindings.Participant(
+                    11, new FrameEvidence.Frame(901, 3, 20), FrameEvidence.Role.EXECUTE)));
+    var stripped =
+        new HeapSnapshot(
+            raw.run(),
+            raw.checkpoint(),
+            raw.status(),
+            raw.jvmtiError(),
+            HeapSnapshot.TAGGING,
+            0,
+            0,
+            0,
+            0,
+            raw.classes(),
+            raw.arrays(),
+            raw.methods().stream()
+                .map(
+                    m ->
+                        new HeapSnapshot.MethodInfo(m.token(), m.owner(), m.name(), m.descriptor()))
+                .toList(),
+            raw.records());
+    return SnapshotProjector.projectRetained(stripped, LAYOUT, participants, retained);
   }
 
   private static Graph expected(Value.Reference binding) {

@@ -685,6 +685,15 @@ public final class JavaEmitter {
         return;
       }
 
+      case Instruction.Monitor monitor -> {
+        line("synchronized (" + binding(monitor.owner()).name() + ") {");
+        monitorMarker(monitor.id(), 0);
+        block(monitor.body());
+        line("}");
+        monitorMarker(monitor.id(), 1);
+        return;
+      }
+
       case Instruction.Scope scope -> {
         record(scope.id(), false);
         line("{");
@@ -713,6 +722,16 @@ public final class JavaEmitter {
 
       case Instruction.Operation operation -> emitOperation(operation);
     }
+  }
+
+  private void monitorMarker(int operation, int boundary) {
+    line(
+        recorder()
+            + ".record("
+            + operation
+            + ", io.connglli.gorrect.protocol.ExecutionTrace.Kind.OPERATION.ordinal(), "
+            + boundary
+            + "L);");
   }
 
   private void queueEvent(int operation, String kind, String value, String wrapper) {

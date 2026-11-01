@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.HeapId;
@@ -174,6 +175,8 @@ public final class HistoryOracle {
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
   static void validateProgram(GirProgram program) {
     GirValidator.validate(program);
+    if (MonitorProgram.usesMonitors(program))
+      throw new UnsupportedHistoryException("Monitors require the exact sequential backend");
     if (IdentityHashProgram.usesIdentityHash(program))
       throw new UnsupportedHistoryException("Identity hashes require the exact sequential backend");
     var clones = CloneProgram.unsupported(program);
@@ -317,6 +320,8 @@ public final class HistoryOracle {
 
         case Instruction.Parallel ignored ->
             throw new GirException("Parallel reference histories are unsupported");
+        case Instruction.Monitor ignored ->
+            throw new UnsupportedHistoryException("Monitors require the exact sequential backend");
         case Instruction.Scope scope -> {
           machine.step(scope.id(), false);
           expect();

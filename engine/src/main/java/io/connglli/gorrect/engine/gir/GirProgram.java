@@ -92,6 +92,7 @@ public record GirProgram(
               }
               var instruction = pending.peek().next();
               switch (instruction) {
+                case Instruction.Monitor monitor -> pending.push(monitor.body().iterator());
                 case Instruction.Scope scope -> pending.push(scope.body().iterator());
                 case Instruction.Repeat repeat -> pending.push(repeat.body().iterator());
                 case Instruction.Acquire acquire -> pending.push(acquire.body().iterator());

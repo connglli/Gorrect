@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayList;
@@ -34,6 +35,8 @@ public final class Oracle {
     var unsupported = CloneProgram.unsupported(program);
     if (!unsupported.isEmpty())
       throw new UnsupportedHistoryException(String.join("; ", unsupported));
+    var monitors = MonitorProgram.unsupported(program);
+    if (!monitors.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", monitors));
     var copies = ArrayCopyProgram.unsupported(program);
     if (!copies.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", copies));
     var hashSupport = IdentityHashProgram.unsupported(program);
@@ -52,7 +55,8 @@ public final class Oracle {
         machine.identityHashes());
   }
 
-  private static void execute(List<Instruction> instructions, GraphMachine machine) {
+  /** Executes validated instructions; failed child blocks leave the caller scope current. */
+  static void execute(List<Instruction> instructions, GraphMachine machine) {
     for (var instruction : instructions) {
       switch (instruction) {
         case Instruction.IfPresent present -> {
@@ -69,6 +73,11 @@ public final class Oracle {
             throw new GirException("Acquisition requires a recorded history");
         case Instruction.Parallel parallel -> parallel(parallel, machine);
         case Instruction.Operation operation -> machine.apply(operation);
+        case Instruction.Monitor monitor -> {
+          machine.enterMonitor(monitor);
+          scoped(monitor.body(), machine);
+          machine.marker(monitor.id(), ExecutionTrace.Kind.OPERATION, 1);
+        }
         case Instruction.Scope scope -> {
           machine.step(scope.id(), false);
           scoped(scope.body(), machine);

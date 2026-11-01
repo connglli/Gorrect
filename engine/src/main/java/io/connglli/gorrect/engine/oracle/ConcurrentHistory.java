@@ -528,6 +528,9 @@ public final class ConcurrentHistory {
               thread.body(value ? branch.thenBody() : branch.elseBody());
             }
 
+            case Instruction.Monitor ignored ->
+                throw new UnsupportedHistoryException(
+                    "Monitors require the exact sequential backend");
             case Instruction.Scope scope -> {
               machine.step(scope.id(), false);
               emit(worker);

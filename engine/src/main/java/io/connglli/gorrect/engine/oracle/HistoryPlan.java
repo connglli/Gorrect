@@ -111,6 +111,11 @@ public final class HistoryPlan {
           block(branch.thenBody(), null, 0);
           block(branch.elseBody(), null, 0);
         }
+        case Instruction.Monitor monitor -> {
+          event(monitor.id(), ExecutionTrace.Kind.OPERATION);
+          block(monitor.body(), null, 0);
+          event(monitor.id(), ExecutionTrace.Kind.OPERATION);
+        }
         case Instruction.Scope scope -> {
           event(scope.id(), ExecutionTrace.Kind.OPERATION);
           block(scope.body(), null, 0);

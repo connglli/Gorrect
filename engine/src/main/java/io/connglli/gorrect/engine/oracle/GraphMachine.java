@@ -316,6 +316,17 @@ final class GraphMachine {
     enterScope();
   }
 
+  /** Validates before charging entry or opening its budget-independent child scope. */
+  void enterMonitor(Instruction.Monitor monitor) {
+    var value = binding(monitor.owner());
+    if (!(value instanceof Value.Reference reference)
+        || reference.target() == null
+        || reference.wrapperTarget() != null
+        || !objects.containsKey(reference.target()))
+      throw new GirException("Monitor requires a non-null object or array handle");
+    marker(monitor.id(), ExecutionTrace.Kind.OPERATION, 0);
+  }
+
   void enterScope() {
     scopes.push(new HashMap<>());
   }

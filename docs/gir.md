@@ -93,6 +93,7 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 | `if-nonzero value { ... } else { ... }` | Scalar-selected child scope; else is optional. |
 | `release name;` | End a current-scope binding. |
 | `scope { ... }` | Introduce a scope. |
+| `monitor owner { ... }` | Synchronized child scope; non-null object/array owner; strong sequential controlled. |
 | `repeat count { ... }` | Literal nonnegative repetitions, each with a fresh scope. |
 | `checkpoint;` | Capture graph obligations. |
 | `collect;` | Request collection. |
@@ -101,7 +102,7 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 
 Root, strong-reference and data reads/writes are plain unless explicitly volatile. CAS/exchange have volatile effects; failed CAS has only read effects. CAS never fails spuriously. `if-nonzero` evaluates once: zero selects else, every nonzero value selects then. Branch scopes export no bindings; heap/root writes persist.
 
-Reference bindings stay strong until release or scope exit; acquired handles last through their acquisition body. Scalars retain no objects. Names cannot shadow active bindings or be reused after release within a scope. Only current-scope bindings may be released, removing obligations without requiring reclamation. The outer scope ends before final capture. Conditional checkpoints count executed visits; [observation profiles](./observation.md#coverage-and-observer-effects) determine physical local obligations.
+Reference handles stay strong until release or scope exit; acquired handles last through their whole body. Scalars retain nothing. Names cannot shadow bindings or repeat within scopes. Release requires no reclamation. The outer scope ends before final capture. [Profiles](./observation.md#coverage-and-observer-effects) define physical obligations for executed checkpoints.
 
 Array cloning and range copying require strong sequential programs with controlled observation.
 

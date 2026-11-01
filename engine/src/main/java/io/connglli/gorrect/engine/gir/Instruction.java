@@ -359,6 +359,26 @@ public sealed interface Instruction {
   }
 
   /**
+   * Requires a live non-null ordinary object or array handle declared in an outer scope. Entry
+   * validates the receiver and step capacity before effects, then records OPERATION value 0 after
+   * Java acquisition. The child scope sees outer bindings but cannot release or shadow them. Normal
+   * completion discards child bindings without budget, then consumes an exit step and records
+   * OPERATION value 1 after Java release. An empty block costs two steps.
+   *
+   * <p>Body failure unwinds child bindings without budget and preserves successful prefix writes;
+   * unwound blocks emit no normal-exit marker. Exit exhaustion retains entry/body effects after
+   * child cleanup. Unexpected target exceptions propagate after Java release. Strong sequential
+   * controlled observation is required. Markers and bytecode do not certify physical ownership,
+   * inflation or survival of a lock through optimization. Interior checkpoints require actual
+   * local-origin evidence for every live binding, including the receiver.
+   */
+  record Monitor(int id, String owner, List<Instruction> body) implements Instruction {
+    public Monitor {
+      body = List.copyOf(body);
+    }
+  }
+
+  /**
    * Requires a nonnegative literal count. Executes the body that many times, unless execution
    * fails, using a fresh child scope each iteration. Root and heap changes carry between
    * iterations; local bindings expire at each iteration's end. Zero skips execution but still

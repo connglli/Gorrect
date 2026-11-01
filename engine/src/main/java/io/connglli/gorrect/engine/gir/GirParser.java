@@ -205,6 +205,7 @@ public final class GirParser {
             case "collect" -> new Instruction.Collect(id);
             case "barrier" -> new Instruction.Barrier(id);
             case "parallel" -> parallel(id, depth + 1);
+            case "monitor" -> new Instruction.Monitor(id, name(), block(depth + 1));
             case "scope" -> new Instruction.Scope(id, block(depth + 1));
             case "repeat" -> new Instruction.Repeat(id, number(), block(depth + 1));
             default -> throw error("Unsupported instruction " + opcode);

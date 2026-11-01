@@ -179,6 +179,12 @@ public final class GirValidator {
             conditionalDepth--;
           }
           case Instruction.Parallel parallel -> parallel(parallel, depth + 1);
+          case Instruction.Monitor monitor -> {
+            var owner = binding(monitor.owner()).shape();
+            if (owner == null || owner.wrapper())
+              fail("Monitor requires an object or array handle");
+            block(monitor.body(), depth + 1);
+          }
           case Instruction.Scope scope -> block(scope.body(), depth + 1);
           case Instruction.Repeat repeat -> {
             if (repeat.count() < 0) fail("Negative repeat count at " + repeat.id());
