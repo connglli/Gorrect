@@ -1,0 +1,12 @@
+[general]
+ignore-merge-commits=false
+ignore-revert-commits=false
+ignore-fixup-commits=false
+ignore-fixup-amend-commits=false
+ignore-squash-commits=false
+
+[title-max-length]
+line-length=50
+
+[body-max-line-length]
+line-length=70
