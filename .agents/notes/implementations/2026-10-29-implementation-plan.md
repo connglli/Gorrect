@@ -191,7 +191,7 @@ Complete when independent memory litmus models agree with allowed/rejected outco
 
 Goal: cover JNI local/global/weak-global roots and critical-array access.
 
-Model native root scopes and distinguish deliberate roots from observer leaks. Add primitive-array critical regions with bounded coordination that obeys JNI call/blocking restrictions. Record whether copying/pinning and collector overlap actually occurred; requesting critical access does not establish either.
+Start with [native strong roots](../designs/2026-11-01-native-strong-roots.md), distinguishing deliberate roots from observer leaks. Add primitive-array critical regions with bounded coordination that obeys JNI call/blocking restrictions. Record whether copying/pinning and collector overlap actually occurred; requesting critical access does not establish either.
 
 Complete when scope expiry, weak-root acquisition, exceptions, and concurrent collection match independent obligations. Leak guards still reject unintended observer roots. Target/JDK differences are explicit capabilities.
 
