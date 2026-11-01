@@ -46,7 +46,9 @@ def observerIntegration = tasks.register('observerIntegration', Test) {
     group = 'verification'
     description = 'Verifies raw native captures independently on the engine JVM.'
     dependsOn ':runtime:observerSmoke17', ':runtime:observerSmoke21',
-            ':runtime:observerLocalsSmoke17', ':runtime:observerLocalsSmoke21'
+            ':runtime:observerLocalsSmoke17', ':runtime:observerLocalsSmoke21',
+            ':runtime:queueAutomaticSmoke17', ':runtime:queueAutomaticRetainedSmoke17',
+            ':runtime:queueAutomaticFacts17'
     testClassesDirs = sourceSets.test.output.classesDirs
     classpath = sourceSets.test.runtimeClasspath
     useJUnitPlatform { includeTags 'observer' }
@@ -59,6 +61,16 @@ def observerIntegration = tasks.register('observerIntegration', Test) {
     systemProperty 'gorrect.observer.artifacts', captures.collect {
         it.get().asFile.absolutePath
     }.join(File.pathSeparator)
+    def automatic = project(':runtime').layout.buildDirectory.dir('queue/java17')
+    inputs.dir(automatic).withPathSensitivity(PathSensitivity.RELATIVE)
+    systemProperty 'gorrect.automaticQueue.artifacts', automatic.get().asFile.absolutePath
+    def automaticRuntimeProject = project(':runtime')
+    def automaticClasspath = providers.provider { automaticRuntimeProject.sourceSets.queueNativeSmoke.runtimeClasspath.asPath }
+    def automaticLibrary = configurations.nativeObserver
+    doFirst {
+        systemProperty 'gorrect.automaticQueue.classpath', automaticClasspath.get()
+        systemProperty 'gorrect.automaticQueue.library', automaticLibrary.singleFile.absolutePath
+    }
 }
 
 tasks.named('check') { dependsOn observerIntegration }

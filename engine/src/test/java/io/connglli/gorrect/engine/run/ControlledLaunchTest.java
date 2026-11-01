@@ -103,6 +103,39 @@ class ControlledLaunchTest {
   }
 
   @Test
+  void alternateVmSelectionIsRejectedAndRemovedFromControlledEnvironment() {
+    var builder = new ProcessBuilder();
+    builder.environment().put("JDK_ALTERNATE_VM", "unreviewed");
+    ProcessSupport.cleanEnvironment(builder, Map.of(), true);
+    assertFalse(builder.environment().containsKey("JDK_ALTERNATE_VM"));
+    var json = profile();
+    json.addProperty("bindingMetadata", "retained-class");
+    json.add("environment", JsonFiles.GSON.toJsonTree(Map.of("JDK_ALTERNATE_VM", "unreviewed")));
+    var selected = TargetProfile.parse(json, directory);
+    assertTrue(
+        ControlledLaunch.configuration(selected).stream()
+            .anyMatch(problem -> problem.contains("JDK_ALTERNATE_VM")));
+    json.remove("environment");
+    var resolved = new JsonObject();
+    resolved.add(
+        "environment", JsonFiles.GSON.toJsonTree(Map.of("JDK_ALTERNATE_VM", "unreviewed")));
+    var rejected =
+        assertThrows(
+            IOException.class,
+            () ->
+                ControlledLaunch.evidence(
+                    TargetProfile.parse(json, directory), resolved, new Properties(), true));
+    assertTrue(rejected.getMessage().contains("JDK_ALTERNATE_VM"));
+    assertThrows(
+        IllegalArgumentException.class,
+        () ->
+            ControlledLaunch.check(
+                directory,
+                TargetProfile.parse(json, directory),
+                Map.of("JDK_ALTERNATE_VM", "unreviewed")));
+  }
+
+  @Test
   void retainedEnvironmentCannotRestoreJavaOrNativeInjection() {
     var builder = new ProcessBuilder();
     builder.environment().put("LD_PRELOAD", "other.so");

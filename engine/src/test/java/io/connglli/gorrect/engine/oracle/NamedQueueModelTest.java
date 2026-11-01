@@ -61,44 +61,45 @@ class NamedQueueModelTest {
               poll-queue held a; enqueue-ref consumed r; }
             """);
     var m = new GraphMachine(p, OracleLimits.DEFAULT);
+    var frontier = new ReferenceFrontier(HistoryLimits.DEFAULT);
     var id = new WrapperId(0, 1, 1, -1);
     m.apply((Instruction.Operation) p.body().get(0));
+    frontier.register(m.referenceValue("r", -1), "a");
     assertEquals(
         Map.of("a", new HeapQueue(1, Set.of()), "b", new HeapQueue(2, Set.of())),
         m.graph().queues());
-    m.apply((Instruction.Operation) p.body().get(1));
+    assertTrue(frontier.enqueue(id, true));
+    m.enqueueResult((Instruction.EnqueueReference) p.body().get(1), true);
     assertEquals(new Value.Scalar(1), m.bound("first"));
-    assertEquals(Set.of(id), m.graph().queues().get("a").members());
-    m.apply((Instruction.Operation) p.body().get(2));
+    assertTrue(frontier.enqueue(id, false));
+    m.enqueueResult((Instruction.EnqueueReference) p.body().get(2), false);
     assertEquals(new Value.Scalar(0), m.bound("again"));
-    var fork = new GraphMachine(m);
-    fork.pollNamed((Instruction.PollQueue) p.body().get(3), id);
-    fork.apply((Instruction.Operation) p.body().get(4));
-    assertEquals(new Value.Scalar(0), fork.bound("consumed"));
-    assertTrue(fork.graph().queues().get("a").members().isEmpty());
-    assertEquals(Set.of(id), m.graph().queues().get("a").members());
-    assertNotEquals(m.key(), fork.key());
+    var fork = new ReferenceFrontier(frontier);
+    assertTrue(fork.poll("a", id));
+    assertTrue(fork.enqueue(id, false));
+    assertTrue(fork.states().iterator().next().members().isEmpty());
+    assertFalse(frontier.states().iterator().next().members().isEmpty());
+    assertNotEquals(frontier.key(), fork.key());
+    // The shared machine stores resource identity and construction facts, never member predictions.
+    assertTrue(m.graph().queues().get("a").members().isEmpty());
   }
 
   @Test
-  void namedPollCannotClaimEmptyOrWrongQueueAndRejectionIsTransactional() {
+  void namedPollRejectsWrongConstructorQueueBeforeChangingBindingsOrCounters() {
     var p =
         GirParser.parse(
             """
             gir 1; shape W weak; queue a W; queue b W;
-            program { allocate-ref r W null a; enqueue-ref inserted r; poll-queue held a; }
+            program { allocate-ref r W null a; poll-queue held a; }
             """);
     var m = new GraphMachine(p, OracleLimits.DEFAULT);
     m.apply((Instruction.Operation) p.body().get(0));
-    m.apply((Instruction.Operation) p.body().get(1));
     Graph graph = m.graph();
     long steps = m.steps();
     Object key = m.key();
     assertThrows(
-        GirException.class, () -> m.pollNamed((Instruction.PollQueue) p.body().get(2), null));
-    assertThrows(
         GirException.class,
-        () -> m.pollNamed(new Instruction.PollQueue(3, "held", "b"), new WrapperId(0, 1, 1, -1)));
+        () -> m.pollNamed(new Instruction.PollQueue(2, "held", "b"), new WrapperId(0, 1, 1, -1)));
     assertEquals(graph, m.graph());
     assertEquals(steps, m.steps());
     assertEquals(key, m.key());
@@ -116,10 +117,11 @@ class NamedQueueModelTest {
     var m = new GraphMachine(p, OracleLimits.DEFAULT);
     var f = new ReferenceFrontier(HistoryLimits.DEFAULT);
     m.apply((Instruction.Operation) p.body().get(0));
-    f.register(m.referenceValue("inner", -1), false);
+    f.register(m.referenceValue("inner", -1), "a");
     m.apply((Instruction.Operation) p.body().get(1));
     f.register(m.referenceValue("witness", -1), false);
-    m.apply((Instruction.Operation) p.body().get(2));
+    assertTrue(f.enqueue(new WrapperId(0, 1, 1, -1), true));
+    m.enqueueResult((Instruction.EnqueueReference) p.body().get(2), true);
     m.apply((Instruction.Operation) p.body().get(3));
     f.expand(m.graph());
     var inner = new WrapperId(0, 1, 1, -1);

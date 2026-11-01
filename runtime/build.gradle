@@ -202,3 +202,37 @@ configurations {
         tasks.named('check') { dependsOn task }
     }
 }
+
+// Only the exact first adapter is exercised; HS21/J9 automatic support stays unselected.
+['automatic', 'automatic-retained'].each { mode ->
+    def task = tasks.register("queue${mode.split('-').collect { it.capitalize() }.join('')}Smoke17", JavaExec) {
+        group = 'verification'
+        dependsOn tasks.named('queueNativeSmokeClasses'), configurations.nativeObserver
+        classpath = sourceSets.queueNativeSmoke.runtimeClasspath
+        mainClass = 'Case'
+        javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+        timeout = Duration.ofSeconds(60)
+        doFirst {
+            def library = configurations.nativeObserver.singleFile.absolutePath
+            def option = mode == 'automatic-retained' ? '=retained-class' : ''
+            setJvmArgs(["-agentpath:${library}${option}", '-Xint', '-Xcheck:jni', '-Xmx128m', '-XX:+UseSerialGC', '-Xshare:off'])
+            setArgs([library, layout.buildDirectory.dir("queue/java17/${mode}").get().asFile.absolutePath, mode])
+        }
+    }
+    tasks.named('check') { dependsOn task }
+}
+
+def automaticQueueFacts17 = tasks.register('queueAutomaticFacts17', JavaExec) {
+    group = 'verification'
+    dependsOn tasks.named('queueNativeSmokeClasses'), configurations.nativeObserver
+    classpath = sourceSets.queueNativeSmoke.runtimeClasspath
+    mainClass = 'io.connglli.gorrect.runtime.QueueAutomaticFacts'
+    javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(17) }
+    timeout = Duration.ofSeconds(30)
+    doFirst {
+        def library = configurations.nativeObserver.singleFile.absolutePath
+        setJvmArgs(["-agentpath:${library}", '-Xint', '-Xmx128m', '-Xshare:off', '-XX:+UseSerialGC', '-XX:+DisableAttachMechanism'])
+        setArgs([library, layout.buildDirectory.file('queue/java17/automatic-facts.properties').get().asFile.absolutePath])
+    }
+}
+tasks.named('check') { dependsOn automaticQueueFacts17 }

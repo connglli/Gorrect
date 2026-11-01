@@ -1,12 +1,12 @@
 # Heap observation
 
-The observer projects physical heap evidence into [GIR](./gir.md) graphs, with actual [queue ownership](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueCapture.java) from the same walk. Layouts identify classes, fields and identity roles; they contain no expected targets or payloads.
+The observer projects physical evidence into [GIR](./gir.md). Layouts describe roles, never expected values. [Queue ownership](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueCapture.java) comes from the same walk; automatic capture requires [verified mutation locks](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueConsistency.java).
 
 ## Capture contract
 
 Register classes before workload construction. Supported layouts are direct `Object` subclasses without interfaces, `Object[]`, `long[]`, static root holders and generated direct soft/weak subclasses. Names are ASCII; JVMTI supplies actual field indices, modifiers and signatures. Unknown layouts fail explicitly.
 
-A capture walks VM roots without requesting GC. Callbacks use preallocated storage without JNI, allocation or locks; metadata retains no strong workload references. Conflicting records, missing values/owners, unknown non-null targets, duplicate identities or unvisited root classes prevent complete projection. Absent edges mean null only with valid metadata, a complete recording policy and walk. Unknown queue identity or membership cannot establish null, emptiness or coverage. An observed zero-length `[J` proves empty contents without a values callback. Limits/JVMTI errors cannot pass.
+Heap walks request no GC. Automatic capture holds each declared queue's mutation lock; acquisition may allocate, permit GC or delay delivery. Callbacks use preallocated buffers without JNI, allocation or locks; metadata retains no strong workload references. Conflicting records, missing origins/values, unknown targets, duplicate identities or unvisited root classes prevent complete projection. Missing edges mean null only with valid metadata and complete recording; unknown queue components prove neither null nor emptiness. An observed zero-length `[J` proves empty contents without a values callback. Limits, JVMTI errors or failed lock cleanup cannot pass.
 
 ## Identity
 
@@ -32,7 +32,7 @@ Heap walking can materialize objects or deoptimize frames. Array binding/identit
 
 ## Binding metadata
 
-The profile selects `jvmti` (default) or explicit `retained-class`; hashed plan/layout and evidence must agree. Retained mode (`roots-diagnostic`) and [queue capture](../engine/src/main/java/io/connglli/gorrect/engine/run/QueueResources.java) require qualified Linux amd64 HotSpot JDK 17/21 or OpenJ9 JDK 21 revision `6e16eb1a4f` gencon; queues need known bootstrap libraries and [API qualification](../runtime/src/main/java/io/connglli/gorrect/runtime/QueueQualification.java). Other builds need coordinate qualification. Live/offline admission checks direct ELF launch, reviewed support, effective arguments/environment and disabled attachment to establish the controlled-launch premise; OpenJ9 shared-cache/AOT reuse is disabled. External WhiteBox clients, natural capture, custom loaders and frame reconstruction are unsupported.
+The profile selects `jvmti` (default) or `retained-class`; plan/layout hashes and evidence must agree. Retained (`roots-diagnostic`) and [queue capture](../engine/src/main/java/io/connglli/gorrect/engine/run/QueueResources.java) require qualified Linux amd64 HotSpot 17/21 or OpenJ9 21 (`6e16eb1a4f`, gencon). Queues check [bootstrap bytes/APIs](../runtime/src/main/java/io/connglli/gorrect/runtime/QueueQualification.java); [automatic delivery](../engine/src/main/java/io/connglli/gorrect/engine/run/AutomaticQueues.java) requires the exact HotSpot 17 Serial interpreted image. Admission verifies retained image/support identities, effective command/environment and disabled attachment; offline checking needs no installation. OpenJ9 shared-cache/AOT reuse is disabled. External WhiteBox clients, natural capture, custom loaders and frame reconstruction are unsupported.
 
 Before construction, a nontransforming hook binds the intended class/loader/methods through weak mirrors; the host compares copied bytes with retained `Case.class`. Controlled launch must exclude later transformation. Retained metadata enables no local-access capability and cannot replace missing physical roots.
 

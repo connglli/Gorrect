@@ -9,6 +9,7 @@ import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.FrameEvidence;
 import io.connglli.gorrect.protocol.ObserverPlan;
 import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueueConsistency;
 import io.connglli.gorrect.protocol.QueuePlan;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
@@ -134,8 +135,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
           throw new IllegalStateException(
               "Named queues require intended system-defined resource metadata");
         NativeObserver.configure(registrations);
-        NativeObserver.configureQueues(queueRoots, queueType);
-        queueFacts = QueueQualification.exercise();
+        NativeObserver.configureQueues(queueRoots, queueType, queuePlan.automatic());
+        queueFacts = QueueQualification.exercise(queuePlan.automatic());
       } else if (registrations != null || queueRoots != null || queueType != null)
         throw new IllegalStateException("Queue setup supplied without source selection");
       queueSetup = false;
@@ -572,20 +573,26 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       if (queuePlan != null) {
         if (evidence.resources() == null)
           throw new IOException("Missing retained queue resource result");
-        writeQueues(evidence.resources());
+        writeQueues(evidence.resources(), evidence.consistency());
       }
     } else if (queuePlan != null) {
       var evidence = NativeObserver.captureQueues(run, checkpoint, records);
       Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), evidence.snapshot());
-      writeQueues(evidence.resources());
+      writeQueues(evidence.resources(), evidence.consistency());
     } else {
       snapshot = NativeObserver.capture(run, checkpoint, records);
       Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), snapshot);
     }
   }
 
-  private void writeQueues(byte[] bytes) throws IOException {
+  private void writeQueues(byte[] bytes, byte[] consistency) throws IOException {
     Files.write(directory.resolve("snapshots/" + checkpoint + ".gqueue"), bytes);
+    if (queuePlan.automatic()) {
+      if (consistency == null) throw new IOException("Missing automatic queue consistency result");
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gqlock"), consistency);
+      if (!QueueConsistency.read(consistency, run, checkpoint).complete())
+        throw new IOException("Automatic queue custody or cleanup failed");
+    } else if (consistency != null) throw new IOException("Unselected queue consistency result");
     QueueCapture.read(bytes, run, checkpoint);
   }
 

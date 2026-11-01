@@ -121,6 +121,12 @@ final class Artifacts {
    * Hashes the current configured installation/support files, recording absent paths as missing.
    */
   static Map<String, String> installations(TargetProfile profile) throws IOException {
+    return installations(profile, false);
+  }
+
+  /** Automatic source additionally retains the launch library required by its exact image. */
+  static Map<String, String> installations(TargetProfile profile, boolean automatic)
+      throws IOException {
     var paths = new LinkedHashMap<String, Path>();
     paths.put("java", Path.of(profile.java()));
     paths.put("runtime", Path.of(profile.support().runtime()));
@@ -128,9 +134,18 @@ final class Artifacts {
     paths.put("observer", Path.of(profile.support().observer()));
     if (profile.support().whitebox() != null)
       paths.put("whitebox", Path.of(profile.support().whitebox()));
-    if (Files.exists(Path.of(profile.java()))) {
-      Path home = Path.of(profile.java()).toRealPath().getParent().getParent();
+    boolean executablePresent = Files.exists(Path.of(profile.java()));
+    if (executablePresent || automatic) {
+      Path executable =
+          executablePresent
+              ? Path.of(profile.java()).toRealPath()
+              : Path.of(profile.java()).toAbsolutePath().normalize();
+      Path home = executable.getParent().getParent();
       paths.putAll(VmDriver.installations(profile, home));
+      if (automatic) {
+        paths.put("target/lib/libjli.so", home.resolve("lib/libjli.so"));
+        paths.put("target/lib/jvm.cfg", home.resolve("lib/jvm.cfg"));
+      }
     }
     var hashes = new LinkedHashMap<String, String>();
     for (var entry : paths.entrySet())

@@ -21,7 +21,7 @@ public final class NativeObserver {
     }
   }
 
-  private static boolean queuesConfigured;
+  private static boolean queuesConfigured, automaticQueues;
 
   private NativeObserver() {}
 
@@ -48,9 +48,17 @@ public final class NativeObserver {
 
   /**
    * Adds dedicated static queue/helper roles after graph configuration. The native policy copies
-   * metadata and weak tags only; it receives no workload values and retains no class mirrors.
+   * metadata and weak tags only. Automatic mode also keeps a weak roots-class mirror; temporary
+   * queue/lock locals never retain wrappers or referents.
    */
   public static void configureQueues(Class<?> queueRoots, Class<?> queueType) {
+    configureQueues(queueRoots, queueType, false);
+  }
+
+  /**
+   * Selects actual private-monitor custody; unsupported metadata aborts rather than falling back.
+   */
+  public static void configureQueues(Class<?> queueRoots, Class<?> queueType, boolean automatic) {
     Objects.requireNonNull(queueRoots);
     if (queuesConfigured) throw new IllegalStateException("Queue policy is already configured");
     try {
@@ -59,12 +67,17 @@ public final class NativeObserver {
     } catch (ClassNotFoundException failure) {
       throw new IllegalStateException("Queue roots cannot be prepared", failure);
     }
-    configureQueues0(queueRoots, Objects.requireNonNull(queueType));
+    configureQueues0(queueRoots, Objects.requireNonNull(queueType), automatic);
+    automaticQueues = automatic;
     queuesConfigured = true;
   }
 
   /** Two independent recording statuses from exactly one heap walk. */
-  public record QueueSnapshots(byte[] snapshot, byte[] resources) {
+  public record QueueSnapshots(byte[] snapshot, byte[] resources, byte[] consistency) {
+    public QueueSnapshots(byte[] snapshot, byte[] resources) {
+      this(snapshot, resources, null);
+    }
+
     public QueueSnapshots {
       Objects.requireNonNull(snapshot);
       Objects.requireNonNull(resources);
@@ -77,9 +90,10 @@ public final class NativeObserver {
   public static QueueSnapshots captureQueues(long run, long checkpoint, int records) {
     if (!queuesConfigured) throw new IllegalStateException("Queue capture is not configured");
     byte[][] data = captureQueues0(run, checkpoint, records);
-    if (data == null || data.length != 2)
+    if (data == null || data.length != (automaticQueues ? 3 : 2))
       throw new IllegalStateException("Incomplete queue capture result");
-    return new QueueSnapshots(data[0], data[1]);
+    return new QueueSnapshots(
+        data[0], data[1], automaticQueues ? Objects.requireNonNull(data[2]) : null);
   }
 
   /**
@@ -140,9 +154,14 @@ public final class NativeObserver {
   }
 
   /** Raw evidence from one retained capture. Each byte array belongs to its caller. */
-  public record RetainedCapture(byte[] snapshot, byte[] frames, byte[] resources) {
+  public record RetainedCapture(
+      byte[] snapshot, byte[] frames, byte[] resources, byte[] consistency) {
     public RetainedCapture(byte[] snapshot, byte[] frames) {
-      this(snapshot, frames, null);
+      this(snapshot, frames, null, null);
+    }
+
+    public RetainedCapture(byte[] snapshot, byte[] frames, byte[] resources) {
+      this(snapshot, frames, resources, null);
     }
 
     public RetainedCapture {
@@ -163,10 +182,13 @@ public final class NativeObserver {
     Objects.requireNonNull(threads);
     Objects.requireNonNull(workers);
     byte[][] evidence = captureRetained0(run, checkpoint, records, threads, workers, terminal);
-    if (evidence == null || evidence.length != (queuesConfigured ? 3 : 2))
+    if (evidence == null || evidence.length != (automaticQueues ? 4 : queuesConfigured ? 3 : 2))
       throw new IllegalStateException("Incomplete retained capture result");
     return new RetainedCapture(
-        evidence[0], evidence[1], queuesConfigured ? Objects.requireNonNull(evidence[2]) : null);
+        evidence[0],
+        evidence[1],
+        queuesConfigured ? Objects.requireNonNull(evidence[2]) : null,
+        automaticQueues ? Objects.requireNonNull(evidence[3]) : null);
   }
 
   /** Checks wire integrity and capture identity; graph coverage is checked by the engine. */
@@ -195,7 +217,8 @@ public final class NativeObserver {
 
   private static native void configure0(Class<?>[] classes, int[] kinds);
 
-  private static native void configureQueues0(Class<?> queueRoots, Class<?> queueType);
+  private static native void configureQueues0(
+      Class<?> queueRoots, Class<?> queueType, boolean automatic);
 
   private static native byte[][] captureQueues0(long run, long checkpoint, int records);
 

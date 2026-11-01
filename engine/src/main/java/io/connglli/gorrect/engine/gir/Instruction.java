@@ -64,8 +64,11 @@ public sealed interface Instruction {
 
   /**
    * Constructs a fresh soft/weak wrapper. Omitted queue means no registration; a named queue
-   * requires its exact nominal shape and a literal null referent in this slice. Registration is
-   * immutable and creates no strong root to the wrapper.
+   * requires its exact nominal shape. A nonliteral-null registered construction must occur once at
+   * top level. At least one top-level publication must put the constructor binding into a dedicated
+   * initially-null root before binding release, with no other writes to that root; other roots and
+   * aliases retain their contracts. Registration is immutable and creates no strong root to the
+   * wrapper. Automatic delivery also requires independently qualified target mutation-lock capture.
    */
   record AllocateReference(int id, String name, String shape, Operand value, String queue)
       implements Operation {
@@ -78,7 +81,8 @@ public sealed interface Instruction {
    * Requires a live non-null wrapper receiver and fresh scalar name. Calls enqueue once, clearing
    * its referent even on failure. Binds long 1 only for first insertion into its registered queue,
    * otherwise 0. Membership survives repeated false insertion; consumed wrappers cannot be inserted
-   * again. No-queue receivers return 0.
+   * again. No-queue receivers return 0. A pending handler may insert before API linearization;
+   * neither this call nor program clearing creates GC-notification debt.
    */
   record EnqueueReference(int id, String name, String owner) implements Operation {}
 

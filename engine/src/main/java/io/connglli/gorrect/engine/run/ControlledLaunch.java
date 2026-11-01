@@ -19,6 +19,7 @@ import java.util.jar.JarFile;
 final class ControlledLaunch {
   static final Set<String> INJECTION_ENVIRONMENT =
       Set.of(
+          "JDK_ALTERNATE_VM",
           "LD_PRELOAD",
           "LD_LIBRARY_PATH",
           "LD_AUDIT",
@@ -46,6 +47,7 @@ final class ControlledLaunch {
                 "-Xnojit",
                 "-Xnoaot",
                 "-Xshareclasses:none",
+                "-Xshare:off",
                 "-Djava.compiler=NONE")
             .contains(argument)
         || argument.matches(

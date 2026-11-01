@@ -1,0 +1,9 @@
+# Automatic queue HS17 implementation
+
+Status: implemented for the [qualified HotSpot 17 Serial interpreted image](../../../engine/src/main/java/io/connglli/gorrect/engine/run/AutomaticQueues.java). Other automatic adapters remain unsupported. [Portable semantics](completed-2026-10-31-automatic-queue-portable-slice.md) compose with monitor/context guards and retirement's cumulative quotas; queue programs remain ineligible for retirement.
+
+[QueuePlan](../../../protocol/src/main/java/io/connglli/gorrect/protocol/QueuePlan.java) selects version 1 [QueueConsistency](../../../protocol/src/main/java/io/connglli/gorrect/protocol/QueueConsistency.java) evidence; false plans preserve existing bytes. [QueueLocks](../../../native/src/queue_locks.hpp) acquires actual declared locks before observer state and attempts every reverse-order exit before encoding. Failed cleanup cannot certify consistency. Helpers hold no wrappers/referents; caller-specific Thread evidence excludes outgoing Thread state. [QueueProjector](../../../engine/src/main/java/io/connglli/gorrect/engine/observe/QueueProjector.java) validates every resource before interpreting membership and rejects augmentation from untrusted global context.
+
+Selected JNI captures report the actual caller as monitor owner but zero `entry_count`: inspected HotSpot source counts Java-frame entries, not JNI acquisitions. Counts remain diagnostics; successful acquisition, actual owner identity and balanced exits are required. Zero alone proves no ownership.
+
+Image admission uses retained digests and effective launch facts, without consulting the original installation. It excludes alternate-VM selection and unqualified launcher configuration. [Review evidence](../commits/completed-2026-11-01-automatic-queues-review.md) records physical fault probes, clean GIR runs and validation limits.

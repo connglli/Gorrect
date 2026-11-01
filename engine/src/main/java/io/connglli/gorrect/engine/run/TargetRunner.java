@@ -148,7 +148,7 @@ final class TargetRunner {
 
       if (queues) {
         try {
-          QueueResources.admission(profile, manifest, target);
+          QueueResources.admission(profile, manifest, target, directory);
         } catch (IOException | RuntimeException failure) {
           unmet.add("Named queue startup qualification failed: " + failure);
         }

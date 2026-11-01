@@ -493,7 +493,8 @@ final class RunVerifier {
         try {
           var facts = ControlledLaunch.targetFacts(directory);
           ControlledLaunch.evidence(profile, manifest, facts, layout.queuePlan() != null);
-          if (layout.queuePlan() != null) QueueResources.admission(profile, manifest, facts);
+          if (layout.queuePlan() != null)
+            QueueResources.admission(profile, manifest, facts, directory);
         } catch (IOException | RuntimeException failure) {
           launchProblem = "Controlled launch evidence failed: " + failure;
           errors.add(launchProblem);
@@ -713,7 +714,7 @@ final class RunVerifier {
         var facts = ControlledLaunch.targetFacts(directory);
         ControlledLaunch.evidence(profile, manifest, facts, ReferenceProgram.usesQueues(program));
         if (ReferenceProgram.usesQueues(program))
-          QueueResources.admission(profile, manifest, facts);
+          QueueResources.admission(profile, manifest, facts, directory);
       }
       var layout =
           JsonFiles.GSON.fromJson(
@@ -721,34 +722,50 @@ final class RunVerifier {
 
       QueueResources.source(program, layout);
       QueueResources.selection(directory, layout);
+      RetainedMetadata.selection(directory, profile, layout);
       var plan = new CheckpointPlan(HistoryPlan.plan(program, OracleLimits.DEFAULT));
       var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
       var recorded = CheckpointPlan.recorded(program, trace);
       prefixControls(directory, run, plan, recorded);
       var observations = new ArrayList<HistoryOracle.Observation>();
+      var suffixProblems = new ArrayList<String>();
       for (int index = 1;
           Files.exists(directory.resolve("snapshots/" + index + ".gsnap"));
           index++) {
-        if (index > recorded.size())
-          throw new IOException("Capture has no recorded checkpoint marker");
+        // recorded includes a synthetic terminal visit; a failed prefix has no such capture.
+        if (index >= recorded.size()) {
+          suffixProblems.add("Unlinked capture suffix after the validated failure prefix");
+          break;
+        }
         var visit = recorded.get(index - 1);
-        if (!plan.permits(visit.operation(), visit.occurrence()))
-          throw new IOException("Recorded checkpoint exceeds syntax bounds");
+        if (!plan.permits(visit.operation(), visit.occurrence())) {
+          suffixProblems.add("Capture exceeds the validated failure-prefix syntax bounds");
+          break;
+        }
         var expectedBindings = plan.declarations(visit.operation());
-        var projection =
-            projection(
-                directory,
-                snapshot(directory, run, index),
-                layout,
-                ObservationProfile.parse(profile.observation()),
-                expectedBindings,
-                new HashSet<>());
-        projection =
-            QueueResources.project(
-                directory, snapshot(directory, run, index), layout, profile.vm(), projection);
-        observations.add(
-            new HistoryOracle.Observation(
-                projection.covered(), projection.problems(), projection.graph().isPresent()));
+        try {
+          var projection =
+              projection(
+                  directory,
+                  snapshot(directory, run, index),
+                  layout,
+                  ObservationProfile.parse(profile.observation()),
+                  expectedBindings,
+                  new HashSet<>());
+          projection =
+              QueueResources.project(
+                  directory, snapshot(directory, run, index), layout, profile.vm(), projection);
+          observations.add(
+              new HistoryOracle.Observation(
+                  projection.covered(), projection.problems(), projection.graph().isPresent()));
+        } catch (IOException | RuntimeException unavailable) {
+          // A rejected later cut supplies no raw fallback and cannot erase an earlier refutation.
+          observations.add(
+              new HistoryOracle.Observation(
+                  Optional.empty(),
+                  List.of("Checkpoint " + index + " prefix extraction failed: " + unavailable),
+                  false));
+        }
       }
 
       var result =
@@ -762,15 +779,24 @@ final class RunVerifier {
               observations,
               new HistoryLimits(
                   profile.limits().historyStates(), profile.limits().historyTransitions()));
-      if (result.invalidWorkload()) {
-        var report =
-            new RunReport(
-                RunReport.Outcome.INVALID_WORKLOAD,
-                ExactVerifier.Verdict.INCONCLUSIVE,
-                execution.unmetRequirements(),
-                result.problems());
-        return report;
-      }
+      var diagnostics = new ArrayList<>(execution.problems());
+      diagnostics.addAll(result.problems());
+      diagnostics.addAll(suffixProblems);
+      if (result.verdict() == ExactVerifier.Verdict.VIOLATED)
+        return new RunReport(
+            execution.execution(),
+            ExactVerifier.Verdict.VIOLATED,
+            execution.unmetRequirements(),
+            diagnostics);
+      if (result.invalidWorkload())
+        return new RunReport(
+            RunReport.Outcome.INVALID_WORKLOAD,
+            ExactVerifier.Verdict.INCONCLUSIVE,
+            execution.unmetRequirements(),
+            diagnostics);
+      if (!suffixProblems.isEmpty())
+        return new RunReport(
+            execution.execution(), execution.verdict(), execution.unmetRequirements(), diagnostics);
     } catch (IOException | RuntimeException ignored) {
       // Partial failure artifacts cannot establish a legal path or override the execution error.
     }

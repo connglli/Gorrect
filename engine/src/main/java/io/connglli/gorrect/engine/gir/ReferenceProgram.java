@@ -34,6 +34,78 @@ public final class ReferenceProgram {
                         || instruction instanceof Instruction.PollQueue poll && poll.named());
   }
 
+  /** Source selection for automatic delivery; a nonliteral operand may evaluate to null. */
+  public static boolean usesAutomaticQueues(GirProgram program) {
+    return program
+        .instructions()
+        .anyMatch(
+            instruction ->
+                instruction instanceof Instruction.AllocateReference allocation
+                    && allocation.queue() != null
+                    && !(allocation.value() instanceof Operand.Null));
+  }
+
+  /**
+   * Proves wrapper lifetime without depending on VM pending-list ownership. A constructor binding
+   * protects the wrapper until a qualifying top-level publication; that dedicated root has one
+   * write and protects it through terminal capture. Other roots and aliases retain their contracts.
+   * All syntax counts as a write, including skipped blocks and atomics.
+   */
+  static List<String> automaticQueueGaps(GirProgram program) {
+    var gaps = new ArrayList<String>();
+    var writes = new HashMap<String, List<Instruction>>();
+    var topLevel = new HashSet<Integer>();
+    program.body().forEach(instruction -> topLevel.add(instruction.id()));
+    var initialNull = new HashSet<String>();
+    program.roots().stream()
+        .filter(root -> root.value().heapTarget() == null)
+        .forEach(root -> initialNull.add(root.name()));
+    var instructions = program.instructions().toList();
+    for (var instruction : instructions) {
+      String root =
+          switch (instruction) {
+            case Instruction.WriteRoot write -> write.root();
+            case Instruction.CompareSet atomic
+                when atomic.location().kind() == Location.Kind.ROOT ->
+                atomic.location().owner();
+            case Instruction.Exchange atomic when atomic.location().kind() == Location.Kind.ROOT ->
+                atomic.location().owner();
+            default -> null;
+          };
+      if (root != null) writes.computeIfAbsent(root, ignored -> new ArrayList<>()).add(instruction);
+    }
+    for (var instruction : instructions) {
+      if (!(instruction instanceof Instruction.AllocateReference allocation)
+          || allocation.queue() == null
+          || allocation.value() instanceof Operand.Null) continue;
+      boolean protectedLifetime = false;
+      if (topLevel.contains(allocation.id())) {
+        for (var publication : program.body()) {
+          if (!(publication instanceof Instruction.WriteRoot write)
+              || !(write.value() instanceof Operand.Name name)
+              || !name.name().equals(allocation.name())
+              || write.id() <= allocation.id()
+              || !initialNull.contains(write.root())
+              || writes.get(write.root()).size() != 1) continue;
+          protectedLifetime =
+              instructions.stream()
+                  .noneMatch(
+                      candidate ->
+                          candidate instanceof Instruction.Release release
+                              && release.name().equals(allocation.name())
+                              && allocation.id() < release.id()
+                              && release.id() < write.id());
+          if (protectedLifetime) break;
+        }
+      }
+      if (!protectedLifetime)
+        gaps.add(
+            "Registered nonliteral-null wrappers require top-level publication into a"
+                + " dedicated initially-null root before release");
+    }
+    return List.copyOf(gaps);
+  }
+
   public static boolean usesFirstClass(GirProgram program) {
     return program.shapes().stream().anyMatch(Shape::wrapper);
   }

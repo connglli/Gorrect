@@ -9,7 +9,7 @@ import java.util.HashSet;
 import java.util.List;
 
 /** Source-derived selection and static resource roles; it contains no expected queue members. */
-public record QueuePlan(List<Resource> resources) {
+public record QueuePlan(List<Resource> resources, boolean automatic) {
   public static final int POLICY = 1;
   public static final int MAX_BYTES = 65_536;
   public static final String ROOTS = "LCase$QueueRoots;";
@@ -27,9 +27,16 @@ public record QueuePlan(List<Resource> resources) {
     }
   }
 
+  /** Source compatibility and unchanged encoding for explicit-only queue plans. */
+  public QueuePlan(List<Resource> resources) {
+    this(resources, false);
+  }
+
   public QueuePlan {
     resources = List.copyOf(resources);
     var names = new HashSet<String>();
+    if (automatic && resources.isEmpty())
+      throw new IllegalArgumentException("Automatic queues require a declared resource");
     if (resources.size() > QueueHistory.MAX_QUEUES)
       throw new IllegalArgumentException("Queue resource limit exceeded");
     for (int i = 0; i < resources.size(); i++)
@@ -43,6 +50,7 @@ public record QueuePlan(List<Resource> resources) {
 
   private String text() {
     var out = new StringBuilder("version=1\ncount=" + resources.size() + "\n");
+    if (automatic) out.append("automatic=true\n");
     for (var resource : resources)
       out.append("queue.")
           .append(resource.id())
@@ -70,17 +78,20 @@ public record QueuePlan(List<Resource> resources) {
       if (lines.length < 3 || !lines[0].equals("version=1") || !lines[1].startsWith("count="))
         throw new IllegalArgumentException("Invalid queue plan header");
       int count = Integer.parseInt(lines[1].substring(6));
-      if (count < 0 || count > QueueHistory.MAX_QUEUES || lines.length != count + 3)
+      boolean automatic = lines.length > 2 && lines[2].equals("automatic=true");
+      int offset = automatic ? 2 : 1;
+      if (count < 0 || count > QueueHistory.MAX_QUEUES || lines.length != count + 2 + offset)
         throw new IllegalArgumentException("Invalid queue plan count");
       var resources = new ArrayList<Resource>();
       for (int i = 1; i <= count; i++) {
         String prefix = "queue." + i + "=";
-        if (!lines[i + 1].startsWith(prefix)) throw new IllegalArgumentException("Missing queue");
-        String[] fields = lines[i + 1].substring(prefix.length()).split(",", -1);
+        if (!lines[i + offset].startsWith(prefix))
+          throw new IllegalArgumentException("Missing queue");
+        String[] fields = lines[i + offset].substring(prefix.length()).split(",", -1);
         if (fields.length != 2) throw new IllegalArgumentException("Invalid queue resource");
         resources.add(new Resource(i, fields[0], fields[1]));
       }
-      var plan = new QueuePlan(resources);
+      var plan = new QueuePlan(resources, automatic);
       if (!text.equals(plan.text())) throw new IllegalArgumentException("Noncanonical queue plan");
       return plan;
     } catch (IllegalArgumentException malformed) {

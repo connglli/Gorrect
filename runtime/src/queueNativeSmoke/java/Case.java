@@ -2,6 +2,7 @@ import io.connglli.gorrect.protocol.CodeEvidence;
 import io.connglli.gorrect.protocol.FrameEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueueConsistency;
 import io.connglli.gorrect.runtime.observe.NativeObserver;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
@@ -17,7 +18,7 @@ import java.util.Set;
 public final class Case {
   private static final long RUN = 31;
   private static long checkpoint;
-  private static boolean retained;
+  private static boolean retained, automatic;
   private static Path output;
 
   public static final class Queue extends ReferenceQueue<Object> {
@@ -39,7 +40,11 @@ public final class Case {
     public final long idOccurrence;
 
     public W(long identity, ReferenceQueue<Object> queue) {
-      super(null, queue);
+      this(identity, null, queue);
+    }
+
+    public W(long identity, Object target, ReferenceQueue<Object> queue) {
+      super(target, queue);
       idOccurrence = identity;
     }
   }
@@ -48,12 +53,20 @@ public final class Case {
     public static W held;
   }
 
+  public static final class AutomaticRoots {
+    public static W first, second;
+  }
+
   public static void main(String[] args) throws Exception {
     System.load(args[0]);
     output = Path.of(args[1]);
     Files.createDirectories(output);
     String mode = args[2];
-    retained = mode.equals("retained");
+    automatic = mode.startsWith("automatic");
+    retained = mode.equals("retained") || mode.equals("automatic-retained");
+    if (automatic)
+      Files.writeString(
+          output.resolve("caller.txt"), Long.toString(Thread.currentThread().getId()));
     if (retained) {
       var code =
           CodeEvidence.read(
@@ -63,7 +76,8 @@ public final class Case {
     NativeObserver.configure(
         List.of(
             new NativeObserver.Registration(W.class, HeapSnapshot.ClassKind.WEAK_REFERENCE),
-            new NativeObserver.Registration(Roots.class, HeapSnapshot.ClassKind.ROOTS)));
+            new NativeObserver.Registration(
+                automatic ? AutomaticRoots.class : Roots.class, HeapSnapshot.ClassKind.ROOTS)));
     if (mode.equals("wrong-type")) {
       try {
         NativeObserver.configureQueues(QueueRoots.class, Object.class);
@@ -79,13 +93,20 @@ public final class Case {
       }
     }
     boolean zero = mode.equals("zero");
-    NativeObserver.configureQueues(zero ? ZeroRoots.class : QueueRoots.class, Queue.class);
+    NativeObserver.configureQueues(
+        zero ? ZeroRoots.class : QueueRoots.class, Queue.class, automatic);
+    if (automatic) {
+      if (mode.equals("automatic-blocked")) blockedAcquisition();
+      else automatic();
+      return;
+    }
     if (mode.equals("duplicate")) {
       var method =
-          NativeObserver.class.getDeclaredMethod("configureQueues0", Class.class, Class.class);
+          NativeObserver.class.getDeclaredMethod(
+              "configureQueues0", Class.class, Class.class, boolean.class);
       method.setAccessible(true);
       try {
-        method.invoke(null, QueueRoots.class, Queue.class);
+        method.invoke(null, QueueRoots.class, Queue.class, false);
         throw new AssertionError("Repeated native queue registration accepted");
       } catch (InvocationTargetException expected) {
         require(expected.getCause() instanceof IllegalStateException, "duplicate failure cause");
@@ -173,15 +194,74 @@ public final class Case {
         "Queue capture passed: " + mode + " on " + System.getProperty("java.vm.name"));
   }
 
+  private static void blockedAcquisition() throws Exception {
+    QueueRoots.q1 = new Queue(1);
+    QueueRoots.q2 = new Queue(2);
+    var field = ReferenceQueue.class.getDeclaredField("lock");
+    field.setAccessible(true); // Test-only setup; this opening is never a production-admitted flag.
+    Object lock = field.get(QueueRoots.q2);
+    var ready = new java.util.concurrent.CountDownLatch(1);
+    var holder =
+        new Thread(
+            () -> {
+              synchronized (lock) {
+                ready.countDown();
+                try {
+                  new java.util.concurrent.CountDownLatch(1).await();
+                } catch (InterruptedException failure) {
+                  Thread.currentThread().interrupt();
+                }
+              }
+            });
+    holder.setDaemon(true);
+    holder.start();
+    ready.await();
+    Files.writeString(output.resolve("waiting.txt"), "real private second-queue lock is held");
+    capture(100_000);
+    throw new AssertionError("Blocked actual queue acquisition unexpectedly completed");
+  }
+
+  private static void automatic() throws Exception {
+    QueueRoots.q1 = new Queue(1);
+    QueueRoots.q2 = new Queue(2);
+    AutomaticRoots.first = new W(1, new Object(), QueueRoots.q1);
+    AutomaticRoots.second = new W(2, new Object(), QueueRoots.q2);
+    boolean arrived = false;
+    for (int attempt = 0; attempt < 50; attempt++) {
+      System.gc();
+      Thread.sleep(20);
+      var pair = capture(100_000);
+      if (memberIds(pair[1], resource(pair[1], "q1", 1)).equals(Set.of(1L))
+          && memberIds(pair[1], resource(pair[1], "q2", 2)).equals(Set.of(2L))) {
+        arrived = true;
+        break;
+      }
+    }
+    require(arrived, "bounded actual GC-handler notification experiment");
+    var partial = capture(1);
+    require(
+        partial[0].status() == HeapSnapshot.Status.RECORD_LIMIT
+            && partial[1].status() == HeapSnapshot.Status.RECORD_LIMIT,
+        "actual automatic quota cannot certify membership");
+    capture(100_000); // Quota did not leak monitors; a later cut still obtains real custody.
+    if (retained) {
+      var code =
+          CodeEvidence.read(NativeObserver.codeStatus(RUN, true), RUN, CodeEvidence.Stage.FINAL);
+      require(code.status() == CodeEvidence.Status.VALID, "automatic retained completion");
+    }
+    System.out.println("Automatic lock capture passed: " + (retained ? "retained" : "jvmti"));
+  }
+
   private static HeapSnapshot[] capture(int limit) throws Exception {
     long sequence = ++checkpoint;
-    byte[] graph, resources;
+    byte[] graph, resources, consistency = null;
     if (retained) {
       var result =
           NativeObserver.captureRetained(
               RUN, sequence, limit, new Thread[] {Thread.currentThread()}, new int[] {0}, true);
       graph = result.snapshot();
       resources = result.resources();
+      consistency = result.consistency();
       require(
           FrameEvidence.read(result.frames(), RUN, sequence).status() == CodeEvidence.Status.VALID,
           "retained frame status");
@@ -190,11 +270,57 @@ public final class Case {
       var result = NativeObserver.captureQueues(RUN, sequence, limit);
       graph = result.snapshot();
       resources = result.resources();
+      consistency = result.consistency();
     }
     Files.write(output.resolve(sequence + ".gsnap"), graph);
     Files.write(output.resolve(sequence + ".gqueue"), resources);
     var normal = NativeObserver.decode(graph, RUN, sequence);
     var queue = QueueCapture.read(resources, RUN, sequence).snapshot();
+    if (automatic) {
+      require(consistency != null, "source-selected actual custody bytes");
+      Files.write(output.resolve(sequence + ".gqlock"), consistency);
+      var proof = QueueConsistency.read(consistency, RUN, sequence);
+      require(
+          proof.complete()
+              && proof.thread() == Thread.currentThread().getId()
+              && proof.locks().size() == 2,
+          "actual all-resource caller custody");
+      if (queue.status() == HeapSnapshot.Status.COMPLETE) {
+        require(
+            queue.records().stream()
+                .anyMatch(
+                    record ->
+                        record.kind() == HeapSnapshot.Kind.ROOT
+                            && record.a() == proof.threadTag()
+                            && record.b() == 25
+                            && record.c() == proof.thread()),
+            "same-walk actual current-thread JNI-local origin");
+        var threadType = type(queue, "Ljava/lang/Thread;");
+        require(
+            object(queue, proof.threadTag()).b() == threadType.id()
+                && queue.records().stream()
+                    .anyMatch(
+                        record ->
+                            record.kind() == HeapSnapshot.Kind.REFERENCE
+                                && record.a() == proof.threadTag()
+                                && record.b() == -threadType.id()
+                                && record.c() == 1),
+            "actual caller-specific Thread class provenance");
+        var lockType = type(queue, "Ljava/lang/ref/ReferenceQueue$Lock;");
+        var roots = type(queue, "LCase$QueueRoots;");
+        var queueType = type(queue, "LCase$Queue;");
+        for (var lock : proof.locks()) {
+          require(
+              lock.rootsClass() == roots.id()
+                  && lock.rootField() == field(roots, "q" + lock.resource())
+                  && reference(queue, -roots.id(), lock.rootField(), 8) == lock.queueTag()
+                  && reference(queue, lock.queueTag(), field(queueType, "lock"), 2)
+                      == lock.lockTag()
+                  && object(queue, lock.lockTag()).b() == lockType.id(),
+              "same-walk actual root-to-lock custody");
+        }
+      }
+    }
     require(
         normal.gcStartsBefore() == queue.gcStartsBefore()
             && normal.gcFinishesBefore() == queue.gcFinishesBefore()

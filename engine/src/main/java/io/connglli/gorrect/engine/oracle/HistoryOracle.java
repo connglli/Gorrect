@@ -364,21 +364,22 @@ public final class HistoryOracle {
                 actual.queue() == queueId(allocation.queue()) && actual.result() == 0,
                 "Reference constructor changed its actual queue argument");
           }
-          frontier.register(value, false);
+          frontier.register(value, allocation.queue());
         }
 
         case Instruction.EnqueueReference enqueue -> {
           var value = machine.referenceValue(enqueue.owner(), -1);
-          machine.apply(enqueue);
-          expect();
-          var actual = takeQueue(QueueHistory.Kind.ENQUEUE, enqueue.id(), position);
+          long result = choice(enqueue.id(), ExecutionTrace.Kind.SCALAR_READ);
+          var actual = takeQueue(QueueHistory.Kind.ENQUEUE, enqueue.id(), position + 1);
           queueSubject(actual, value.wrapper());
-          long result = ((Value.Scalar) machine.bound(enqueue.name())).value();
           require(
               actual.queue() == queueId(machine.registration(value.wrapper()))
                   && actual.result() == result,
-              "Impossible explicit enqueue result or registration");
-          frontier.programClear(value.wrapper());
+              "Explicit enqueue changed its result or registration");
+          require(
+              frontier.enqueue(value.wrapper(), result == 1), "Impossible explicit enqueue result");
+          machine.enqueueResult(enqueue, result == 1);
+          expect();
         }
 
         case Instruction.ReferenceState state -> {
@@ -403,10 +404,7 @@ public final class HistoryOracle {
                     && actual.result() == result
                     && (returned != null) == (result == 1),
                 "Named poll changed its queue, result or wrapper identity");
-            var members = machine.graph().queues().get(poll.queue()).members();
-            require(
-                returned == null ? members.isEmpty() : members.contains(returned),
-                "Impossible named queue delivery");
+            require(frontier.poll(poll.queue(), returned), "Impossible named queue delivery");
             machine.pollNamed(poll, returned);
             expect();
             break;
@@ -542,7 +540,7 @@ public final class HistoryOracle {
   }
 
   private void snapshot(int operation, long occurrence) {
-    machine.chargeSnapshot(machine.graph().accessible());
+    machine.chargeSnapshot(frontier.snapshotBound(machine.graph()));
     if (checkpoint >= observations.size()) {
       checkpoint++;
       incomplete = true;

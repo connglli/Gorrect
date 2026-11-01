@@ -39,9 +39,7 @@ final class GraphMachine {
   private final Map<String, Value.Reference> roots = new HashMap<>();
   private final Map<String, Shape> queueShapes = new HashMap<>();
   private final Map<String, Integer> queueIdentities = new HashMap<>();
-  private final Map<String, Set<WrapperId>> queues = new HashMap<>();
   private final Map<WrapperId, String> registrations = new HashMap<>();
-  private final Set<WrapperId> inserted = new HashSet<>();
   private Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private int worker, group, phase;
   private long round;
@@ -92,9 +90,7 @@ final class GraphMachine {
     roots.putAll(source.roots);
     queueShapes.putAll(source.queueShapes);
     queueIdentities.putAll(source.queueIdentities);
-    source.queues.forEach((name, members) -> queues.put(name, new HashSet<>(members)));
     registrations.putAll(source.registrations);
-    inserted.addAll(source.inserted);
     occurrences.putAll(source.occurrences);
     scopes = copyContext(source.context()).scopes();
     worker = source.worker;
@@ -117,10 +113,7 @@ final class GraphMachine {
   }
 
   private long queueCells() {
-    return queues.size()
-        + registrations.size()
-        + inserted.size()
-        + queues.values().stream().mapToLong(Set::size).sum();
+    return queueIdentities.size() + registrations.size();
   }
 
   long forkCells() {
@@ -142,8 +135,7 @@ final class GraphMachine {
       long snapshotCells,
       long ordinaryAllocations,
       long wrappers,
-      Map<WrapperId, String> registrations,
-      Set<WrapperId> inserted) {}
+      Map<WrapperId, String> registrations) {}
 
   /** Quiescent search keys preserve budgets and bindings as well as the complete logical heap. */
   Object key() {
@@ -167,8 +159,7 @@ final class GraphMachine {
         snapshotCells,
         ordinaryAllocations,
         wrappers,
-        Map.copyOf(registrations),
-        Set.copyOf(inserted));
+        Map.copyOf(registrations));
   }
 
   private record ContextKey(
@@ -296,7 +287,6 @@ final class GraphMachine {
     for (var queue : program.queues()) {
       queueShapes.put(queue.name(), shape(queue.shape()));
       queueIdentities.put(queue.name(), queueIdentities.size() + 1);
-      queues.put(queue.name(), new HashSet<>());
     }
     if (program.objects().size() > limits.objects()) limit("initial objects");
     for (var initial : program.objects()) {
@@ -477,18 +467,8 @@ final class GraphMachine {
             new HeapObject(target.object().shape(), references, target.object().data()));
       }
 
-      case Instruction.EnqueueReference op -> {
-        requireDeclaration(op.name());
-        var value = referenceValue(op.owner(), -1);
-        var queue = registrations.get(value.wrapper());
-        boolean added = queue != null && !inserted.contains(value.wrapper());
-        if (added) {
-          queues.get(queue).add(value.wrapper());
-          inserted.add(value.wrapper());
-        }
-        read = added ? 1 : 0;
-        bind(op.name(), op.id(), new Value.Scalar(read));
-      }
+      case Instruction.EnqueueReference ignored ->
+          throw new GirException("Queue insertion requires a recorded history");
       case Instruction.ReferenceState ignored ->
           throw new GirException("Reference state requires a recorded history");
       case Instruction.PollQueue ignored ->
@@ -828,8 +808,6 @@ final class GraphMachine {
     if (!shape.wrapper()) throw new GirException("allocate-ref requires a wrapper type");
     var target = reference(op.value()).heapTarget();
     if (op.queue() != null) {
-      if (!(op.value() instanceof Operand.Null) || target != null)
-        throw new GirException("Registered wrappers require literal null");
       if (!shape.equals(queueShapes.get(op.queue())))
         throw new GirException("Unknown queue or wrapper shape mismatch");
     }
@@ -848,20 +826,32 @@ final class GraphMachine {
     slots++;
   }
 
+  /** Binds an enqueue result after the joint frontier has validated its API linearization. */
+  void enqueueResult(Instruction.EnqueueReference operation, boolean result) {
+    if (operation.id() <= 0 || scopes.isEmpty()) throw new GirException("Invalid enqueue context");
+    requireStep();
+    requireDeclaration(operation.name());
+    referenceValue(operation.owner(), -1);
+    bind(operation.name(), operation.id(), new Value.Scalar(result ? 1 : 0));
+    marker(operation.id(), ExecutionTrace.Kind.SCALAR_READ, result ? 1 : 0);
+  }
+
   /**
-   * Removes one known member and binds its wrapper strongly. Null is valid only for an empty named
-   * queue. Every precondition is checked before membership, bindings or counters change.
+   * Binds a named poll result after the joint frontier validates membership. Preconditions precede
+   * bindings and counters; this machine never manufactures membership from successful API calls.
    */
   void pollNamed(Instruction.PollQueue operation, WrapperId returned) {
     if (operation.id() <= 0 || scopes.isEmpty())
       throw new GirException("Invalid named poll context");
     requireStep();
     requireDeclaration(operation.name());
-    var members = queues.get(operation.queue());
-    if (!operation.named() || members == null) throw new GirException("Unknown named queue");
-    if (returned == null ? !members.isEmpty() : !members.contains(returned))
-      throw new GirException("Impossible named queue delivery");
-    if (returned != null) members.remove(returned);
+    var shape = queueShapes.get(operation.queue());
+    if (!operation.named() || shape == null) throw new GirException("Unknown named queue");
+    if (returned != null
+        && (!referenceObjects.containsKey(returned)
+            || !shape.equals(referenceObjects.get(returned).shape())
+            || !operation.queue().equals(registrations.get(returned))))
+      throw new GirException("Invalid named queue wrapper");
     bind(
         operation.name(),
         operation.id(),
@@ -1015,11 +1005,11 @@ final class GraphMachine {
     return new Target(value.target(), object);
   }
 
-  /** Copies each resource without changing its semantic membership. */
+  /** Declaration-only resources; their semantic membership belongs to the reference frontier. */
   private Map<String, HeapQueue> queueGraph() {
     var result = new HashMap<String, HeapQueue>();
-    queues.forEach(
-        (name, members) -> result.put(name, new HeapQueue(queueIdentities.get(name), members)));
+    queueIdentities.forEach(
+        (name, identity) -> result.put(name, new HeapQueue(identity, Set.of())));
     return result;
   }
 

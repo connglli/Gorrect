@@ -125,10 +125,11 @@ inline std::int64_t primitive_bits(jvalue value, jvmtiPrimitiveType type) {
 
 /** One traversal with independent graph/resource quotas and a shared physical tag namespace. */
 class HeapCapture {
-  enum class ResourceRole { none, roots, queue, bootstrap, helper };
+  enum class ResourceRole { none, roots, queue, bootstrap, helper, caller };
   const std::vector<ClassInfo> &classes_;
   const std::vector<ClassInfo> *resources_;
   jlong &next_tag_;
+  jlong witness_thread_;
 
   const ClassInfo *type(jlong tag, bool resources) const {
     if (tag >= 0)
@@ -148,8 +149,16 @@ class HeapCapture {
     auto index = static_cast<std::uint64_t>(-(tag + 1));
     if (index < classes_.size() || index - classes_.size() >= resources_->size())
       return ResourceRole::none;
-    // configureQueues publishes exactly this fixed four-role order.
-    return static_cast<ResourceRole>(index - classes_.size() + 1);
+    // The first four roles retain their wire order; automatic lock metadata appends helpers.
+    auto resource = index - classes_.size();
+    if ((*resources_)[resource].signature == "Ljava/lang/Thread;")
+      return ResourceRole::caller;
+    return resource >= 3 ? ResourceRole::helper : static_cast<ResourceRole>(resource + 1);
+  }
+
+  bool full_resource(jlong tag) const {
+    auto value = role(tag);
+    return value != ResourceRole::none && value != ResourceRole::caller;
   }
 
   void reference(CaptureBuffer &capture, bool resource, jvmtiHeapReferenceKind kind,
@@ -165,10 +174,19 @@ class HeapCapture {
     if (resource) {
       // Role admission applies to targets as well as outgoing edges: helper-first discovery must
       // retain object/class/length evidence before any convenient queue edge is encountered.
-      target_kept = reference_type(target_type) || role(class_tag) != ResourceRole::none;
-      source_kept = reference_type(owner) || role(referrer_class_tag) != ResourceRole::none;
-      root_field = kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && source &&
-                   role(*source) != ResourceRole::none;
+      bool caller_class = kind == JVMTI_HEAP_REFERENCE_CLASS && source &&
+                          *source == witness_thread_ &&
+                          role(referrer_class_tag) == ResourceRole::caller;
+      // Only the actual caller contributes Thread class evidence. Preserve unexpected incoming
+      // edges from selected owners, but never follow Thread fields/statics or retain other roots.
+      if ((role(referrer_class_tag) == ResourceRole::caller ||
+           (source && role(*source) == ResourceRole::caller)) &&
+          !caller_class)
+        return;
+      target_kept = reference_type(target_type) || full_resource(class_tag) ||
+                    (witness_thread_ > 0 && *target == witness_thread_);
+      source_kept = reference_type(owner) || full_resource(referrer_class_tag) || caller_class;
+      root_field = kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD && source && full_resource(*source);
     }
     if (*target < 0)
       capture.object(target, target_type, size, length, next_tag_);
@@ -211,9 +229,9 @@ public:
   std::optional<CaptureBuffer> queues;
 
   HeapCapture(jlong run, jlong checkpoint, jint capacity, const std::vector<ClassInfo> &classes,
-              const std::vector<ClassInfo> *resources, jlong &next_tag)
+              const std::vector<ClassInfo> *resources, jlong &next_tag, jlong witness_thread = 0)
       : classes_(classes), resources_(resources), next_tag_(next_tag),
-        graph(run, checkpoint, capacity, classes.size()) {
+        witness_thread_(witness_thread), graph(run, checkpoint, capacity, classes.size()) {
     if (resources_)
       queues.emplace(run, checkpoint, capacity, classes.size() + resources_->size());
   }
@@ -273,7 +291,7 @@ public:
     if (walk.queues && !walk.queues->full) {
       jlong owner = kind == JVMTI_HEAP_REFERENCE_STATIC_FIELD ? *object : class_tag;
       metadata = walk.type(owner, true);
-      if (reference_type(metadata) || walk.role(owner) != ResourceRole::none) {
+      if (reference_type(metadata) || walk.full_resource(owner)) {
         if (*object < 0)
           walk.queues->object(object, metadata, 0, -1, walk.next_tag_);
         walk.queues->add({RecordKind::primitive_field, walk.queues->tag(object, walk.next_tag_),

@@ -66,7 +66,10 @@ public final class JavaEmitter {
     var resources = new ArrayList<QueuePlan.Resource>();
     for (var queue : program.queues())
       resources.add(new QueuePlan.Resource(resources.size() + 1, queue.name(), queue.shape()));
-    queuePlan = ReferenceProgram.usesQueues(program) ? new QueuePlan(resources) : null;
+    queuePlan =
+        ReferenceProgram.usesQueues(program)
+            ? new QueuePlan(resources, ReferenceProgram.usesAutomaticQueues(program))
+            : null;
   }
 
   /**

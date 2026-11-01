@@ -10,6 +10,7 @@ import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueueConsistency;
 import io.connglli.gorrect.protocol.QueuePlan;
 import java.util.ArrayList;
 import java.util.Collections;
@@ -608,6 +609,166 @@ class QueueProjectionTest {
     assertTrue(result.complete(), result.problems().toString());
     assertEquals(
         new HeapQueue(1, Set.of(new WrapperId(0, 1, 1, -1))), result.queues().get("ready"));
+  }
+
+  @ParameterizedTest
+  @ValueSource(
+      strings = {
+        "valid",
+        "missing",
+        "wrong-run",
+        "wrong-thread",
+        "wrong-thread-tag",
+        "wrong-root-class",
+        "wrong-root-index",
+        "wrong-queue",
+        "wrong-lock",
+        "wrong-owner",
+        "failed-cleanup",
+        "missing-lock-class",
+        "missing-caller-root",
+        "wrong-lock-field",
+        "partial-resource",
+        "wrong-mode",
+        "extra-resource",
+        "wrong-interval",
+        "identity-with-missing",
+        "second-resource-bad-lock",
+        "null-root-missing",
+        "wrong-checkpoint",
+        "missing-thread-class",
+        "missing-thread-class-edge",
+        "caller-queue-alias",
+        "caller-lock-alias",
+        "other-thread-class-only"
+      })
+  void automaticMembershipNeedsActualAllResourceCustodyAndRetainsIndependentIdentity(
+      String damage) {
+    var f = fixture("hotspot");
+    var types = new ArrayList<>(f.resources().classes());
+    var queue = types.get(3);
+    var fields = new ArrayList<>(queue.fields());
+    fields.add(field(3, 18, "lock", "Ljava/lang/ref/ReferenceQueue$Lock;"));
+    types.set(3, new HeapSnapshot.ClassInfo(queue.id(), queue.kind(), queue.signature(), fields));
+    if (!damage.equals("missing-lock-class"))
+      types.add(
+          new HeapSnapshot.ClassInfo(
+              7, HeapSnapshot.ClassKind.OBJECT, "Ljava/lang/ref/ReferenceQueue$Lock;", List.of()));
+    if (!damage.equals("missing-thread-class"))
+      types.add(
+          new HeapSnapshot.ClassInfo(
+              8, HeapSnapshot.ClassKind.OBJECT, "Ljava/lang/Thread;", List.of()));
+    var records = new ArrayList<>(f.resources().records());
+    records.add(visit(7));
+    records.add(visit(8));
+    records.add(object(400, 7, -1));
+    records.add(object(500, 8, -1));
+    if (!damage.equals("missing-thread-class-edge")) records.add(reference(500, -8, 1, -1));
+    long callerTag =
+        damage.equals("caller-queue-alias")
+            ? 100
+            : damage.equals("caller-lock-alias")
+                ? 400
+                : damage.equals("other-thread-class-only") ? 501 : 500;
+    if (callerTag != 500) {
+      if (callerTag == 501) records.add(object(501, 8, -1));
+      records.add(new HeapSnapshot.Record(HeapSnapshot.Kind.ROOT, callerTag, 25, 1, 0, 0, 0, 0));
+    }
+    records.add(reference(100, damage.equals("wrong-lock-field") ? 401 : 400, 2, 3));
+    if (!damage.equals("missing-caller-root"))
+      records.add(new HeapSnapshot.Record(HeapSnapshot.Kind.ROOT, 500, 25, 1, 0, 0, 0, 0));
+    if (damage.equals("identity-with-missing")) {
+      records.removeIf(
+          record ->
+              record.kind() == HeapSnapshot.Kind.PRIMITIVE_FIELD
+                  && record.a() == 100
+                  && record.b() == 0);
+      records.add(primitive(100, 0, 'I', 9));
+    }
+    if (damage.equals("null-root-missing"))
+      records.removeIf(
+          record ->
+              record.kind() == HeapSnapshot.Kind.REFERENCE && record.a() == -3 && record.d() == 0);
+    boolean secondResource = damage.equals("second-resource-bad-lock");
+    if (secondResource) {
+      types.set(
+          2,
+          new HeapSnapshot.ClassInfo(
+              3,
+              HeapSnapshot.ClassKind.ROOTS,
+              QueuePlan.ROOTS,
+              List.of(field(0, 9, "q1", QueuePlan.TYPE), field(1, 9, "q2", QueuePlan.TYPE))));
+      records.add(reference(-3, 101, 8, 1));
+      records.add(object(101, 4, -1));
+      records.add(primitive(101, 0, 'I', 2));
+      records.add(primitive(101, 2, 'J', 0));
+      records.add(object(401, 7, -1));
+      records.add(reference(101, 401, 2, 3));
+    }
+    var row =
+        new QueueConsistency.Lock(
+            1,
+            damage.equals("wrong-root-class") ? 4 : 3,
+            damage.equals("wrong-root-index") ? 1 : 0,
+            1,
+            damage.equals("wrong-queue") ? 101 : 100,
+            damage.equals("wrong-lock") ? 401 : 400,
+            damage.equals("wrong-owner") ? 501 : callerTag,
+            callerTag,
+            1,
+            1,
+            damage.equals("failed-cleanup") ? -1 : 0);
+    var rows = new ArrayList<>(List.of(row));
+    if (damage.equals("extra-resource"))
+      rows.add(new QueueConsistency.Lock(2, 3, 1, 1, 101, 401, 500, 500, 1, 1, 0));
+    if (secondResource)
+      rows.add(new QueueConsistency.Lock(2, 3, 1, 1, 101, 402, 500, 500, 1, 1, 0));
+    QueueConsistency proof =
+        damage.equals("missing")
+                || damage.equals("identity-with-missing")
+                || damage.equals("null-root-missing")
+            ? null
+            : new QueueConsistency(
+                damage.equals("wrong-run") ? 2 : 1,
+                damage.equals("wrong-checkpoint") ? 2 : 1,
+                damage.equals("wrong-thread") ? 2 : 1,
+                damage.equals("wrong-thread-tag") ? 501 : callerTag,
+                damage.equals("wrong-interval") ? 1 : 0,
+                0,
+                damage.equals("wrong-interval") ? 1 : 0,
+                0,
+                rows);
+    var original = f.layout();
+    var resources = new ArrayList<>(original.queuePlan().resources());
+    if (secondResource) resources.add(new QueuePlan.Resource(2, "second", "W"));
+    var layout =
+        new ObservationLayout(
+            original.objects(),
+            original.arrays(),
+            original.roots(),
+            original.references(),
+            original.bindings(),
+            original.bindingSelection(),
+            original.bindingMetadata(),
+            new QueuePlan(resources, true));
+    var raw = snapshot(types, records);
+    if (damage.equals("partial-resource"))
+      raw = copy(raw, records, HeapSnapshot.Status.RECORD_LIMIT);
+    var result =
+        QueueProjector.project(
+            f.graph(),
+            new QueueCapture(raw),
+            layout,
+            damage.equals("wrong-mode") ? "openj9" : "hotspot",
+            proof,
+            1);
+    assertEquals(damage.equals("valid"), result.complete(), result.problems().toString());
+    assertEquals(
+        damage.equals("identity-with-missing") ? 9 : damage.equals("null-root-missing") ? 0 : 1,
+        result.queues().get("ready").identity());
+    assertEquals(
+        damage.equals("valid") ? Set.of(new WrapperId(0, 1, 1, -1)) : null,
+        result.queues().get("ready").members());
   }
 
   private static Fixture fixture(String vm) {

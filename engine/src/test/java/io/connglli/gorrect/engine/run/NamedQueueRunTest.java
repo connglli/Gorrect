@@ -76,6 +76,26 @@ class NamedQueueRunTest {
         QueueCapture.read(run.resolve("snapshots/1.gqueue"), token, 1).snapshot().status());
   }
 
+  @ParameterizedTest
+  @ValueSource(booleans = {false, true})
+  void sourceLifetimeProofCannotEnableUnqualifiedAutomaticCapture(boolean retained)
+      throws IOException {
+    String program =
+        "gir 1; shape W weak; queue q W; root permanent = null; program {"
+            + " allocate-ref target W null; allocate-ref r W target q; write-root permanent r; }";
+    var result =
+        RunEngine.run(
+            input(directory, program),
+            selected(21, retained),
+            directory.resolve("unsupported-automatic"));
+    assertEquals(RunReport.Outcome.UNSUPPORTED, result.execution(), result.toString());
+    assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, result.verdict(), result.toString());
+    assertTrue(
+        result.unmetRequirements().stream()
+            .anyMatch(problem -> problem.contains("Automatic queue")),
+        result.toString());
+  }
+
   @Test
   void softOwnedWrappersUseTheSamePortableQueueContract() throws IOException {
     Path run = directory.resolve("soft");

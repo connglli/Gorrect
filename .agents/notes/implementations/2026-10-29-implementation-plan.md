@@ -135,7 +135,7 @@ Complete when CAS results control execution, repeated/recursive frames keep dist
 
 ## 15. Make references and queues first-class
 
-Status: in progress. [No-queue objects](./completed-2026-10-31-stage15a.md) and [initially-null registered queues](./completed-2026-10-31-stage15b.md) are implemented. [Automatic pending processing](../designs/2026-10-31-automatic-reference-queues.md), non-null registration, legacy exposure, phantom processing and Cleaner actors retain separate gates.
+Status: in progress. [No-queue objects](./completed-2026-10-31-stage15a.md), [initially-null queues](./completed-2026-10-31-stage15b.md) and [rooted automatic queues on qualified HS17](./completed-2026-11-01-automatic-queue-runtime-backend.md) are implemented. Detached non-null registration, other adapters, legacy exposure, phantom processing and Cleaner actors retain separate gates.
 
 Goal: model Reference objects as graph participants and cover asynchronous cleanup.
 

@@ -1,6 +1,8 @@
 package io.connglli.gorrect.runtime;
 
+import com.sun.management.HotSpotDiagnosticMXBean;
 import java.io.IOException;
+import java.lang.management.ManagementFactory;
 import java.lang.ref.Reference;
 import java.lang.ref.ReferenceQueue;
 import java.lang.ref.SoftReference;
@@ -15,6 +17,10 @@ final class QueueQualification {
   private QueueQualification() {}
 
   static Properties exercise() throws IOException {
+    return exercise(false);
+  }
+
+  static Properties exercise(boolean automatic) throws IOException {
     if (Reference.class.getClassLoader() != null || ReferenceQueue.class.getClassLoader() != null)
       throw new IllegalStateException("Queue implementation is not bootstrap-defined");
     for (boolean soft : new boolean[] {false, true}) {
@@ -61,6 +67,44 @@ final class QueueQualification {
         throw new IllegalStateException("SHA-256 is unavailable", unavailable);
       }
       facts.setProperty("queue.library." + name, digest);
+    }
+    if (automatic) {
+      if (Runtime.version().feature() != 17
+          || !System.getProperty("java.vm.name", "").equals("OpenJDK 64-Bit Server VM"))
+        throw new IllegalStateException("Automatic queue image is not selected HotSpot17");
+      for (String name :
+          new String[] {
+            "java.lang.Object",
+            "java.lang.Thread",
+            "java.lang.ref.Reference$ReferenceHandler",
+            "java.lang.ref.ReferenceQueue$Lock",
+            "java.lang.ref.SoftReference",
+            "java.lang.ref.WeakReference"
+          }) {
+        try {
+          var type = Class.forName(name);
+          if (type.getClassLoader() != null)
+            throw new IllegalStateException("Automatic queue role is not bootstrap-defined");
+          try (var input = type.getResourceAsStream("/" + name.replace('.', '/') + ".class")) {
+            if (input == null) throw new IOException("Missing automatic library image: " + name);
+            byte[] bytes = input.readNBytes(1024 * 1024 + 1);
+            if (bytes.length > 1024 * 1024)
+              throw new IOException("Automatic library exceeds byte limit");
+            facts.setProperty(
+                "queue.automatic.library." + name,
+                HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256").digest(bytes)));
+          }
+        } catch (ClassNotFoundException | NoSuchAlgorithmException unavailable) {
+          throw new IllegalStateException(
+              "Automatic queue library role is unavailable", unavailable);
+        }
+      }
+      facts.setProperty(
+          "queue.automatic.shared",
+          ManagementFactory.getPlatformMXBean(HotSpotDiagnosticMXBean.class)
+              .getVMOption("UseSharedSpaces")
+              .getValue());
+      facts.setProperty("queue.automatic.configured", "true");
     }
     return facts;
   }

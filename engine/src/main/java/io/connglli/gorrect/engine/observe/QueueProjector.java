@@ -4,6 +4,7 @@ import io.connglli.gorrect.engine.model.HeapQueue;
 import io.connglli.gorrect.engine.model.WrapperId;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueueConsistency;
 import io.connglli.gorrect.protocol.QueuePlan;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -74,6 +75,17 @@ public final class QueueProjector {
 
   public static Result project(
       HeapSnapshot graph, QueueCapture capture, ObservationLayout layout, String vm) {
+    return project(graph, capture, layout, vm, null, 0);
+  }
+
+  /** Consistency gaps retain independent identity facts, never unlocked automatic membership. */
+  public static Result project(
+      HeapSnapshot graph,
+      QueueCapture capture,
+      ObservationLayout layout,
+      String vm,
+      QueueConsistency consistency,
+      long caller) {
     var problems = new ArrayList<String>();
     var facts = new LinkedHashMap<String, HeapQueue>();
     try {
@@ -111,6 +123,15 @@ public final class QueueProjector {
           roots.kind() == HeapSnapshot.ClassKind.ROOTS
               && roots.fields().size() == layout.queuePlan().resources().size(),
           "Queue root metadata mismatch");
+      boolean consistent = true;
+      if (layout.queuePlan().automatic()) {
+        try {
+          decoder.consistencyContext(consistency, caller);
+        } catch (IllegalArgumentException unavailable) {
+          consistent = false;
+          problems.add(unavailable.getMessage());
+        }
+      }
       for (var resource : layout.queuePlan().resources()) {
         Integer identity = null;
         Set<WrapperId> members = null;
@@ -122,7 +143,9 @@ public final class QueueProjector {
               "Queue root coverage is unavailable");
           long tag = decoder.reference(-roots.id(), index, STATIC);
           if (tag == 0) {
-            facts.put(resource.name(), new HeapQueue(0, Set.of()));
+            facts.put(
+                resource.name(),
+                new HeapQueue(0, layout.queuePlan().automatic() && !consistent ? null : Set.of()));
             continue;
           }
           var object = decoder.object(tag);
@@ -141,6 +164,9 @@ public final class QueueProjector {
           }
           try {
             require(completeWalk, "Queue member path recording is incomplete");
+            if (layout.queuePlan().automatic()) {
+              require(consistent, "Automatic queue consistency is unavailable");
+            }
             members =
                 vm.equals("hotspot")
                     ? decoder.linked(tag, queueType, resource)
@@ -158,6 +184,91 @@ public final class QueueProjector {
       problems.add(malformed.getMessage());
     }
     return new Result(facts, problems);
+  }
+
+  private void consistencyContext(QueueConsistency proof, long caller) {
+    require(vm.equals("hotspot"), "Automatic queue adapter is not qualified for this VM");
+    require(proof != null, "Missing automatic queue consistency evidence");
+    require(
+        proof.run() == raw.run()
+            && proof.checkpoint() == raw.checkpoint()
+            && caller > 0
+            && proof.thread() == caller,
+        "Automatic queue caller/capture differs");
+    require(
+        proof.startsBefore() == raw.gcStartsBefore()
+            && proof.finishesBefore() == raw.gcFinishesBefore()
+            && proof.startsAfter() == raw.gcStartsAfter()
+            && proof.finishesAfter() == raw.gcFinishesAfter(),
+        "Automatic queue walk interval differs");
+    require(
+        proof.locks().size() == layout.queuePlan().resources().size(),
+        "Automatic queue custody does not cover every declaration");
+    var threadType = type("Ljava/lang/Thread;");
+    var threadObject = object(proof.threadTag());
+    require(
+        threadType.kind() == HeapSnapshot.ClassKind.OBJECT
+            && threadType.fields().isEmpty()
+            && visited.contains((long) threadType.id())
+            && threadObject.b() == threadType.id()
+            && threadObject.d() == -1
+            && classEdges.containsKey(proof.threadTag()),
+        "Automatic caller lacks actual caller-specific Thread class provenance");
+    checkClassEdges(proof.threadTag(), threadType.id(), classEdges);
+    require(
+        raw.records().stream()
+            .anyMatch(
+                record ->
+                    record.kind() == HeapSnapshot.Kind.ROOT
+                        && record.a() == proof.threadTag()
+                        && record.b() == 25
+                        && record.c() == caller),
+        "Automatic queue caller lacks its same-walk JNI-local origin");
+    require(proof.complete(), "Automatic queue custody or cleanup is incomplete");
+    var roots = type(QueuePlan.ROOTS);
+    // Shared reference links make this an all-resource premise, not per-queue salvage.
+    for (var resource : layout.queuePlan().resources()) {
+      int index = field(roots, resource.field(), QueuePlan.TYPE, true).index();
+      require(
+          references.containsKey(new Slot(-roots.id(), index)),
+          "Automatic queue root lacks its actual static edge");
+      consistencyResource(proof, resource, roots, index, reference(-roots.id(), index, STATIC));
+    }
+  }
+
+  private void consistencyResource(
+      QueueConsistency proof,
+      QueuePlan.Resource resource,
+      HeapSnapshot.ClassInfo roots,
+      int rootIndex,
+      long queueTag) {
+    var row = proof.locks().get(resource.id() - 1);
+    require(
+        row.resource() == resource.id()
+            && row.rootsClass() == roots.id()
+            && row.rootField() == rootIndex
+            && row.queueTag() == queueTag,
+        "Automatic queue custody changed its declared root coordinate");
+    require(
+        row.kind() == QueueConsistency.HOTSPOT17_JNI_MONITOR && row.owned(proof.threadTag()),
+        "Automatic queue monitor ownership or cleanup failed");
+    var queue = type(QueuePlan.TYPE);
+    var field = field(queue, "lock", "Ljava/lang/ref/ReferenceQueue$Lock;", false);
+    require(
+        (field.modifiers() & FINAL_MODIFIER) != 0,
+        "Automatic queue mutation lock field is mutable");
+    require(
+        reference(queueTag, field.index(), FIELD) == row.lockTag(),
+        "Automatic queue custody used the wrong mutation lock");
+    var lock = object(row.lockTag());
+    var type = type("Ljava/lang/ref/ReferenceQueue$Lock;");
+    require(
+        type.kind() == HeapSnapshot.ClassKind.OBJECT
+            && type.fields().isEmpty()
+            && visited.contains((long) type.id())
+            && lock.b() == type.id()
+            && lock.d() == -1,
+        "Automatic queue mutation lock has unqualified actual class evidence");
   }
 
   private static Set<WrapperId> throwUnknown() {

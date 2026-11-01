@@ -103,6 +103,56 @@ void primitive_and_static_owners() {
   require(capture.graph.snapshot.records.empty(), "resource statics remain opaque");
 }
 
+void caller_type_is_target_only() {
+  auto metadata = queue_classes;
+  metadata.push_back({7, ClassKind::object, "Ljava/lang/ref/ReferenceQueue$Lock;", {}});
+  metadata.push_back({8, ClassKind::object, "Ljava/lang/Thread;", {}});
+  jlong next = 1000, caller = 500, other = 501, wrapper = 20, mirror = -8;
+  HeapCapture capture(1, 2, 64, graph_classes, &metadata, next, caller);
+  jvmtiHeapReferenceInfo info{};
+  info.field.index = 0;
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_FIELD, &info, -8, -2, 64, &other, &wrapper,
+                                  -1, &capture);
+  require(std::any_of(capture.queues->snapshot.records.begin(),
+                      capture.queues->snapshot.records.end(),
+                      [](const Record &r) {
+                        return r.kind == RecordKind::reference && r.a == 20 && r.b == 501;
+                      }),
+          "unexpected incoming Thread target was suppressed");
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_FIELD, &info, -2, -8, 32, &wrapper, &other,
+                                  -1, &capture);
+  jvalue value{};
+  value.i = 7;
+  HeapCapture::primitive_callback(JVMTI_HEAP_REFERENCE_FIELD, &info, -8, &other, value,
+                                  JVMTI_PRIMITIVE_TYPE_INT, &capture);
+  info.jni_local.thread_id = 42;
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_JNI_LOCAL, &info, -8, 0, 64, &other, nullptr,
+                                  -1, &capture);
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_CLASS, nullptr, 0, -8, 0, &mirror, &other,
+                                  -1, &capture);
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_JNI_LOCAL, &info, -8, 0, 64, &caller,
+                                  nullptr, -1, &capture);
+  HeapCapture::reference_callback(JVMTI_HEAP_REFERENCE_CLASS, nullptr, 0, -8, 0, &mirror, &caller,
+                                  -1, &capture);
+  require(object(*capture.queues, caller) && object(*capture.queues, caller)->b == 8,
+          "actual caller Thread type is unavailable");
+  require(std::none_of(capture.queues->snapshot.records.begin(),
+                       capture.queues->snapshot.records.end(),
+                       [](const Record &r) {
+                         return (r.a == 501 &&
+                                 (r.kind == RecordKind::root || r.kind == RecordKind::reference ||
+                                  r.kind == RecordKind::primitive_field));
+                       }),
+          "noncaller Thread supplied witness roots, class edges or outgoing fields");
+  require(std::any_of(capture.queues->snapshot.records.begin(),
+                      capture.queues->snapshot.records.end(),
+                      [](const Record &r) {
+                        return r.kind == RecordKind::reference && r.a == 500 && r.b == -8 &&
+                               r.c == JVMTI_HEAP_REFERENCE_CLASS;
+                      }),
+          "actual caller lacks its specific class edge");
+}
+
 void independent_quota() {
   jlong next = 1, helper = 0;
   HeapCapture capture(1, 2, 8, graph_classes, &queue_classes, next);
@@ -181,6 +231,7 @@ int main(int argc, char **argv) {
     legacy_graph();
     helper_first_and_shared_tags();
     primitive_and_static_owners();
+    caller_type_is_target_only();
     independent_quota();
     global_abort_and_resource_error();
     golden(argv[1]);

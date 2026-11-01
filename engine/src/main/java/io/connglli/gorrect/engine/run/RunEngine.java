@@ -253,7 +253,8 @@ public final class RunEngine {
       var combination = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
       combination.addAll(VmDriver.unsupported(profile));
       if (ReferenceProgram.usesQueues(program))
-        combination.addAll(QueueResources.configuration(profile));
+        combination.addAll(
+            QueueResources.configuration(profile, ReferenceProgram.usesAutomaticQueues(program)));
       if (!combination.isEmpty())
         return finish(
             directory,
@@ -305,7 +306,8 @@ public final class RunEngine {
         manifest.addProperty("replayOf", saved.toString());
       }
 
-      var installations = Artifacts.installations(profile);
+      var installations =
+          Artifacts.installations(profile, ReferenceProgram.usesAutomaticQueues(program));
       manifest.add("installationArtifacts", JsonFiles.GSON.toJsonTree(installations));
       var changes = new ArrayList<String>();
       if (saved != null) {

@@ -1,5 +1,6 @@
 #include "heap_capture.hpp"
 #include "openj9_stack.hpp"
+#include "queue_locks.hpp"
 #include "queue_wire.hpp"
 #include "retained_observer.hpp"
 #include "snapshot_wire.hpp"
@@ -29,6 +30,9 @@ std::vector<ClassInfo> classes;
 // Resource-only classes follow the graph class-ID range without changing graph lookup.
 std::vector<ClassInfo> queue_classes;
 bool queue_setup_attempted = false;
+// Immutable after release publication; acquisition reads no observer state before queue locks.
+QueueLockConfig automatic_queue_config;
+std::atomic<bool> automatic_queues{false};
 // Published entries never move or change. Mutators can read primitive identity cells without
 // taking the capture/registration lock or retaining a Java reference.
 std::array<ArrayIdentity, max_arrays> arrays;
@@ -143,8 +147,8 @@ jclass queue_class(JNIEnv *env, const char *name) {
 }
 struct LocalFrame {
   JNIEnv *env;
-  explicit LocalFrame(JNIEnv *environment) : env(environment) {
-    if (env->PushLocalFrame(64) != JNI_OK)
+  explicit LocalFrame(JNIEnv *environment, jint capacity = 64) : env(environment) {
+    if (env->PushLocalFrame(capacity) != JNI_OK)
       throw std::bad_alloc();
   }
   ~LocalFrame() { env->PopLocalFrame(nullptr); }
@@ -257,13 +261,14 @@ std::vector<MethodInfo> methods(JNIEnv *env, const Snapshot &snapshot) {
 // Frames bracket the heap walk itself. All metadata queries and byte encoding follow the walk.
 Snapshot capture_snapshot(JNIEnv *env, jlong run, jlong checkpoint, jint capacity,
                           FrameEvidence *frames = nullptr, jobjectArray threads = nullptr,
-                          Snapshot *resources = nullptr) {
+                          Snapshot *resources = nullptr, jlong witness_thread = 0) {
   if (queue_setup_attempted && queue_classes.empty())
     throw std::runtime_error("Queue setup failed; observer cannot be reused");
   if (!queue_classes.empty() && !resources)
     throw std::runtime_error("Queue capture requires paired resource evidence");
   HeapCapture capture(run, checkpoint, capacity, classes,
-                      queue_classes.empty() ? nullptr : &queue_classes, next_object_tag);
+                      queue_classes.empty() ? nullptr : &queue_classes, next_object_tag,
+                      witness_thread);
   capture.graph.snapshot.starts_before = gc_starts.load();
   capture.graph.snapshot.finishes_before = gc_finishes.load();
   jvmtiHeapCallbacks callbacks{};
@@ -325,6 +330,7 @@ extern "C" JNIEXPORT jint JNICALL Agent_OnLoad(JavaVM *vm, char *options, void *
     if (!available.can_tag_objects)
       return JNI_ERR;
     desired.can_tag_objects = 1;
+    desired.can_get_monitor_info = available.can_get_monitor_info;
     std::string mode = options ? options : "";
     if (!mode.empty() && mode != "locals" && mode != "retained-class")
       return JNI_ERR;
@@ -505,7 +511,8 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
 extern "C" JNIEXPORT void JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureQueues0(JNIEnv *env, jclass,
                                                                          jclass roots,
-                                                                         jclass queue_type) {
+                                                                         jclass queue_type,
+                                                                         jboolean automatic) {
   entry(env, [&] {
     require_agent();
     std::lock_guard<std::mutex> lock(control_mutex);
@@ -525,9 +532,35 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureQueues0(JNIEnv 
       throw std::runtime_error("Queue roots parent is unavailable");
     if (!env->IsSameObject(parent, base) || !env->IsSameObject(roots_parent, object))
       throw std::runtime_error("Queue resources require direct supported subclasses");
-    std::array<jclass, 4> types{roots, queue_type, base, helper};
-    std::array<ClassKind, 4> kinds{ClassKind::roots, ClassKind::object, ClassKind::object,
-                                   ClassKind::reference_array};
+    std::vector<jclass> types{roots, queue_type, base, helper};
+    std::vector<ClassKind> kinds{ClassKind::roots, ClassKind::object, ClassKind::object,
+                                 ClassKind::reference_array};
+    jclass mutation_lock = nullptr;
+    if (automatic == JNI_TRUE) {
+      jvmtiCapabilities actual{};
+      queue_check(jvmti->GetCapabilities(&actual));
+      if (!actual.can_get_monitor_info)
+        throw std::runtime_error("Automatic queues require monitor ownership capability");
+      mutation_lock = queue_class(env, "java/lang/ref/ReferenceQueue$Lock");
+      if (!env->IsSameObject(env->GetSuperclass(mutation_lock), object))
+        throw std::runtime_error("Automatic queue monitor class is unsupported");
+      types.push_back(mutation_lock);
+      kinds.push_back(ClassKind::object);
+      auto thread = queue_class(env, "java/lang/Thread");
+      jobject loader = nullptr;
+      queue_check(jvmti->GetClassLoader(thread, &loader));
+      if (loader) {
+        env->DeleteLocalRef(loader);
+        throw std::runtime_error("Automatic caller Thread class is not bootstrap-defined");
+      }
+      jint status = 0;
+      queue_check(jvmti->GetClassStatus(thread, &status));
+      if (!(status & JVMTI_CLASS_STATUS_PREPARED) ||
+          !env->IsSameObject(env->GetSuperclass(thread), object))
+        throw std::runtime_error("Automatic caller Thread class is unsupported");
+      types.push_back(thread);
+      kinds.push_back(ClassKind::object);
+    }
     std::vector<ClassInfo> pending;
     pending.reserve(types.size());
     for (std::size_t i = 0; i < types.size(); ++i) {
@@ -535,8 +568,11 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureQueues0(JNIEnv 
       queue_check(jvmti->GetTag(types[i], &previous));
       if (previous != 0)
         throw std::runtime_error("Queue resource class is already tagged");
-      auto metadata =
-          queue_metadata(env, types[i], kinds[i], static_cast<jint>(classes.size() + i + 1));
+      auto id = static_cast<jint>(classes.size() + i + 1);
+      // The caller role supplies actual type/class evidence only, never Thread field coverage.
+      auto metadata = automatic == JNI_TRUE && i == 5
+                          ? ClassInfo{id, ClassKind::object, queue_signature(types[i]), {}}
+                          : queue_metadata(env, types[i], kinds[i], id);
       for (const auto &old : classes)
         if (old.signature == metadata.signature)
           throw std::runtime_error("Queue class conflicts with graph registration");
@@ -554,10 +590,53 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureQueues0(JNIEnv 
                                  });
     if (identity == pending[1].fields.end())
       throw std::runtime_error("Queue identity field is unavailable");
+    QueueLockConfig lock_config;
+    if (automatic == JNI_TRUE) {
+      auto role = std::find_if(pending[1].fields.begin(), pending[1].fields.end(),
+                               [](const FieldInfo &field) {
+                                 return field.name == "lock" &&
+                                        field.descriptor == "Ljava/lang/ref/ReferenceQueue$Lock;" &&
+                                        !(field.modifiers & 0x0008) && (field.modifiers & 0x0010);
+                               });
+      if (role == pending[1].fields.end() || !pending[4].fields.empty() ||
+          pending[0].fields.empty())
+        throw std::runtime_error("Automatic queue mutation-lock metadata is unsupported");
+      lock_config.lock = env->GetFieldID(base, "lock", "Ljava/lang/ref/ReferenceQueue$Lock;");
+      if (!lock_config.lock)
+        throw std::runtime_error("Automatic queue mutation-lock field is unavailable");
+      lock_config.roots_id = pending[0].id;
+      lock_config.queue_id = pending[1].id;
+      lock_config.lock_id = pending[4].id;
+      lock_config.thread_id = pending[5].id;
+      lock_config.fields.reserve(pending[0].fields.size());
+      for (std::size_t i = 0; i < pending[0].fields.size(); ++i) {
+        auto name = "q" + std::to_string(i + 1);
+        auto field = std::find_if(
+            pending[0].fields.begin(), pending[0].fields.end(), [&](const FieldInfo &candidate) {
+              return candidate.name == name && candidate.descriptor == pending[1].signature &&
+                     (candidate.modifiers & 0x0008);
+            });
+        if (field == pending[0].fields.end())
+          throw std::runtime_error("Automatic queue root role is unavailable");
+        auto id = env->GetStaticFieldID(roots, name.c_str(), pending[1].signature.c_str());
+        if (!id)
+          throw std::runtime_error("Automatic queue root field is unavailable");
+        lock_config.fields.push_back({id, field->index});
+      }
+    }
     // Existing registered graph tags are never changed. Only these new role classes are tagged.
     for (std::size_t i = 0; i < types.size(); ++i)
       queue_check(jvmti->SetTag(types[i], -static_cast<jlong>(pending[i].id)));
+    if (automatic == JNI_TRUE) {
+      lock_config.roots = env->NewWeakGlobalRef(roots);
+      if (!lock_config.roots)
+        throw std::bad_alloc();
+    }
     queue_classes = std::move(pending);
+    if (automatic == JNI_TRUE) {
+      automatic_queue_config = std::move(lock_config);
+      automatic_queues.store(true, std::memory_order_release);
+    }
   });
 }
 
@@ -647,37 +726,81 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_capture0(JNIEnv *env, jc
     return java_bytes(env, encode(capture_snapshot(env, run, checkpoint, capacity)));
   });
 }
+namespace {
+struct QueueCaptureBundle {
+  Snapshot graph, resources;
+  FrameEvidence frames;
+  std::vector<std::uint8_t> consistency;
+};
+QueueCaptureBundle capture_bundle(JNIEnv *env, jlong run, jlong checkpoint, jint capacity,
+                                  jobjectArray threads = nullptr, jintArray workers = nullptr,
+                                  bool terminal = false) {
+  require_agent();
+  QueueCaptureBundle result;
+  // Temporary metadata/queue/lock/thread locals expire before returned Java arrays are allocated.
+  LocalFrame locals(env, 2 * 64 + 16);
+  std::optional<QueueLocks> custody;
+  if (automatic_queues.load(std::memory_order_acquire)) {
+    custody.emplace(env, jvmti, automatic_queue_config);
+    custody->acquire();
+  }
+  {
+    std::lock_guard<std::mutex> state(control_mutex);
+    if (automatic_queues.load(std::memory_order_acquire) != custody.has_value())
+      throw std::runtime_error("Queue capture policy changed before custody");
+    if (classes.empty() || run <= 0 || checkpoint <= 0 || capacity <= 0 || capacity > max_records ||
+        (!threads && (queue_classes.empty() || retained::enabled())))
+      throw std::runtime_error("Invalid paired queue capture request");
+    if (threads)
+      result.frames = retained::before(env, run, checkpoint, threads, workers, terminal);
+    if (custody)
+      custody->before(next_object_tag);
+    result.graph = capture_snapshot(
+        env, run, checkpoint, capacity, threads ? &result.frames : nullptr, threads,
+        queue_classes.empty() ? nullptr : &result.resources, custody ? custody->thread_tag() : 0);
+    if (custody)
+      custody->after(next_object_tag);
+  }
+  if (custody) {
+    custody->release();
+    result.consistency = custody->encode(result.graph);
+  }
+  return result;
+}
+} // namespace
+
 extern "C" JNIEXPORT jobjectArray JNICALL
 Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureQueues0(JNIEnv *env, jclass,
                                                                        jlong run, jlong checkpoint,
                                                                        jint capacity) {
   return entry(env, [&]() -> jobjectArray {
-    require_agent();
-    std::lock_guard<std::mutex> lock(control_mutex);
-    if (classes.empty() || queue_classes.empty() || run <= 0 || checkpoint <= 0 || capacity <= 0 ||
-        capacity > max_records || retained::enabled())
-      throw std::runtime_error("Invalid queue capture request");
-    Snapshot resources;
-    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, nullptr, nullptr, &resources);
+    auto bundle = capture_bundle(env, run, checkpoint, capacity);
     auto byte_array_type = env->FindClass("[B");
     if (!byte_array_type)
       return nullptr;
-    auto result = env->NewObjectArray(2, byte_array_type, nullptr);
+    auto result = env->NewObjectArray(bundle.consistency.empty() ? 2 : 3, byte_array_type, nullptr);
     env->DeleteLocalRef(byte_array_type);
     if (!result)
       return nullptr;
-    auto raw = java_bytes(env, encode(snapshot));
+    auto raw = java_bytes(env, encode(bundle.graph));
     if (!raw)
       return nullptr;
     env->SetObjectArrayElement(result, 0, raw);
     env->DeleteLocalRef(raw);
     if (env->ExceptionCheck())
       return nullptr;
-    auto queue = java_bytes(env, encode_queue(resources), 128U * 1024 * 1024 + 24);
+    auto queue = java_bytes(env, encode_queue(bundle.resources), 128U * 1024 * 1024 + 24);
     if (!queue)
       return nullptr;
     env->SetObjectArrayElement(result, 1, queue);
     env->DeleteLocalRef(queue);
+    if (!bundle.consistency.empty() && !env->ExceptionCheck()) {
+      auto proof = java_bytes(env, bundle.consistency);
+      if (!proof)
+        return nullptr;
+      env->SetObjectArrayElement(result, 2, proof);
+      env->DeleteLocalRef(proof);
+    }
     return env->ExceptionCheck() ? nullptr : result;
   });
 }
@@ -710,39 +833,43 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureRetained0(
     JNIEnv *env, jclass, jlong run, jlong checkpoint, jint capacity, jobjectArray threads,
     jintArray workers, jboolean terminal) {
   return entry(env, [&]() -> jobjectArray {
-    require_agent();
-    std::lock_guard<std::mutex> lock(control_mutex);
-    if (classes.empty() || capacity <= 0 || capacity > max_records)
-      throw std::runtime_error("Invalid retained capture request");
-    auto frames = retained::before(env, run, checkpoint, threads, workers, terminal == JNI_TRUE);
-    Snapshot resources;
-    auto snapshot = capture_snapshot(env, run, checkpoint, capacity, &frames, threads,
-                                     queue_classes.empty() ? nullptr : &resources);
+    auto bundle =
+        capture_bundle(env, run, checkpoint, capacity, threads, workers, terminal == JNI_TRUE);
     auto byte_array_type = env->FindClass("[B");
     if (!byte_array_type)
       return nullptr;
-    auto result = env->NewObjectArray(queue_classes.empty() ? 2 : 3, byte_array_type, nullptr);
+    auto result = env->NewObjectArray(queue_classes.empty()        ? 2
+                                      : bundle.consistency.empty() ? 3
+                                                                   : 4,
+                                      byte_array_type, nullptr);
     env->DeleteLocalRef(byte_array_type);
     if (!result)
       return nullptr;
-    auto raw = java_bytes(env, encode(snapshot));
+    auto raw = java_bytes(env, encode(bundle.graph));
     if (!raw)
       return nullptr;
     env->SetObjectArrayElement(result, 0, raw);
     env->DeleteLocalRef(raw);
     if (env->ExceptionCheck())
       return nullptr;
-    auto sample = java_bytes(env, encode(frames));
+    auto sample = java_bytes(env, encode(bundle.frames));
     if (!sample)
       return nullptr;
     env->SetObjectArrayElement(result, 1, sample);
     env->DeleteLocalRef(sample);
     if (!queue_classes.empty() && !env->ExceptionCheck()) {
-      auto queue = java_bytes(env, encode_queue(resources), 128U * 1024 * 1024 + 24);
+      auto queue = java_bytes(env, encode_queue(bundle.resources), 128U * 1024 * 1024 + 24);
       if (!queue)
         return nullptr;
       env->SetObjectArrayElement(result, 2, queue);
       env->DeleteLocalRef(queue);
+    }
+    if (!bundle.consistency.empty() && !env->ExceptionCheck()) {
+      auto proof = java_bytes(env, bundle.consistency);
+      if (!proof)
+        return nullptr;
+      env->SetObjectArrayElement(result, 3, proof);
+      env->DeleteLocalRef(proof);
     }
     return env->ExceptionCheck() ? nullptr : result;
   });

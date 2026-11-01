@@ -46,9 +46,9 @@ A two-phase rendezvous publishes worker arrivals, then keeps the caller and ever
 
 ## Native observer
 
-JNI requests a JVMTI heap walk. Callbacks fill preallocated storage without JNI calls, allocation or locks; native metadata retains no strong workload references. Encoding and metadata queries happen outside callbacks, and JNI boundaries contain C++ exceptions.
+JNI drives JVMTI walks under the [capture contract](./observation.md#capture-contract), coordinating queue locks and containing C++ exceptions. Metadata queries and encoding run outside callbacks.
 
-The engine projects physical records using the [observation contract](./observation.md). Layouts identify fields and identity roles; they contain no expected graph values. Local metadata comes from VM tables or certified retained class bytes.
+The engine projects records using layouts that identify observation roles without expected graph values. Local metadata comes from VM tables or certified retained class bytes.
 
 ## JVM integration
 

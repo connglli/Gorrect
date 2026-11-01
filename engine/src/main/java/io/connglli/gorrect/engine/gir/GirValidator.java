@@ -117,6 +117,8 @@ public final class GirValidator {
         fail("Named roots require strong references");
     }
     block(program.body(), 0);
+    var queueGaps = ReferenceProgram.automaticQueueGaps(program);
+    if (!queueGaps.isEmpty()) fail(String.join("; ", queueGaps));
     var labels = new HashSet<String>();
     for (var entry : program.labels().entrySet()) {
       if (entry.getKey() <= 0 || entry.getKey() >= nextOperation) {
@@ -273,8 +275,6 @@ public final class GirValidator {
         operand(op.value(), true);
         if (op.queue() != null) {
           if (!shape.equals(queue(op.queue()))) fail("Queue wrapper shape mismatch");
-          if (!(op.value() instanceof Operand.Null))
-            fail("Registered wrappers require literal null in this slice");
         }
         declare(op.name(), shape);
       }

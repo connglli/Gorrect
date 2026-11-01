@@ -10,6 +10,7 @@ import io.connglli.gorrect.engine.observe.QueueProjector;
 import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import io.connglli.gorrect.protocol.QueueCapture;
+import io.connglli.gorrect.protocol.QueueConsistency;
 import io.connglli.gorrect.protocol.QueuePlan;
 import java.io.IOException;
 import java.nio.file.Files;
@@ -51,14 +52,21 @@ final class QueueResources {
     var expected = new ArrayList<QueuePlan.Resource>();
     for (var queue : program.queues())
       expected.add(new QueuePlan.Resource(expected.size() + 1, queue.name(), queue.shape()));
-    if (!layout.queuePlan().equals(new QueuePlan(expected)))
+    if (!layout
+        .queuePlan()
+        .equals(new QueuePlan(expected, ReferenceProgram.usesAutomaticQueues(program))))
       throw new IOException("Queue resources differ from source declarations");
   }
 
   static List<String> configuration(TargetProfile profile) {
+    return configuration(profile, false);
+  }
+
+  static List<String> configuration(TargetProfile profile, boolean automatic) {
     var problems = new ArrayList<>(ControlledLaunch.configuration(profile, true));
     if (profile.vm().equals("openj9") && !profile.collector().equals("gencon"))
       problems.add("Named queue ownership qualification covers OpenJ9 gencon");
+    if (automatic) problems.addAll(AutomaticQueues.preflight(profile));
     return List.copyOf(problems);
   }
 
@@ -72,10 +80,25 @@ final class QueueResources {
     if (layout.queuePlan() == null) return projection;
     var problems = new ArrayList<>(projection.problems());
     var usable = projection.covered();
-    if (usable.isEmpty()) usable = SnapshotProjector.project(capture, layout).graph();
     if (usable.isEmpty()) return projection;
     var graph = usable.orElseThrow();
     try {
+      QueueConsistency consistency = null;
+      long caller = 0;
+      if (layout.queuePlan().automatic()) {
+        try {
+          consistency =
+              QueueConsistency.read(
+                  directory.resolve("snapshots/" + capture.checkpoint() + ".gqlock"),
+                  capture.run(),
+                  capture.checkpoint());
+          caller =
+              Long.parseLong(
+                  ControlledLaunch.targetFacts(directory).getProperty("main.thread", "0"));
+        } catch (IOException | RuntimeException unavailable) {
+          problems.add("Automatic queue consistency extraction failed: " + unavailable);
+        }
+      }
       var queues =
           QueueProjector.project(
               capture,
@@ -84,7 +107,9 @@ final class QueueResources {
                   capture.run(),
                   capture.checkpoint()),
               layout,
-              vm);
+              vm,
+              consistency,
+              caller);
       problems.addAll(queues.problems());
       graph =
           new Graph(
@@ -103,7 +128,8 @@ final class QueueResources {
   /**
    * Uses controlled launch plus known bootstrap bytes and actual API exercise before ACK/offline.
    */
-  static void admission(TargetProfile profile, JsonObject manifest, Properties facts)
+  static void admission(
+      TargetProfile profile, JsonObject manifest, Properties facts, Path directory)
       throws IOException {
     ControlledLaunch.evidence(profile, manifest, facts, true);
     var unmet = new ArrayList<String>();
@@ -131,6 +157,8 @@ final class QueueResources {
         profile.vm().equals("openj9") ? OPENJ9 : feature.equals("17") ? HOTSPOT17 : HOTSPOT21;
     if (!actual.equals(expected))
       throw new IOException("Unqualified bootstrap queue library bytes");
+    if (QueuePlan.read(directory.resolve("generated/queues.properties")).automatic())
+      AutomaticQueues.admission(profile, facts, manifest);
   }
 
   // Qualified class resources from the exercised libraries. Controlled launch excludes a later

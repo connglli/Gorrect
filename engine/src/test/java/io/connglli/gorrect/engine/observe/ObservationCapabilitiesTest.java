@@ -49,6 +49,19 @@ class ObservationCapabilitiesTest {
   }
 
   @Test
+  void portableAutomaticAdmissionStillRequiresControlledObservation() {
+    var program =
+        GirParser.parse(
+            "gir 1; shape W weak; queue q W; root permanent = null; program { allocate-ref target W"
+                + " null; allocate-ref r W target q; write-root permanent r; }");
+    assertTrue(
+        ObservationCapabilities.unsupported(program, ObservationProfile.CONTROLLED_ROOTS)
+            .isEmpty());
+    assertFalse(
+        ObservationCapabilities.unsupported(program, ObservationProfile.NATURAL_ROOTS).isEmpty());
+  }
+
+  @Test
   void permitsUnusedArrayDeclarationsButRejectsDiagnosticArrayBindingInNaturalMode() {
     var unused = GirParser.parse("gir 1; shape R refs 1; program {}");
     assertTrue(

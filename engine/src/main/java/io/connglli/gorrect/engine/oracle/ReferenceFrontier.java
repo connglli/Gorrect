@@ -19,7 +19,8 @@ import java.util.Map;
 import java.util.Set;
 
 /**
- * GC changes only wrapper state. Ordinary graph mutations are shared across the surviving frontier.
+ * Candidates own clearing, notification debt and queue insertion. Ordinary graph mutations are
+ * shared across the surviving frontier.
  */
 final class ReferenceFrontier {
   record Instance(
@@ -27,13 +28,16 @@ final class ReferenceFrontier {
       Value.ReferenceKind kind,
       ObjectId target,
       WrapperId wrapperTarget,
-      boolean registered) {
+      boolean registered,
+      String queue) {
     HeapId heapTarget() {
       return wrapperTarget == null ? HeapId.object(target) : HeapId.wrapper(wrapperTarget);
     }
   }
 
-  record State(BitSet cleared, BitSet pending, BitSet delivered) {}
+  // inserted is permanent; members records current ownership. Their difference is consumption.
+  // pending is GC-notification debt, never a portable strong root.
+  record State(BitSet cleared, BitSet pending, BitSet delivered, BitSet inserted, BitSet members) {}
 
   private final HistoryBudget budget;
   private final List<Instance> instances = new ArrayList<>();
@@ -46,7 +50,7 @@ final class ReferenceFrontier {
 
   ReferenceFrontier(HistoryBudget budget) {
     this.budget = budget;
-    states.add(new State(new BitSet(), new BitSet(), new BitSet()));
+    states.add(new State(new BitSet(), new BitSet(), new BitSet(), new BitSet(), new BitSet()));
   }
 
   ReferenceFrontier(ReferenceFrontier source) {
@@ -67,20 +71,37 @@ final class ReferenceFrontier {
   }
 
   void register(Value.Reference value, boolean registered) {
+    register(value, registered, null);
+  }
+
+  /** Registers the immutable actual constructor queue and referent, without creating debt. */
+  void register(Value.Reference value, String queue) {
+    register(value, queue != null, queue);
+  }
+
+  private void register(Value.Reference value, boolean registered, String queue) {
     if (value.kind() == Value.ReferenceKind.STRONG) return;
     if (indices.containsKey(value.wrapper()))
       throw new IllegalArgumentException("Duplicate model wrapper identity");
+    spend(1L + 5L * (instances.size() + 1L) * states.size());
     int index = instances.size();
     indices.put(value.wrapper(), index);
     instances.add(
         new Instance(
-            value.wrapper(), value.kind(), value.target(), value.wrapperTarget(), registered));
+            value.wrapper(),
+            value.kind(),
+            value.target(),
+            value.wrapperTarget(),
+            registered,
+            queue));
     if (value.heapTarget() == null) {
       var next = new LinkedHashSet<State>();
       for (var state : states) {
         var cleared = copy(state.cleared());
         cleared.set(index);
-        next.add(new State(cleared, state.pending(), state.delivered()));
+        next.add(
+            new State(
+                cleared, state.pending(), state.delivered(), state.inserted(), state.members()));
       }
       states = next;
     }
@@ -92,12 +113,18 @@ final class ReferenceFrontier {
    * preserved. Only frontier state changes; ordinary graph payload remains unchanged.
    */
   void expand(Graph graph) {
-    var strong = reach(graph, null, Set.of(), 0);
     var closure = new LinkedHashSet<>(states);
     var queue = new ArrayDeque<>(states);
 
     while (!queue.isEmpty()) {
       var state = queue.removeFirst();
+      var semantic = membership(graph, state.members());
+      var strong = reach(semantic, null, Set.of(), 0);
+      for (var delivery : deliveries(state))
+        if (closure.add(delivery)) {
+          budget.states(closure.size());
+          queue.addLast(delivery);
+        }
       for (int index = 0; index < instances.size(); index++) {
         spend();
         var instance = instances.get(index);
@@ -105,7 +132,7 @@ final class ReferenceFrontier {
             || instance.heapTarget() == null
             || strong.contains(instance.heapTarget())) continue;
 
-        var soft = reach(graph, state, Set.of(), 1);
+        var soft = reach(semantic, state, Set.of(), 1);
         if (instance.kind() == Value.ReferenceKind.WEAK && soft.contains(instance.heapTarget()))
           continue;
 
@@ -113,7 +140,7 @@ final class ReferenceFrontier {
         // strong referent root; it supplies only its own soft/weak edge for this transition.
         var eligible =
             reach(
-                graph,
+                semantic,
                 state,
                 Set.of(instance.heapTarget()),
                 instance.kind() == Value.ReferenceKind.SOFT ? 1 : 2);
@@ -135,11 +162,12 @@ final class ReferenceFrontier {
               && cohort.contains(value.heapTarget())
               && !cleared.get(member)) {
             cleared.set(member);
-            if (value.registered()) pending.set(member);
+            if (value.registered() && !state.inserted().get(member)) pending.set(member);
           }
         }
 
-        var next = new State(cleared, pending, state.delivered());
+        var next =
+            new State(cleared, pending, state.delivered(), state.inserted(), state.members());
         if (closure.add(next)) {
           budget.states(closure.size());
           queue.addLast(next);
@@ -186,9 +214,12 @@ final class ReferenceFrontier {
     int index = index(id);
     var next = new LinkedHashSet<State>();
     for (var state : states) {
+      spend(1L + instances.size());
       var cleared = copy(state.cleared());
       cleared.set(index);
-      next.add(new State(cleared, state.pending(), state.delivered()));
+      next.add(
+          new State(
+              cleared, state.pending(), state.delivered(), state.inserted(), state.members()));
     }
     states = next;
   }
@@ -200,7 +231,7 @@ final class ReferenceFrontier {
   boolean poll(WrapperId id) {
     if (id == null) return true; // Queue delivery can lag clearing by an unbounded interval.
     Integer index = indices.get(id);
-    if (index == null) return false;
+    if (index == null || instances.get(index).queue() != null) return false;
     var next = new LinkedHashSet<State>();
     for (var state : states)
       if (state.pending().get(index) && !state.delivered().get(index)) {
@@ -208,10 +239,101 @@ final class ReferenceFrontier {
         var delivered = copy(state.delivered());
         pending.clear(index);
         delivered.set(index);
-        next.add(new State(state.cleared(), pending, delivered));
+        next.add(new State(state.cleared(), pending, delivered, state.inserted(), state.members()));
       }
     states = next;
     return !states.isEmpty();
+  }
+
+  /**
+   * Applies one actual enqueue result. Pending handler insertion may win before linearization.
+   * Every attempt clears, including false no-queue and consumed-wrapper attempts. A failed match
+   * empties this path; budget exhaustion leaves the previous frontier unchanged.
+   */
+  boolean enqueue(WrapperId id, boolean result) {
+    int index = index(id);
+    var next = new LinkedHashSet<State>();
+    for (var state : deliveryClosure()) {
+      spend(1L + 5L * instances.size());
+      boolean adds = instances.get(index).queue() != null && !state.inserted().get(index);
+      if (adds != result) continue;
+      var cleared = copy(state.cleared());
+      var pending = copy(state.pending());
+      var inserted = copy(state.inserted());
+      var members = copy(state.members());
+      cleared.set(index);
+      if (adds) {
+        inserted.set(index);
+        members.set(index);
+      }
+      // Once inserted, settling debt cannot change any admitted API or graph observation.
+      if (inserted.get(index)) pending.clear(index);
+      next.add(new State(cleared, pending, state.delivered(), inserted, members));
+    }
+    states = next;
+    return !states.isEmpty();
+  }
+
+  /** Matches actual unordered named membership, then consumes exactly the returned wrapper. */
+  boolean poll(String name, WrapperId id) {
+    Integer index = id == null ? null : indices.get(id);
+    if (id != null && (index == null || !name.equals(instances.get(index).queue()))) return false;
+    var next = new LinkedHashSet<State>();
+    for (var state : deliveryClosure()) {
+      spend(1L + 5L * instances.size());
+      if (id == null) {
+        boolean empty = true;
+        for (int member = state.members().nextSetBit(0);
+            member >= 0;
+            member = state.members().nextSetBit(member + 1)) {
+          spend();
+          if (name.equals(instances.get(member).queue())) empty = false;
+        }
+        if (empty) next.add(state);
+      } else if (state.members().get(index)) {
+        var members = copy(state.members());
+        members.clear(index);
+        next.add(
+            new State(
+                state.cleared(), state.pending(), state.delivered(), state.inserted(), members));
+      }
+    }
+    states = next;
+    return !states.isEmpty();
+  }
+
+  private List<State> deliveries(State state) {
+    var next = new ArrayList<State>();
+    for (int index = state.pending().nextSetBit(0);
+        index >= 0;
+        index = state.pending().nextSetBit(index + 1)) {
+      spend();
+      if (instances.get(index).queue() == null)
+        continue; // Legacy delivery stays on its own channel.
+      spend(1L + 5L * instances.size());
+      var pending = copy(state.pending());
+      var inserted = copy(state.inserted());
+      var members = copy(state.members());
+      pending.clear(index);
+      if (!inserted.get(index)) {
+        inserted.set(index);
+        members.set(index);
+      }
+      next.add(new State(state.cleared(), pending, state.delivered(), inserted, members));
+    }
+    return next;
+  }
+
+  private Set<State> deliveryClosure() {
+    var closure = new LinkedHashSet<>(states);
+    var todo = new ArrayDeque<>(states);
+    while (!todo.isEmpty())
+      for (var next : deliveries(todo.removeFirst()))
+        if (closure.add(next)) {
+          budget.states(closure.size());
+          todo.addLast(next);
+        }
+    return closure;
   }
 
   Instance instance(WrapperId id) {
@@ -231,7 +353,11 @@ final class ReferenceFrontier {
   }
 
   private record ClearingKey(
-      Set<WrapperId> cleared, Set<WrapperId> pending, Set<WrapperId> delivered) {}
+      Set<WrapperId> cleared,
+      Set<WrapperId> pending,
+      Set<WrapperId> delivered,
+      Set<WrapperId> inserted,
+      Set<WrapperId> members) {}
 
   private record FrontierKey(Map<WrapperId, Instance> instances, Set<ClearingKey> states) {}
 
@@ -240,13 +366,18 @@ final class ReferenceFrontier {
    * orders.
    */
   Object key() {
-    budget.spend(1L + instances.size() * (1L + states.size()));
+    budget.spend(1L + instances.size() * (1L + 5L * states.size()));
     var values = new HashMap<WrapperId, Instance>();
     instances.forEach(instance -> values.put(instance.id(), instance));
     var clearings = new HashSet<ClearingKey>();
     for (var state : states)
       clearings.add(
-          new ClearingKey(ids(state.cleared()), ids(state.pending()), ids(state.delivered())));
+          new ClearingKey(
+              ids(state.cleared()),
+              ids(state.pending()),
+              ids(state.delivered()),
+              ids(state.inserted()),
+              ids(state.members())));
     return new FrontierKey(Map.copyOf(values), Set.copyOf(clearings));
   }
 
@@ -345,7 +476,48 @@ final class ReferenceFrontier {
                   new HeapReference(
                       object.shape(), state.cleared().get(index(id)) ? null : object.referent()));
             });
-    return new Graph(objects, graph.roots(), graph.handles(), wrappers, graph.queues());
+    return membership(
+        new Graph(objects, graph.roots(), graph.handles(), wrappers, graph.queues()),
+        state.members());
+  }
+
+  /**
+   * Bounds snapshot storage before physical masking. Union all candidate member roots while keeping
+   * constructor edges uncleared: both choices can enlarge accessibility, never remove a candidate's
+   * obligations. Literal-null membership is deterministic, preserving its existing cumulative
+   * charge. This bound is resource accounting only, never input to GC, acquisition or matching.
+   * This method changes no frontier state and does not consult observed queue facts.
+   */
+  Graph snapshotBound(Graph model) {
+    spend(1L + (long) instances.size() * states.size());
+    var members = new BitSet();
+    for (var state : states) members.or(state.members());
+    return membership(model, members).accessible();
+  }
+
+  private Graph membership(Graph graph, BitSet memberBits) {
+    var members = new HashMap<String, Set<WrapperId>>();
+    for (var entry : graph.queues().entrySet()) {
+      spend();
+      if (!entry.getValue().complete() || !entry.getValue().members().isEmpty())
+        throw new IllegalArgumentException(
+            "Model queue resources must have empty complete membership");
+      members.put(entry.getKey(), new HashSet<>());
+    }
+    for (int index = memberBits.nextSetBit(0);
+        index >= 0;
+        index = memberBits.nextSetBit(index + 1)) {
+      spend();
+      var instance = instances.get(index);
+      var resource = members.get(instance.queue());
+      if (resource == null) throw new IllegalArgumentException("Missing model queue resource");
+      resource.add(instance.id());
+    }
+    var queues = new HashMap<String, HeapQueue>();
+    members.forEach(
+        (name, values) ->
+            queues.put(name, new HeapQueue(graph.queues().get(name).identity(), values)));
+    return new Graph(graph.objects(), graph.roots(), graph.handles(), graph.wrappers(), queues);
   }
 
   private Set<HeapId> reach(Graph graph, State state, Set<HeapId> additional, int strength) {
