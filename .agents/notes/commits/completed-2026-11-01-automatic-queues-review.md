@@ -4,7 +4,7 @@ Two independent reviews and coordinator checks close accounting, source-lifetime
 
 ## Validation
 
-Of 1,039 Java cases, 1,038 pass: 750 unit, 253 HotSpot integration, six observer and 29/30 OpenJ9 cases. Ten native checks, JDK 17/21 compatibility/runtime, strict Javadoc and hooks pass. Metronome reports `j9vm.227`, `jnicsup.cpp:1691`, `J9_PUBLIC_FLAGS_VM_ACCESS`, matching baseline `33f8dc6`; core, javacore, Snap, stderr and workload are retained. The matching signature establishes neither cause nor a fix.
+Of 1,039 Java cases, 1,038 pass: 750 unit, 253 HotSpot integration, six observer and 29/30 OpenJ9 cases. Ten native checks, JDK 17/21 compatibility/runtime, strict Javadoc and hooks pass. Metronome reports `j9vm.227`, `jnicsup.cpp:1691`, `J9_PUBLIC_FLAGS_VM_ACCESS`, matching baseline `ccd24ab`; core, javacore, Snap, stderr and workload are retained. The matching signature establishes neither cause nor a fix.
 
 Independent controlled runs under both metadata providers pass run/verify/exact-class replay with actual handler delivery and verified GC completion. Separate diagnostic breakpoint/JNI interception proves handler exclusion, wrong-lock rejection and failure cleanup; its extra agent is not an admitted launch mode.
 

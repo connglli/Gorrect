@@ -4,7 +4,7 @@ Status: complete for the first controlled-capture slice. [Observation](../../../
 
 The slice certifies exact loaded code, the intended class and method identities, parked frames and retained scopes without local-variable access or manufactured roots. Weak metadata ownership, terminal main and once-only final status remain mandatory. Legacy bundles, first-class weak/soft wrappers, offline verification and exact-class replay retain their contracts.
 
-Independent reviewers approved semantic comparisons, launch/code/frame evidence, and runtime/resource lifecycles. The reviewed 64-file candidate against f2afa51 has patch SHA-256 `323483a717e888315f60f8a9f05827fbe5a1dfdfd74fe37d2dd91f08e97eb8b8`; coordinator integration changes only plan/review prose afterward. No required finding remains.
+Independent reviewers approved semantic comparisons, launch/code/frame evidence, and runtime/resource lifecycles. The reviewed 64-file candidate against 26daa23 has patch SHA-256 `323483a717e888315f60f8a9f05827fbe5a1dfdfd74fe37d2dd91f08e97eb8b8`; coordinator integration changes only plan/review prose afterward. No required finding remains.
 
 | Review finding | Correction |
 | --- | --- |

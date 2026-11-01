@@ -1,6 +1,6 @@
 # Native strong roots proposal
 
-Status: unaccepted, design-only first [stage 21](../implementations/2026-10-29-implementation-plan.md#21-add-deliberate-native-roots-and-critical-arrays) slice at `70244a51e28b7a392fe115266677729e587a9357`. No production capability is implemented.
+Status: unaccepted, design-only first [stage 21](../implementations/2026-10-29-implementation-plan.md#21-add-deliberate-native-roots-and-critical-arrays) slice at `85f0bf3603d966976b58035490a283ef52326f3d`. No production capability is implemented.
 
 ## Smallest interface
 

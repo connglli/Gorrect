@@ -1,6 +1,6 @@
 # Mechanism coverage review
 
-Reviewed baseline: `09c4c81`. Status: review complete; the user accepted the recommendations into stages 11 through 25 of the [implementation plan](../implementations/2026-10-29-implementation-plan.md). Scope is graph semantics, execution, VM controls, observation, and checking. Fuzz generation, campaign scheduling, and reduction are excluded. No runtime/model behavior is changed by this review. Formats remain version 1. The untracked local bug archive and deferred OpenJ9-trunk work are untouched.
+Reviewed baseline: `f574acc`. Status: review complete; the user accepted the recommendations into stages 11 through 25 of the [implementation plan](../implementations/2026-10-29-implementation-plan.md). Scope is graph semantics, execution, VM controls, observation, and checking. Fuzz generation, campaign scheduling, and reduction are excluded. No runtime/model behavior is changed by this review. Formats remain version 1. The untracked local bug archive and deferred OpenJ9-trunk work are untouched.
 
 ## Conclusion and completeness criterion
 

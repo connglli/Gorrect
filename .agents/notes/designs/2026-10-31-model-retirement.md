@@ -1,6 +1,6 @@
 # Checkpoint model retirement proposal
 
-Status: unaccepted design-only [stage 17](../implementations/2026-10-29-implementation-plan.md#17-scale-allocation-and-checking) slice, based on committed a78f84b. No production behavior or allocation-pressure workload is implemented.
+Status: unaccepted design-only [stage 17](../implementations/2026-10-29-implementation-plan.md#17-scale-allocation-and-checking) slice, based on committed 550a8b3. No production behavior or allocation-pressure workload is implemented.
 
 ## Necessity and scope
 
