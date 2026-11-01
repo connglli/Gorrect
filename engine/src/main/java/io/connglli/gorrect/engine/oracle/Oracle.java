@@ -8,8 +8,10 @@ import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MemoryMode;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
+import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayList;
 import java.util.List;
@@ -31,6 +33,11 @@ public final class Oracle {
    * @throws OracleLimitException if a checking budget is exhausted
    */
   public static OracleResult interpret(GirProgram program, OracleLimits limits) {
+    return interpret(program, limits, true);
+  }
+
+  /** Package-local differential baseline; no runtime, profile or CLI switch is exposed. */
+  static OracleResult interpret(GirProgram program, OracleLimits limits, boolean retirement) {
     GirValidator.validate(program);
     var unsupported = CloneProgram.unsupported(program);
     if (!unsupported.isEmpty())
@@ -44,7 +51,7 @@ public final class Oracle {
       throw new UnsupportedHistoryException(String.join("; ", hashSupport));
     if (HistoryProgram.usesConcurrentHistory(program) || ReferenceProgram.usesReferences(program))
       throw new GirException("Conditional references require a recorded history");
-    var machine = new GraphMachine(program, limits);
+    var machine = new GraphMachine(program, limits, retirement && retirementEligible(program));
     execute(program.body(), machine);
     machine.leaveScope();
     return new OracleResult(
@@ -53,6 +60,52 @@ public final class Oracle {
         machine.steps(),
         machine.events(),
         machine.identityHashes());
+  }
+
+  /**
+   * Positive whole-source admission: future mechanisms remain unoptimized until their possible
+   * reference recovery paths have been reviewed. Ineligibility changes no support decision.
+   */
+  static boolean retirementEligible(GirProgram program) {
+    return program.queues().isEmpty()
+        && program.shapes().stream()
+            .allMatch(
+                shape ->
+                    switch (shape.kind()) {
+                      case OBJECT, REFERENCE_ARRAY, DATA_ARRAY -> true;
+                      default -> false;
+                    })
+        && program.objects().stream()
+            .flatMap(object -> object.references().stream())
+            .allMatch(value -> value.kind() == Value.ReferenceKind.STRONG)
+        && program.roots().stream()
+            .allMatch(root -> root.value().kind() == Value.ReferenceKind.STRONG)
+        && program.instructions().allMatch(Oracle::retirementEligible);
+  }
+
+  private static boolean retirementEligible(Instruction instruction) {
+    return switch (instruction) {
+      case Instruction.Allocate ignored -> true;
+      case Instruction.Clone ignored -> true;
+      case Instruction.CopyArray ignored -> true;
+      case Instruction.IdentityHash ignored -> true;
+      case Instruction.SameObject ignored -> true;
+      case Instruction.Release ignored -> true;
+      case Instruction.Checkpoint ignored -> true;
+      case Instruction.Collect ignored -> true;
+      case Instruction.Scope ignored -> true;
+      case Instruction.Repeat ignored -> true;
+      case Instruction.IfPresent ignored -> true;
+      case Instruction.IfNonzero ignored -> true;
+      case Instruction.ReadRoot op -> op.mode() == MemoryMode.PLAIN;
+      case Instruction.WriteRoot op -> op.mode() == MemoryMode.PLAIN;
+      case Instruction.ReadReference op -> op.mode() == MemoryMode.PLAIN;
+      case Instruction.WriteReference op ->
+          op.mode() == MemoryMode.PLAIN && op.kind() == Value.ReferenceKind.STRONG;
+      case Instruction.ReadData op -> op.mode() == MemoryMode.PLAIN;
+      case Instruction.WriteData op -> op.mode() == MemoryMode.PLAIN;
+      default -> false;
+    };
   }
 
   /** Executes validated instructions; failed child blocks leave the caller scope current. */

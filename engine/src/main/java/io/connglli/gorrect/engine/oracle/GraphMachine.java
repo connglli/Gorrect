@@ -32,6 +32,7 @@ import java.util.stream.IntStream;
  */
 final class GraphMachine {
   private final OracleLimits limits;
+  private final boolean retireAtCheckpoints;
   private final Map<String, Shape> shapes;
   private final Map<ObjectId, HeapObject> objects = new HashMap<>();
   private final Map<WrapperId, HeapReference> referenceObjects = new HashMap<>();
@@ -52,6 +53,8 @@ final class GraphMachine {
   private long steps;
   private long slots;
   private long snapshotCells;
+  // The working map may shrink; the public allocation allowance never resets.
+  private long ordinaryAllocations;
   private long wrappers;
 
   /**
@@ -81,6 +84,7 @@ final class GraphMachine {
   /** Forks semantic state for schedule search; only its last marker is retained. */
   GraphMachine(GraphMachine source) {
     limits = source.limits;
+    retireAtCheckpoints = source.retireAtCheckpoints;
     // Declarations never change; payload, root, and binding maps belong to each fork.
     shapes = source.shapes;
     objects.putAll(source.objects);
@@ -100,6 +104,7 @@ final class GraphMachine {
     steps = source.steps;
     slots = source.slots;
     snapshotCells = source.snapshotCells;
+    ordinaryAllocations = source.ordinaryAllocations;
     wrappers = source.wrappers;
     if (!source.events.isEmpty()) events.add(source.lastEvent());
   }
@@ -135,6 +140,7 @@ final class GraphMachine {
       long steps,
       long slots,
       long snapshotCells,
+      long ordinaryAllocations,
       long wrappers,
       Map<WrapperId, String> registrations,
       Set<WrapperId> inserted) {}
@@ -159,6 +165,7 @@ final class GraphMachine {
         steps,
         slots,
         snapshotCells,
+        ordinaryAllocations,
         wrappers,
         Map.copyOf(registrations),
         Set.copyOf(inserted));
@@ -276,7 +283,14 @@ final class GraphMachine {
   }
 
   GraphMachine(GirProgram program, OracleLimits limits) {
+    this(program, limits, false);
+  }
+
+  /** Retirement is enabled only by the exact oracle's positive source eligibility check. */
+  GraphMachine(GirProgram program, OracleLimits limits, boolean retireAtCheckpoints) {
     this.limits = limits;
+    this.retireAtCheckpoints = retireAtCheckpoints;
+    ordinaryAllocations = program.objects().size();
     shapes = new HashMap<>();
     program.shapes().forEach(shape -> shapes.put(shape.name(), shape));
     for (var queue : program.queues()) {
@@ -292,7 +306,7 @@ final class GraphMachine {
       for (int index = 0; index < initial.references().size(); index++) {
         var value = initial.references().get(index);
         if (value.kind() != Value.ReferenceKind.STRONG) {
-          if ((long) program.objects().size() + wrappers >= limits.objects())
+          if (ordinaryAllocations + wrappers >= limits.objects())
             limit("initial reference wrappers");
           value =
               new Value.Reference(
@@ -427,7 +441,7 @@ final class GraphMachine {
 
         long occurrence = 0;
         if (op.kind() != Value.ReferenceKind.STRONG) {
-          if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
+          if (ordinaryAllocations + wrappers >= limits.objects()) limit("reference wrappers");
           occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
           value =
               new Value.Reference(
@@ -564,6 +578,11 @@ final class GraphMachine {
 
     steps++;
     events.add(event(operation.id(), eventKind(operation), read));
+    if (retireAtCheckpoints && operation instanceof Instruction.Checkpoint) {
+      // Snapshot validation and charging succeeded. Reuse its full closure; old snapshots own
+      // immutable records, and neither identity counters nor cumulative budgets may be pruned.
+      objects.keySet().retainAll(checkpoints.getLast().graph().objects().keySet());
+    }
   }
 
   private static ExecutionTrace.Kind eventKind(Instruction.Operation operation) {
@@ -721,7 +740,7 @@ final class GraphMachine {
     requireDeclaration(op.name());
     var shape = shape(op.shape());
     if (shape.wrapper()) throw new GirException("Wrapper types require allocate-ref");
-    if (objects.size() + wrappers >= limits.objects()) limit("objects");
+    if (ordinaryAllocations + wrappers >= limits.objects()) limit("objects");
     if (shape.slots() > limits.slots() - slots) limit("slots");
 
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
@@ -736,6 +755,7 @@ final class GraphMachine {
     objects.put(id, object);
     scopes.peek().put(op.name(), binding);
     occurrences.put(op.id(), occurrence);
+    ordinaryAllocations++;
     slots += shape.slots();
   }
 
@@ -747,7 +767,7 @@ final class GraphMachine {
     var original = objects.get(source.target());
     if (original == null || !original.shape().array())
       throw new GirException("clone requires an array handle");
-    if (objects.size() + wrappers >= limits.objects()) limit("objects");
+    if (ordinaryAllocations + wrappers >= limits.objects()) limit("objects");
     if (original.shape().slots() > limits.slots() - slots) limit("slots");
 
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
@@ -757,6 +777,7 @@ final class GraphMachine {
     objects.put(id, copy);
     bind(op.name(), op.id(), Value.Reference.strong(id));
     occurrences.put(op.id(), occurrence);
+    ordinaryAllocations++;
     slots += original.shape().slots();
   }
 
@@ -812,7 +833,7 @@ final class GraphMachine {
       if (!shape.equals(queueShapes.get(op.queue())))
         throw new GirException("Unknown queue or wrapper shape mismatch");
     }
-    if (objects.size() + wrappers >= limits.objects()) limit("reference wrappers");
+    if (ordinaryAllocations + wrappers >= limits.objects()) limit("reference wrappers");
     if (slots >= limits.slots()) limit("slots");
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
     var id = new WrapperId(worker, op.id(), occurrence, -1);
@@ -1002,7 +1023,7 @@ final class GraphMachine {
     return result;
   }
 
-  /** Copies the allocated heap and reference roots before reachability projection. */
+  /** Copies retained execution records and reference roots before reachability projection. */
   Graph graph() {
     var handles = new HashMap<Integer, Value.Reference>();
     for (var scope : scopes) {
