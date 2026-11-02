@@ -126,11 +126,22 @@ public record GirProgram(
     }
   }
 
-  /** The initial value of a named shared root slot. */
-  public record Root(String name, Value.Reference value) {
+  /** Storage owns the same portable strong root through final capture. */
+  public enum RootStorage {
+    JAVA_STATIC,
+    JNI_GLOBAL
+  }
+
+  /** The initial value and physical storage of a named shared root slot. */
+  public record Root(String name, Value.Reference value, RootStorage storage) {
+    public Root(String name, Value.Reference value) {
+      this(name, value, RootStorage.JAVA_STATIC);
+    }
+
     public Root {
       Objects.requireNonNull(name);
       Objects.requireNonNull(value);
+      Objects.requireNonNull(storage);
     }
   }
 }

@@ -7,6 +7,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.protocol.HeapSnapshot;
@@ -43,6 +44,9 @@ public final class ObservationCapabilities {
   /** Reasons the selected profile cannot faithfully execute/check this combination. */
   public static List<String> unsupported(GirProgram program, ObservationProfile profile) {
     var reasons = new ArrayList<String>(CloneProgram.unsupported(program));
+    reasons.addAll(NativeRootProgram.unsupported(program));
+    if (NativeRootProgram.selected(program) && !profile.controlled())
+      reasons.add("Native roots require controlled observation");
     reasons.addAll(MonitorProgram.unsupported(program));
     if (MonitorProgram.usesMonitors(program) && !profile.controlled())
       reasons.add("Monitors require controlled observation");
@@ -93,6 +97,7 @@ public final class ObservationCapabilities {
       Set<String> verified) {
     long bits = Long.parseLong(target.getProperty("observer.capabilities", "0"));
     var combination = unsupported(program, profile);
+    boolean nativeRoots = NativeRootProgram.selected(program);
     var result = new ArrayList<Capability>();
     for (String mechanism :
         List.of("named-roots", "local-bindings", "semantic-reads", "alias-checks")) {
@@ -129,7 +134,9 @@ public final class ObservationCapabilities {
               local
                   ? "Read stack slot and reachable graph; no workload writes"
                   : mechanism.equals("named-roots")
-                      ? "Read named static slots and reachable graph"
+                      ? nativeRoots
+                          ? "Read declared roots and reachable graph"
+                          : "Read named static slots and reachable graph"
                       : mechanism.equals("semantic-reads")
                           ? "Read selected payload slot"
                           : "Read two private strong operands; no shared-memory access",
@@ -158,6 +165,32 @@ public final class ObservationCapabilities {
                   profile.controlled()
                       ? "diagnostic array binding and identity reads when used"
                       : "no diagnostic array binding")));
+    }
+    if (nativeRoots) {
+      var reasons = new ArrayList<>(combination);
+      if ((bits & HeapSnapshot.TAGGING) == 0) reasons.add("Object tagging unavailable");
+      if (!target.getProperty("observer.nativeRoots.qualified", "false").equals("true"))
+        reasons.add("Actual JNI root qualification unavailable");
+      boolean used = exercised.contains("native-roots");
+      result.add(
+          new Capability(
+              "native-roots",
+              profile.profileName(),
+              reasons.isEmpty(),
+              used,
+              verified.contains("native-roots") && used && reasons.isEmpty(),
+              reasons,
+              "Strong sequential controlled source; qualified JNI root callbacks",
+              "Retain targets in workload-owned global slots until deletion or cleanup",
+              "Declared globals plus one temporary replacement; borrowed JNI locals",
+              List.of(
+                  "source-selected slot plan",
+                  "startup reference-kind/tag/multiplicity qualification",
+                  "same-walk slot brackets and raw global-root multiset",
+                  "post-delete empty table and complete walk"),
+              List.of(
+                  "JNI transitions and temporary local handles",
+                  "startup qualification and checkpoint heap walks")));
     }
     return List.copyOf(result);
   }

@@ -1,6 +1,6 @@
 # Native strong roots proposal
 
-Status: unaccepted, design-only first [stage 21](../implementations/2026-10-29-implementation-plan.md#21-add-deliberate-native-roots-and-critical-arrays) slice at `85f0bf3603d966976b58035490a283ef52326f3d`. No production capability is implemented.
+Status: the first strong sequential [stage 21](../implementations/2026-10-29-implementation-plan.md#21-add-deliberate-native-roots-and-critical-arrays) slice is implemented. The [implementation note](../implementations/completed-2026-11-02-native-strong-roots.md) records admission and evidence; weak/local roots, critical arrays and wider composition remain separate work.
 
 ## Smallest interface
 

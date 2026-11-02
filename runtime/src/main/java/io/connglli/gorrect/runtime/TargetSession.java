@@ -7,6 +7,9 @@ import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.FrameEvidence;
+import io.connglli.gorrect.protocol.HeapSnapshot;
+import io.connglli.gorrect.protocol.NativeRootEvidence;
+import io.connglli.gorrect.protocol.NativeRootPlan;
 import io.connglli.gorrect.protocol.ObserverPlan;
 import io.connglli.gorrect.protocol.QueueCapture;
 import io.connglli.gorrect.protocol.QueueConsistency;
@@ -58,6 +61,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private boolean codeBound, codeFinalizationAttempted;
   private final boolean typedReferences;
   private final QueuePlan queuePlan;
+  private final NativeRootPlan nativeRootPlan;
+  private boolean nativeRootsConfigured, nativeCleanupAttempted;
   private final QueueRecorder queueRecorder;
   private final Map<Integer, Long> visits = new HashMap<>();
   private long checkpoint;
@@ -90,6 +95,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     typedReferences = Files.exists(directory.resolve("generated/typed-references.properties"));
     Path queues = directory.resolve("generated/queues.properties");
     queuePlan = Files.exists(queues) ? QueuePlan.read(queues) : null;
+    Path nativePlan = directory.resolve("generated/native-roots.properties");
+    nativeRootPlan = Files.exists(nativePlan) ? NativeRootPlan.read(nativePlan) : null;
     queueRecorder = queuePlan == null ? null : new QueueRecorder(capacity);
     boolean localBindings =
         !System.getProperty("gorrect.observation", "named-roots-diagnostic")
@@ -102,7 +109,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     in = new DataInputStream(Channels.newInputStream(socket));
     out = new DataOutputStream(Channels.newOutputStream(socket));
 
-    boolean providerSetup = false, queueSetup = false;
+    boolean providerSetup = false, queueSetup = false, nativeSetup = false;
     try {
       System.load(args[3]);
       providerSetup = retained;
@@ -137,13 +144,32 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
         NativeObserver.configure(registrations);
         NativeObserver.configureQueues(queueRoots, queueType, queuePlan.automatic());
         queueFacts = QueueQualification.exercise(queuePlan.automatic());
+      } else if (nativeRootPlan != null) {
+        nativeSetup = true;
+        if (intended == null
+            || registrations == null
+            || queueRoots != null
+            || queueType != null
+            || !intended.getName().equals("Case")
+            || intended.getClassLoader() != ClassLoader.getSystemClassLoader())
+          throw new IllegalStateException(
+              "Native roots require intended system-defined graph metadata");
+        NativeObserver.configure(registrations);
+        NativeObserver.configureNativeRoots(
+            run, nativeRootPlan.roots().size(), NativeRootPlan.MAX_GENERATIONS, records);
+        nativeRootsConfigured = true;
+        nativeSetup = false;
       } else if (registrations != null || queueRoots != null || queueType != null)
-        throw new IllegalStateException("Queue setup supplied without source selection");
+        throw new IllegalStateException("Resource setup supplied without source selection");
+
       queueSetup = false;
       control = VmControl.open(directory, run);
 
       var properties = VmFacts.read();
       properties.putAll(queueFacts);
+      if (nativeRootPlan != null)
+        properties.setProperty(
+            "observer.nativeRoots.qualified", Boolean.toString(nativeRootsConfigured));
       properties.setProperty("main.thread", Long.toString(Thread.currentThread().getId()));
       properties.setProperty("observer.capabilities", Long.toString(NativeObserver.capabilities()));
       properties.setProperty("observer.bindingMetadata", retained ? "retained-class" : "jvmti");
@@ -161,6 +187,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       acknowledge(0);
     } catch (Throwable failure) {
       try {
+        cleanupNativeRoots();
+      } catch (Throwable cleanup) {
+        failure.addSuppressed(cleanup);
+      }
+      try {
         finishCode(false);
       } catch (Throwable cleanup) {
         failure.addSuppressed(cleanup);
@@ -170,7 +201,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
             ControlMessage.Kind.FAILED,
             0,
             0,
-            startupFailureDetail(providerSetup, queueSetup, failure));
+            (nativeSetup
+                    && (failure instanceof IllegalArgumentException
+                        || failure instanceof IllegalStateException)
+                ? ControlMessage.NATIVE_ROOTS_UNSUPPORTED + failureDetail(failure)
+                : startupFailureDetail(providerSetup, queueSetup, failure)));
       } catch (Throwable cleanup) {
         failure.addSuppressed(cleanup);
       }
@@ -229,6 +264,28 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
         List.copyOf(registrations),
         Objects.requireNonNull(queueRoots),
         Objects.requireNonNull(queueType));
+  }
+
+  /** Opens a source-selected native-root case before constructing workload objects. */
+  public static TargetSession openNative(
+      String[] args, Class<?> intended, List<NativeObserver.Registration> registrations)
+      throws IOException {
+    return new TargetSession(
+        args, Objects.requireNonNull(intended), List.copyOf(registrations), null, null);
+  }
+
+  /** Publishes a deliberate native root without retaining a Java shadow. */
+  public void writeNativeRoot(int slot, Object value) {
+    if (!nativeRootsConfigured || nativeCleanupAttempted)
+      throw new IllegalStateException("Native roots are not open");
+    NativeObserver.writeNativeRoot(run, slot, value);
+  }
+
+  /** Returns an independent strong handle with the asserted nominal shape. */
+  public Object readNativeRoot(int slot, Class<?> type, String shape) {
+    if (!nativeRootsConfigured || nativeCleanupAttempted)
+      throw new IllegalStateException("Native roots are not open");
+    return NativeObserver.readNativeRoot(run, slot, type, shape);
   }
 
   @Override
@@ -551,13 +608,55 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
                 run, checkpoint, Thread.currentThread().getId(), 0, 1, bindings.snapshot())
             .write(directory.resolve("snapshots/" + checkpoint + ".gbind"));
 
-      if (retained) capture(new Thread[] {Thread.currentThread()}, new int[] {0}, operation == 0);
+      if (nativeRootPlan != null) captureNativeRoots(operation, occurrence);
+      else if (retained)
+        capture(new Thread[] {Thread.currentThread()}, new int[] {0}, operation == 0);
       else capture(null, null, false);
       send(ControlMessage.Kind.CHECKPOINT, operation, occurrence, "");
       acknowledge(checkpoint);
     } finally {
       bindings.clear();
     }
+  }
+
+  private void captureNativeRoots(int operation, long occurrence) throws IOException {
+    var evidence =
+        NativeObserver.captureNativeRoots(
+            run,
+            checkpoint,
+            records,
+            operation,
+            occurrence,
+            retained ? new Thread[] {Thread.currentThread()} : null,
+            retained ? new int[] {0} : null,
+            operation == 0,
+            false);
+    Files.write(directory.resolve("snapshots/" + checkpoint + ".gsnap"), evidence.snapshot());
+    Files.write(directory.resolve("snapshots/" + checkpoint + ".gnative"), evidence.resources());
+    if (evidence.frames() != null) {
+      Files.write(directory.resolve("snapshots/" + checkpoint + ".gframe"), evidence.frames());
+      FrameEvidence.read(evidence.frames(), run, checkpoint);
+    }
+    NativeRootEvidence.read(evidence.resources(), run, checkpoint);
+  }
+
+  private void cleanupNativeRoots() throws IOException {
+    if (!nativeRootsConfigured || nativeCleanupAttempted) return;
+    nativeCleanupAttempted = true;
+    var evidence =
+        NativeObserver.captureNativeRoots(
+            run, checkpoint + 1, records, 0, 1, null, null, true, true);
+    Files.write(directory.resolve("traces/native-cleanup.gsnap"), evidence.snapshot());
+    Files.write(directory.resolve("traces/native-cleanup.gnative"), evidence.resources());
+    var roots = NativeRootEvidence.read(evidence.resources(), run, checkpoint + 1);
+    var graph = NativeObserver.decode(evidence.snapshot(), run, checkpoint + 1);
+    if (!roots.cleanup()
+        || !roots.complete()
+        || graph.status() != HeapSnapshot.Status.COMPLETE
+        || graph.jvmtiError() != 0
+        || graph.records().stream()
+            .anyMatch(record -> record.kind() == HeapSnapshot.Kind.ROOT && record.b() == 21))
+      throw new IOException("Native root cleanup certification failed");
   }
 
   private void capture(Thread[] threads, int[] workers, boolean terminal) throws IOException {
@@ -603,6 +702,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
   /** Persists complete traces and VM witnesses, then reports success after the final checkpoint. */
   public void complete() throws IOException {
+    cleanupNativeRoots();
     writeTrace(true);
     control.finish();
     finishCode(true);
@@ -615,6 +715,11 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    * Persists incomplete traces and available VM witnesses, then reports a bounded failure message.
    */
   public void fail(Throwable failure) throws IOException {
+    try {
+      cleanupNativeRoots();
+    } catch (Throwable cleanup) {
+      failure.addSuppressed(cleanup);
+    }
     writeTrace(false);
     control.finish();
     finishCode(false);
@@ -704,6 +809,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     var bridge = control;
     try (socket;
         bridge) {
+      cleanupNativeRoots();
       if (!complete) {
         try {
           writeTrace(false);

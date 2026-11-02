@@ -89,7 +89,8 @@ public sealed interface Instruction {
   /**
    * Requires a declared root and shape and a fresh name. Reads the root once into a strong handle,
    * including null. A non-null target must have exactly the declared shape. Later root writes do
-   * not change the handle.
+   * not change the handle. JNI storage acquires a local reference and checks the nominal shape
+   * before binding; failed acquisition preserves the slot and existing bindings.
    */
   record ReadRoot(int id, String name, String shape, String root, MemoryMode mode)
       implements Operation {
@@ -100,7 +101,10 @@ public sealed interface Instruction {
 
   /**
    * Requires an existing root and reference operand. Replaces its target with the operand's current
-   * target, of any shape or null. Clearing preserves the root slot.
+   * target, of any shape or null. Clearing preserves the root slot. Source-qualified JNI storage
+   * acquires a replacement global before deleting the previous one; failed acquisition preserves
+   * the slot. Scope exit and release affect Java bindings only. Native storage requires strong
+   * sequential controlled programs with plain accesses.
    */
   record WriteRoot(int id, String root, Operand value, MemoryMode mode) implements Operation {
     public WriteRoot(int id, String root, Operand value) {

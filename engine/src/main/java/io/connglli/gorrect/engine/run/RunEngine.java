@@ -16,8 +16,10 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.observe.ObservationCapabilities;
+import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.engine.oracle.ConcurrentHistory;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
@@ -252,6 +254,8 @@ public final class RunEngine {
 
       var combination = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
       combination.addAll(VmDriver.unsupported(profile));
+      if (NativeRootProgram.selected(program))
+        combination.addAll(NativeRoots.configuration(profile));
       if (ReferenceProgram.usesQueues(program))
         combination.addAll(
             QueueResources.configuration(profile, ReferenceProgram.usesAutomaticQueues(program)));
@@ -305,6 +309,12 @@ public final class RunEngine {
         if (previous.has("provenance")) manifest.add("provenance", previous.get("provenance"));
         manifest.addProperty("replayOf", saved.toString());
       }
+
+      var layout =
+          JsonFiles.GSON.fromJson(
+              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      NativeRoots.source(program, layout);
+      NativeRoots.selection(directory, layout);
 
       var installations =
           Artifacts.installations(profile, ReferenceProgram.usesAutomaticQueues(program));
@@ -366,6 +376,11 @@ public final class RunEngine {
         .write(directory.resolve("generated/observer.properties"));
     if (emission.layout().queuePlan() != null)
       emission.layout().queuePlan().write(directory.resolve("generated/queues.properties"));
+    if (emission.layout().nativeRootPlan() != null)
+      emission
+          .layout()
+          .nativeRootPlan()
+          .write(directory.resolve("generated/native-roots.properties"));
 
     // Exact obligations still select one path; recorder capacity also covers the other arm.
     var storage =
@@ -432,7 +447,8 @@ public final class RunEngine {
     JsonFiles.write(directory.resolve("manifest.json"), manifest);
     JsonFiles.write(directory.resolve("execution.json"), execution);
     if (execution.execution() == RunReport.Outcome.COMPLETED
-        || execution.execution() == RunReport.Outcome.RUNTIME_ERROR) return verify(directory);
+        || execution.execution() == RunReport.Outcome.RUNTIME_ERROR
+        || NativeRoots.selected(directory)) return verify(directory);
     JsonFiles.write(directory.resolve("result.json"), execution);
     return execution;
   }

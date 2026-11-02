@@ -12,6 +12,7 @@ import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.HeapSnapshot;
+import io.connglli.gorrect.protocol.NativeRootEvidence;
 import java.lang.reflect.Modifier;
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -20,6 +21,7 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.Set;
+import java.util.stream.Collectors;
 
 /** Projects raw evidence without reconstructing values from the oracle. */
 public final class SnapshotProjector {
@@ -35,15 +37,24 @@ public final class SnapshotProjector {
    * Capture projection and its coverage diagnostics. Graph is present only for complete requested
    * coverage; covered retains independently usable named roots and mapped locals. Neither an empty
    * optional nor a missing local is an observed null. Non-null required bindings need physical
-   * origins; named-root capture alone supplies no stack coverage.
+   * origins; named-root capture alone supplies no stack coverage. Native-root coverage certifies
+   * complete actual slot and raw-global evidence independently of any local-binding gap.
    */
-  public record Projection(Optional<Graph> graph, List<String> problems, Optional<Graph> covered) {
+  public record Projection(
+      Optional<Graph> graph,
+      List<String> problems,
+      Optional<Graph> covered,
+      boolean nativeRootsCovered) {
     public Projection {
       problems = List.copyOf(problems);
     }
 
+    public Projection(Optional<Graph> graph, List<String> problems, Optional<Graph> covered) {
+      this(graph, problems, covered, false);
+    }
+
     public Projection(Optional<Graph> graph, List<String> problems) {
-      this(graph, problems, graph);
+      this(graph, problems, graph, false);
     }
 
     /**
@@ -63,13 +74,23 @@ public final class SnapshotProjector {
       for (var entry : expected.handles().entrySet())
         if (observed.handles().containsKey(entry.getKey()))
           handles.put(entry.getKey(), entry.getValue());
-      var partial = new Graph(expected.objects(), expected.roots(), handles, expected.wrappers());
+      var roots = new HashMap<String, Value.Reference>();
+      for (var entry : expected.roots().entrySet())
+        if (observed.roots().containsKey(entry.getKey()))
+          roots.put(entry.getKey(), entry.getValue());
+      var partial = new Graph(expected.objects(), roots, handles, expected.wrappers());
       var observedHandles = new HashMap<Integer, Value.Reference>();
       for (int id : handles.keySet()) observedHandles.put(id, observed.handles().get(id));
       var result =
           ExactVerifier.verify(
               partial,
-              new Graph(observed.objects(), observed.roots(), observedHandles, observed.wrappers()),
+              new Graph(
+                  observed.objects(),
+                  observed.roots().entrySet().stream()
+                      .filter(entry -> roots.containsKey(entry.getKey()))
+                      .collect(Collectors.toMap(Map.Entry::getKey, Map.Entry::getValue)),
+                  observedHandles,
+                  observed.wrappers()),
               true);
       var diagnostics = new ArrayList<>(problems);
       diagnostics.addAll(result.differences());
@@ -139,7 +160,35 @@ public final class SnapshotProjector {
       ObservationLayout layout,
       List<BindingEvidence> participants,
       RetainedBindings retained) {
-    var decoder = new Decoder(snapshot, layout, retained);
+    return projectNative(snapshot, layout, participants, retained, null);
+  }
+
+  /** Adds only independently observed JNI slots paired with this same walk. */
+  public static Projection projectNative(
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      List<BindingEvidence> participants,
+      RetainedBindings retained,
+      NativeRootEvidence evidence) {
+    return projectNative(snapshot, layout, participants, retained, evidence, false);
+  }
+
+  /** Validates the separate post-delete walk against the actual empty, closed slot table. */
+  public static Projection projectNativeCleanup(
+      HeapSnapshot snapshot, ObservationLayout layout, NativeRootEvidence evidence) {
+    if (layout.nativeRootPlan() == null)
+      return new Projection(Optional.empty(), List.of("Native cleanup lacks source selection"));
+    return projectNative(snapshot, layout, List.of(), null, evidence, true);
+  }
+
+  private static Projection projectNative(
+      HeapSnapshot snapshot,
+      ObservationLayout layout,
+      List<BindingEvidence> participants,
+      RetainedBindings retained,
+      NativeRootEvidence evidence,
+      boolean cleanup) {
+    var decoder = new Decoder(snapshot, layout, retained, evidence, cleanup);
     Graph graph;
     try {
       participantContexts(snapshot, participants, retained);
@@ -148,7 +197,7 @@ public final class SnapshotProjector {
       return new Projection(Optional.empty(), List.of(failure.getMessage()));
     }
     var handles = new HashMap<Integer, Value.Reference>();
-    var problems = new ArrayList<String>();
+    var problems = new ArrayList<String>(decoder.nativeProblems);
     for (var participant : participants) {
       try {
         for (var entry : decoder.bindings(participant, null, problems).entrySet())
@@ -163,7 +212,8 @@ public final class SnapshotProjector {
     return new Projection(
         problems.isEmpty() ? Optional.of(covered) : Optional.empty(),
         problems,
-        Optional.of(covered));
+        Optional.of(covered),
+        layout.nativeRootPlan() != null && decoder.nativeProblems.isEmpty());
   }
 
   private static void participantContexts(
@@ -237,6 +287,10 @@ public final class SnapshotProjector {
     private final HeapSnapshot snapshot;
     private final ObservationLayout layout;
     private final RetainedBindings retained;
+    private final NativeRootEvidence nativeEvidence;
+    private final boolean nativeCleanup;
+    private final List<String> nativeProblems = new ArrayList<>();
+    private final Map<String, Long> nativeTargets = new HashMap<>();
     private final Map<Integer, HeapSnapshot.ClassInfo> classes = new HashMap<>();
     private final Map<Integer, Resolved> objectTypes = new HashMap<>();
     private final Map<String, Shape> arrays = new HashMap<>();
@@ -257,9 +311,28 @@ public final class SnapshotProjector {
     }
 
     Decoder(HeapSnapshot snapshot, ObservationLayout layout, RetainedBindings retained) {
+      this(snapshot, layout, retained, null);
+    }
+
+    Decoder(
+        HeapSnapshot snapshot,
+        ObservationLayout layout,
+        RetainedBindings retained,
+        NativeRootEvidence nativeEvidence) {
+      this(snapshot, layout, retained, nativeEvidence, false);
+    }
+
+    Decoder(
+        HeapSnapshot snapshot,
+        ObservationLayout layout,
+        RetainedBindings retained,
+        NativeRootEvidence nativeEvidence,
+        boolean nativeCleanup) {
       this.snapshot = snapshot;
       this.layout = layout;
       this.retained = retained;
+      this.nativeEvidence = nativeEvidence;
+      this.nativeCleanup = nativeCleanup;
     }
 
     Graph decode() {
@@ -524,11 +597,51 @@ public final class SnapshotProjector {
         }
       }
 
+      if (layout.nativeRootPlan() == null) {
+        require(nativeEvidence == null, "Unselected native root evidence");
+        require(
+            snapshot.records().stream()
+                .noneMatch(
+                    record -> record.kind() == HeapSnapshot.Kind.ROOT && record.b() == JNI_GLOBAL),
+            "Unexpected JNI global root to a workload object");
+      } else {
+        try {
+          nativeRoots();
+        } catch (IllegalArgumentException failure) {
+          nativeTargets.clear();
+          nativeProblems.add(failure.getMessage());
+        }
+      }
+    }
+
+    private void nativeRoots() {
+      require(nativeEvidence != null, "Missing source-selected native root evidence");
       require(
-          snapshot.records().stream()
-              .noneMatch(
-                  record -> record.kind() == HeapSnapshot.Kind.ROOT && record.b() == JNI_GLOBAL),
-          "Unexpected JNI global root to a workload object");
+          nativeEvidence.run() == snapshot.run()
+              && nativeEvidence.checkpoint() == snapshot.checkpoint()
+              && nativeEvidence.cleanup() == nativeCleanup
+              && nativeEvidence.complete(),
+          "Native root brackets differ or have wrong context");
+      require(
+          nativeEvidence.startsBefore() == snapshot.gcStartsBefore()
+              && nativeEvidence.finishesBefore() == snapshot.gcFinishesBefore()
+              && nativeEvidence.startsAfter() == snapshot.gcStartsAfter()
+              && nativeEvidence.finishesAfter() == snapshot.gcFinishesAfter(),
+          "Native roots belong to another walk");
+      var plan = layout.nativeRootPlan();
+      require(
+          nativeEvidence.before().size() == plan.roots().size(),
+          "Native slot coverage differs from source");
+      var expected = new HashMap<Long, Integer>();
+      for (var slot : nativeEvidence.before()) {
+        nativeTargets.put(plan.roots().get(slot.slot()), slot.tag());
+        if (slot.tag() != 0) expected.merge(slot.tag(), 1, Integer::sum);
+      }
+      var actual = new HashMap<Long, Integer>();
+      for (var record : snapshot.records())
+        if (record.kind() == HeapSnapshot.Kind.ROOT && record.b() == JNI_GLOBAL)
+          actual.merge(record.a(), 1, Integer::sum);
+      require(actual.equals(expected), "Unexpected, excess or missing JNI global root");
     }
 
     private void resolveObjects() {
@@ -725,6 +838,16 @@ public final class SnapshotProjector {
 
       require(roots.size() == layout.roots().fields().size(), "Declared root field is missing");
 
+      for (var entry : nativeTargets.entrySet()) {
+        var id = entry.getValue() == 0 ? null : identities.get(entry.getValue());
+        if (entry.getValue() != 0 && id == null) {
+          nativeProblems.add("Unmapped native root target");
+          continue;
+        }
+        require(
+            roots.putIfAbsent(entry.getKey(), Value.Reference.strong(id)) == null,
+            "Native and Java root names overlap");
+      }
       return new Graph(heap, roots, Map.of(), referenceObjects);
     }
 

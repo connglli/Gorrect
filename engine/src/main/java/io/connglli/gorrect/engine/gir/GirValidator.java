@@ -109,9 +109,12 @@ public final class GirValidator {
     for (var object : program.objects()) {
       object.references().forEach(value -> initialReference(value, ids));
     }
+    if (NativeRootProgram.roots(program).size() > 64) fail("Native root slot limit exceeded");
     for (var root : program.roots()) {
       name(root.name());
       if (!roots.add(root.name())) fail("Duplicate root " + root.name());
+      if (root.storage() == GirProgram.RootStorage.JNI_GLOBAL && root.value().target() != null)
+        fail("Native roots must be initially null");
       initialReference(root.value(), ids);
       if (root.value().kind() != Value.ReferenceKind.STRONG)
         fail("Named roots require strong references");

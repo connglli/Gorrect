@@ -13,6 +13,7 @@ import com.google.gson.Strictness;
 import com.google.gson.stream.JsonReader;
 import com.google.gson.stream.JsonToken;
 import io.connglli.gorrect.engine.model.Shape;
+import io.connglli.gorrect.engine.observe.ObservationLayout;
 import java.io.IOException;
 import java.lang.reflect.Type;
 import java.math.BigDecimal;
@@ -30,6 +31,8 @@ public final class JsonFiles {
           .setPrettyPrinting()
           .serializeNulls()
           .registerTypeAdapter(Shape.class, (JsonSerializer<Shape>) JsonFiles::shape)
+          .registerTypeAdapter(
+              ObservationLayout.class, (JsonSerializer<ObservationLayout>) JsonFiles::layout)
           .create();
 
   /** Omit implicit long kinds so array length does not inflate retained layout metadata. */
@@ -41,6 +44,25 @@ public final class JsonFiles {
     object.addProperty("data", shape.data());
     if (shape.dataKinds().contains(Shape.DataKind.INT))
       object.add("dataKinds", context.serialize(shape.dataKinds()));
+    return object;
+  }
+
+  /**
+   * Native selection is absent in legacy layouts; preserve their existing bytes and null fields.
+   */
+  private static JsonElement layout(
+      ObservationLayout layout, Type type, JsonSerializationContext context) {
+    var object = new JsonObject();
+    object.add("objects", context.serialize(layout.objects()));
+    object.add("arrays", context.serialize(layout.arrays()));
+    object.add("roots", context.serialize(layout.roots()));
+    object.add("references", context.serialize(layout.references()));
+    object.add("bindings", context.serialize(layout.bindings()));
+    object.addProperty("bindingSelection", layout.bindingSelection());
+    object.addProperty("bindingMetadata", layout.bindingMetadata());
+    object.add("queuePlan", context.serialize(layout.queuePlan()));
+    if (layout.nativeRootPlan() != null)
+      object.add("nativeRootPlan", context.serialize(layout.nativeRootPlan()));
     return object;
   }
 

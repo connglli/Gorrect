@@ -88,10 +88,12 @@ public final class GirParser {
         }
         case "root" -> {
           String name = name();
+          var storage = GirProgram.RootStorage.JAVA_STATIC;
+          if (take("jni-global")) storage = GirProgram.RootStorage.JNI_GLOBAL;
           expect("=");
           var value = reference();
           expect(";");
-          roots.add(new GirProgram.Root(name, value));
+          roots.add(new GirProgram.Root(name, value, storage));
         }
         default -> throw error("Expected a declaration or program");
       }

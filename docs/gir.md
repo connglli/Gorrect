@@ -42,6 +42,7 @@ Objects have stable logical identities, declared shapes and indexed reference/da
 | `shape W weak;` / `shape S soft;` | Nominal wrapper type without indexed payload slots. |
 | `object 1 N [2, null] [7];` | Initial object ID 1: first reference targets ID 2, second is null, data is 7. |
 | `root main = 1;` / `root saved = null;` | Named strong root slots with the stated initial targets. |
+| `root saved jni-global = null;` | JNI global storage; initially null; [plain programs](../engine/src/main/java/io/connglli/gorrect/engine/gir/NativeRootProgram.java) only. |
 | `queue ready W;` | Named reference queue admitting only wrapper type `W`. |
 
 Initial references are IDs, `null`, wrapped `soft(2)`/`weak(2)` or cleared `soft(null)`/`weak(null)`. Lists match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
@@ -104,7 +105,7 @@ Root, strong-reference and data reads/writes are plain unless explicitly volatil
 
 Reference handles stay strong until release or scope exit; acquired handles last through their whole body. Scalars retain nothing. Names cannot shadow bindings or repeat within scopes. Release requires no reclamation. The outer scope ends before final capture. [Profiles](./observation.md#coverage-and-observer-effects) define physical obligations for executed checkpoints.
 
-Array cloning and range copying require strong sequential programs with controlled observation.
+Array cloning, range copying and native roots require strong sequential programs with controlled observation.
 
 ## Reference histories
 

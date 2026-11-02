@@ -77,7 +77,9 @@ final class TargetRunner {
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       RetainedMetadata.selection(directory, profile, layout);
       QueueResources.selection(directory, layout);
+      NativeRoots.selection(directory, layout);
       boolean queues = layout.queuePlan() != null;
+      boolean nativeRoots = layout.nativeRootPlan() != null;
       ControlledLaunch.check(directory, profile, savedEnvironment);
       var resolution = VmProbe.resolve(profile, directory, savedEnvironment, campaignDeadline);
       if (resolution.failure() != null) return resolution.failure();
@@ -129,7 +131,7 @@ final class TargetRunner {
           && first.sequence() == 0
           && first.operation() == 0
           && first.occurrence() == 0)
-        return startupFailure(profile.retainedMetadata(), queues, first.detail());
+        return startupFailure(profile.retainedMetadata(), queues, nativeRoots, first.detail());
       if (first.kind() != ControlMessage.Kind.HELLO || first.sequence() != 0)
         return RunReport.failure(RunReport.Outcome.PROTOCOL_ERROR, "Missing startup handshake");
 
@@ -151,6 +153,13 @@ final class TargetRunner {
           QueueResources.admission(profile, manifest, target, directory);
         } catch (IOException | RuntimeException failure) {
           unmet.add("Named queue startup qualification failed: " + failure);
+        }
+      }
+      if (nativeRoots) {
+        try {
+          NativeRoots.admission(profile, manifest, target, directory);
+        } catch (IOException | RuntimeException failure) {
+          unmet.add("Native root startup qualification failed: " + failure);
         }
       }
       if (profile.retainedMetadata()) {
@@ -277,9 +286,15 @@ final class TargetRunner {
   }
 
   static RunReport startupFailure(boolean retained, boolean queues, String detail) {
+    return startupFailure(retained, queues, false, detail);
+  }
+
+  static RunReport startupFailure(
+      boolean retained, boolean queues, boolean nativeRoots, String detail) {
     boolean unsupported =
         retained && detail.startsWith(ControlMessage.RETAINED_UNSUPPORTED)
-            || queues && detail.startsWith(ControlMessage.QUEUES_UNSUPPORTED);
+            || queues && detail.startsWith(ControlMessage.QUEUES_UNSUPPORTED)
+            || nativeRoots && detail.startsWith(ControlMessage.NATIVE_ROOTS_UNSUPPORTED);
     return RunReport.failure(
         unsupported ? RunReport.Outcome.UNSUPPORTED : RunReport.Outcome.STARTUP_FAILURE, detail);
   }

@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.oracle;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
@@ -38,6 +39,8 @@ public final class HistoryPlan {
   }
 
   public static OracleResult plan(GirProgram program, OracleLimits limits) {
+    var nativeGaps = NativeRootProgram.unsupported(program);
+    if (!nativeGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", nativeGaps));
     var cloneShapes = GirValidator.arrayCloneShapes(program);
     var plan = new HistoryPlan(program, limits, cloneShapes);
     new GraphMachine(program, limits); // Apply the same initial graph/wrapper bounds as execution.

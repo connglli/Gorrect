@@ -236,3 +236,33 @@ def automaticQueueFacts17 = tasks.register('queueAutomaticFacts17', JavaExec) {
     }
 }
 tasks.named('check') { dependsOn automaticQueueFacts17 }
+
+sourceSets {
+    nativeRootsSmoke {
+        compileClasspath += sourceSets.main.output
+        runtimeClasspath += sourceSets.main.output
+    }
+}
+configurations {
+    nativeRootsSmokeImplementation.extendsFrom implementation
+    nativeRootsSmokeRuntimeOnly.extendsFrom runtimeOnly
+}
+[rootProject.targetJavaVersion, rootProject.engineJavaVersion].each { feature ->
+    ['jvmti', 'retained'].each { mode ->
+        def task = tasks.register("nativeRoots${mode.capitalize()}Smoke${feature}", JavaExec) {
+            group = 'verification'
+            dependsOn tasks.named('nativeRootsSmokeClasses'), configurations.nativeObserver
+            classpath = sourceSets.nativeRootsSmoke.runtimeClasspath
+            mainClass = 'Case'
+            javaLauncher = javaToolchains.launcherFor { languageVersion = JavaLanguageVersion.of(feature) }
+            timeout = Duration.ofSeconds(60)
+            doFirst {
+                def library = configurations.nativeObserver.singleFile.absolutePath
+                def option = mode == 'retained' ? '=retained-class' : ''
+                setJvmArgs(["-agentpath:${library}${option}", '-Xint', '-Xcheck:jni', '-Xmx128m', '-XX:+UseSerialGC'])
+                setArgs([library, layout.buildDirectory.dir("native-roots/java${feature}/${mode}").get().asFile.absolutePath, mode])
+            }
+        }
+        tasks.named('check') { dependsOn task }
+    }
+}

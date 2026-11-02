@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.HeapId;
@@ -175,6 +176,8 @@ public final class HistoryOracle {
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
   static void validateProgram(GirProgram program) {
     GirValidator.validate(program);
+    var nativeGaps = NativeRootProgram.unsupported(program);
+    if (!nativeGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", nativeGaps));
     if (MonitorProgram.usesMonitors(program))
       throw new UnsupportedHistoryException("Monitors require the exact sequential backend");
     if (IdentityHashProgram.usesIdentityHash(program))

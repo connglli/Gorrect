@@ -1,4 +1,5 @@
 #include "heap_capture.hpp"
+#include "native_roots.hpp"
 #include "openj9_stack.hpp"
 #include "queue_locks.hpp"
 #include "queue_wire.hpp"
@@ -40,6 +41,7 @@ std::atomic<std::size_t> array_count{0};
 jlong next_object_tag = 1;
 std::atomic<jlong> gc_starts{0}, gc_finishes{0};
 jlong capabilities = 0;
+NativeRoots native_roots;
 struct CompiledCode {
   jmethodID method = nullptr;
   const void *address = nullptr;
@@ -943,5 +945,213 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_openJ9Stack(JNIEnv *env,
       }
     }
     return result;
+  });
+}
+
+namespace {
+void supported_native_operand(JNIEnv *env, jobject value, jclass expected = nullptr,
+                              jstring nominal = nullptr) {
+  if (!value)
+    return;
+  auto actual = env->GetObjectClass(value);
+  if (!actual)
+    throw std::runtime_error("Native root operand class unavailable");
+  jlong class_tag = 0;
+  auto error = jvmti->GetTag(actual, &class_tag);
+  bool same = !expected || env->IsSameObject(actual, expected);
+  env->DeleteLocalRef(actual);
+  native_root_check(error);
+  auto type = type_for(class_tag);
+  if (!same || !type ||
+      (type->kind != ClassKind::object && type->kind != ClassKind::reference_array &&
+       type->kind != ClassKind::data_array))
+    throw std::runtime_error("Unsupported native root operand shape");
+  if (type->kind == ClassKind::reference_array || type->kind == ClassKind::data_array) {
+    jlong tag = 0;
+    native_root_check(jvmti->GetTag(value, &tag));
+    if (!is_array_tag(tag) || static_cast<std::uint64_t>(tag - array_base - 1) >=
+                                  array_count.load(std::memory_order_acquire))
+      throw std::runtime_error("Native root array has no published nominal identity");
+    if (nominal) {
+      auto text = env->GetStringUTFChars(nominal, nullptr);
+      if (!text)
+        throw std::runtime_error("Native root nominal type unavailable");
+      bool matches = arrays[static_cast<std::size_t>(tag - array_base - 1)].shape == text;
+      env->ReleaseStringUTFChars(nominal, text);
+      if (!matches)
+        throw std::runtime_error("Native root array nominal shape differs");
+    }
+  }
+}
+
+struct NativeProbe {
+  jlong tag;
+  jint count = 0;
+  static jint JNICALL reference(jvmtiHeapReferenceKind kind, const jvmtiHeapReferenceInfo *, jlong,
+                                jlong, jlong, jlong *tag, jlong *, jint, void *data) {
+    auto &probe = *static_cast<NativeProbe *>(data);
+    if (kind == JVMTI_HEAP_REFERENCE_JNI_GLOBAL && tag && *tag == probe.tag)
+      ++probe.count;
+    return 0;
+  }
+};
+
+void qualify_native_roots(JNIEnv *env) {
+  LocalFrame locals(env);
+  auto type = env->FindClass("java/lang/Object");
+  if (!type)
+    throw std::runtime_error("Native root qualification class unavailable");
+  auto constructor = env->GetMethodID(type, "<init>", "()V");
+  auto object = constructor ? env->NewObject(type, constructor) : nullptr;
+  if (!object)
+    throw std::bad_alloc();
+  constexpr jlong probe_tag = (1LL << 61) - 1;
+  native_root_check(jvmti->SetTag(object, probe_tag));
+  jobject left = nullptr, right = nullptr;
+  try {
+    left = env->NewGlobalRef(object);
+    if (!left || env->ExceptionCheck())
+      throw std::bad_alloc();
+    right = env->NewGlobalRef(object);
+    if (!right || env->ExceptionCheck())
+      throw std::bad_alloc();
+    env->DeleteLocalRef(object);
+    object = nullptr;
+    for (int expected : {2, 1, 0}) {
+      NativeProbe probe{probe_tag};
+      jvmtiHeapCallbacks callbacks{};
+      callbacks.heap_reference_callback = NativeProbe::reference;
+      native_root_check(jvmti->FollowReferences(0, nullptr, nullptr, &callbacks, &probe));
+      if (probe.count != expected)
+        throw std::runtime_error("Native root callback multiplicity is unsupported");
+      if (expected != 0) {
+        auto current = expected == 2 ? left : right;
+        jlong tag = 0;
+        if (env->GetObjectRefType(current) != JNIGlobalRefType)
+          throw std::runtime_error("Native root reference kind unavailable");
+        native_root_check(jvmti->GetTag(current, &tag));
+        if (tag != probe_tag)
+          throw std::runtime_error("Native root target attribution unavailable");
+        env->DeleteGlobalRef(current);
+        if (expected == 2)
+          left = nullptr;
+        else
+          right = nullptr;
+      }
+    }
+  } catch (...) {
+    if (left)
+      env->DeleteGlobalRef(left);
+    if (right)
+      env->DeleteGlobalRef(right);
+    throw;
+  }
+}
+
+jobjectArray native_bundle_bytes(JNIEnv *env, const Snapshot &graph,
+                                 const std::vector<std::uint8_t> &resources,
+                                 const FrameEvidence *frames) {
+  auto byte_array_type = env->FindClass("[B");
+  if (!byte_array_type)
+    return nullptr;
+  auto result = env->NewObjectArray(frames ? 3 : 2, byte_array_type, nullptr);
+  env->DeleteLocalRef(byte_array_type);
+  if (!result)
+    return nullptr;
+  auto put = [&](jint index, const std::vector<std::uint8_t> &bytes) {
+    auto value = java_bytes(env, bytes);
+    if (!value)
+      throw std::runtime_error("Native root result allocation failed");
+    env->SetObjectArrayElement(result, index, value);
+    env->DeleteLocalRef(value);
+    if (env->ExceptionCheck())
+      throw std::runtime_error("Native root result publication failed");
+  };
+  put(0, encode(graph));
+  put(1, resources);
+  if (frames)
+    put(2, encode(*frames));
+  return result;
+}
+} // namespace
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_configureNativeRoots0(JNIEnv *env, jclass,
+                                                                              jlong run, jint slots,
+                                                                              jlong generations,
+                                                                              jint records) {
+  entry(env, [&]() {
+    std::lock_guard<std::mutex> lock(control_mutex);
+    require_agent();
+    if (classes.empty() || queue_setup_attempted || records <= 0 || records > max_records)
+      throw std::runtime_error(
+          "Native roots require configured graph metadata and bounded records");
+    native_roots.configure(run, slots, generations, records);
+    try {
+      qualify_native_roots(env);
+    } catch (...) {
+      native_roots.close(env, run);
+      throw;
+    }
+  });
+}
+
+extern "C" JNIEXPORT void JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_writeNativeRoot0(JNIEnv *env, jclass,
+                                                                         jlong run, jint slot,
+                                                                         jobject value) {
+  entry(env, [&]() {
+    std::lock_guard<std::mutex> lock(control_mutex);
+    native_roots.borrowed(run, slot);
+    supported_native_operand(env, value);
+    native_roots.write(env, run, slot, value);
+  });
+}
+
+extern "C" JNIEXPORT jobject JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_readNativeRoot0(JNIEnv *env, jclass,
+                                                                        jlong run, jint slot,
+                                                                        jclass type,
+                                                                        jstring nominal) {
+  return entry(env, [&]() -> jobject {
+    std::lock_guard<std::mutex> lock(control_mutex);
+    auto value = native_roots.borrowed(run, slot);
+    if (!type || !nominal)
+      throw std::runtime_error("Missing native root asserted shape");
+    supported_native_operand(env, value, type, nominal);
+    return native_roots.read(env, run, slot);
+  });
+}
+
+extern "C" JNIEXPORT jobjectArray JNICALL
+Java_io_connglli_gorrect_runtime_observe_NativeObserver_captureNativeRoots0(
+    JNIEnv *env, jclass, jlong run, jlong checkpoint, jint records, jint site, jlong visit,
+    jobjectArray threads, jintArray workers, jboolean terminal, jboolean cleanup) {
+  return entry(env, [&]() -> jobjectArray {
+    Snapshot graph;
+    FrameEvidence frames;
+    std::vector<NativeRootRow> before, after;
+    {
+      std::lock_guard<std::mutex> lock(control_mutex);
+      require_agent();
+      if (checkpoint <= 0 || records <= 0 || records > max_records || site < 0 || visit <= 0 ||
+          (cleanup == JNI_TRUE && (threads || workers)) ||
+          ((threads == nullptr) != (workers == nullptr)) ||
+          (cleanup == JNI_FALSE && retained::enabled() != (threads != nullptr)))
+        throw std::runtime_error("Invalid native root capture request");
+      native_roots.require(run);
+      if (records < 2 * static_cast<jint>(native_roots.count()))
+        throw std::runtime_error("Native root bracket record capacity exhausted");
+      if (cleanup == JNI_TRUE)
+        native_roots.close(env, run);
+      before = native_roots.rows(env, jvmti, run, next_object_tag, records, cleanup == JNI_TRUE);
+      if (threads)
+        frames = retained::before(env, run, checkpoint, threads, workers, terminal == JNI_TRUE);
+      graph = capture_snapshot(env, run, checkpoint, records, threads ? &frames : nullptr, threads);
+      after = native_roots.rows(env, jvmti, run, next_object_tag, records, cleanup == JNI_TRUE);
+    }
+    auto resources = encode_native_roots(graph, site, visit, cleanup == JNI_TRUE,
+                                         native_roots.limit(), before, after);
+    return native_bundle_bytes(env, graph, resources, threads ? &frames : nullptr);
   });
 }

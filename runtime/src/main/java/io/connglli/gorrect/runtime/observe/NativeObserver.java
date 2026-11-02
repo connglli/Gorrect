@@ -9,9 +9,10 @@ import java.util.Objects;
 
 /**
  * Target-side entry point, requiring the library as a startup JVMTI agent and a loaded JNI library.
- * Native state holds copied metadata and weak tags, never workload JNI globals. Registration and
- * capture are serialized. GIR graph capture uses quiescent named-root boundaries; counter and frame
- * queries may also run in workers.
+ * Observer metadata holds copied primitive facts and weak tags. Source-selected native slots alone
+ * own deliberate workload JNI globals; registration, slot access and capture are serialized. GIR
+ * graph capture uses quiescent named-root boundaries; counter and frame queries may also run in
+ * workers.
  */
 public final class NativeObserver {
   public record Registration(Class<?> type, HeapSnapshot.ClassKind kind) {
@@ -131,6 +132,49 @@ public final class NativeObserver {
     return capture0(run, checkpoint, records);
   }
 
+  /** Configures one bounded run and qualifies actual alias-global callback multiplicity. */
+  public static void configureNativeRoots(long run, int slots, long generations, int records) {
+    configureNativeRoots0(run, slots, generations, records);
+  }
+
+  /** Stores only a deliberate JNI global; failure preserves the previous slot. */
+  public static void writeNativeRoot(long run, int slot, Object value) {
+    writeNativeRoot0(run, slot, value);
+  }
+
+  /** Acquires an independent Java handle after checking the asserted nominal shape. */
+  public static Object readNativeRoot(long run, int slot, Class<?> type, String shape) {
+    return readNativeRoot0(run, slot, Objects.requireNonNull(type), Objects.requireNonNull(shape));
+  }
+
+  /** Paired raw graph, native table and optional retained caller-frame evidence. */
+  public record NativeRootCapture(byte[] snapshot, byte[] resources, byte[] frames) {
+    public NativeRootCapture {
+      Objects.requireNonNull(snapshot);
+      Objects.requireNonNull(resources);
+    }
+  }
+
+  /** Cleanup deletes all slots before its separate walk and closes this run against reuse. */
+  public static NativeRootCapture captureNativeRoots(
+      long run,
+      long checkpoint,
+      int records,
+      int site,
+      long visit,
+      Thread[] threads,
+      int[] workers,
+      boolean terminal,
+      boolean cleanup) {
+    byte[][] data =
+        captureNativeRoots0(
+            run, checkpoint, records, site, visit, threads, workers, terminal, cleanup);
+    if (data == null || data.length != (threads == null ? 2 : 3))
+      throw new IllegalStateException("Incomplete native root capture result");
+    return new NativeRootCapture(
+        data[0], data[1], threads == null ? null : Objects.requireNonNull(data[2]));
+  }
+
   /** Whether this startup agent selected retained metadata; this is not a readiness certificate. */
   public static boolean retainedMode() {
     return retainedMode0();
@@ -226,6 +270,24 @@ public final class NativeObserver {
       Object array, String shape, int worker, int site, long occurrence);
 
   private static native long arrayIdentity0(Object array, int component);
+
+  private static native void configureNativeRoots0(
+      long run, int slots, long generations, int records);
+
+  private static native void writeNativeRoot0(long run, int slot, Object value);
+
+  private static native Object readNativeRoot0(long run, int slot, Class<?> type, String shape);
+
+  private static native byte[][] captureNativeRoots0(
+      long run,
+      long checkpoint,
+      int records,
+      int site,
+      long visit,
+      Thread[] threads,
+      int[] workers,
+      boolean terminal,
+      boolean cleanup);
 
   private static native byte[] capture0(long run, long checkpoint, int records);
 

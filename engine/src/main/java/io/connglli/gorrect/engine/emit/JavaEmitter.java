@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.Location;
 import io.connglli.gorrect.engine.gir.MemoryMode;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Shape;
@@ -17,6 +18,7 @@ import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.ObservationProfile;
 import io.connglli.gorrect.protocol.ExecutionEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
+import io.connglli.gorrect.protocol.NativeRootPlan;
 import io.connglli.gorrect.protocol.QueuePlan;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -44,6 +46,8 @@ public final class JavaEmitter {
   private final Map<String, Shape> shapes = new HashMap<>();
   private final Map<String, String> types = new HashMap<>();
   private final Map<String, String> roots = new LinkedHashMap<>();
+  private final Map<String, Integer> nativeRoots = new LinkedHashMap<>();
+  private final NativeRootPlan nativeRootPlan;
   private final Map<String, Shape> referenceShapes = new HashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
   private final List<Instruction.Worker> workers = new ArrayList<>();
@@ -60,6 +64,9 @@ public final class JavaEmitter {
     this.program = program;
     this.observation = observation;
     this.bindingMetadata = bindingMetadata;
+    var nativeNames = NativeRootProgram.roots(program);
+    nativeRootPlan = nativeNames.isEmpty() ? null : new NativeRootPlan(nativeNames);
+    nativeNames.forEach(name -> nativeRoots.put(name, nativeRoots.size()));
     references = ReferenceProgram.usesReferences(program);
     typedReferences = ReferenceProgram.usesFirstClass(program);
     concurrent = HistoryProgram.usesConcurrentHistory(program);
@@ -218,6 +225,7 @@ public final class JavaEmitter {
     registrations.add("new NativeObserver.Registration(Roots.class, HeapSnapshot.ClassKind.ROOTS)");
     line("public static final class Roots {");
     for (var root : program.roots()) {
+      if (nativeRoots.containsKey(root.name())) continue;
       String field = "r" + roots.size();
       roots.put(root.name(), field);
       // Ordering belongs to each access; volatile storage would strengthen direct plain accesses.
@@ -227,20 +235,31 @@ public final class JavaEmitter {
     allocationCounters();
     line("public static void main(String[] args) throws Exception {");
     line(
-        "try (TargetSession session = TargetSession.open(args, Case.class"
-            + (queuePlan == null
-                ? ""
-                : ", java.util.List.of("
-                    + String.join(",", registrations)
-                    + "), QueueRoots.class, Queue.class")
+        "try (TargetSession session = TargetSession."
+            + (nativeRootPlan == null ? "open" : "openNative")
+            + "(args, Case.class"
+            + (nativeRootPlan != null
+                ? ", java.util.List.of(" + String.join(",", registrations) + ")"
+                : queuePlan == null
+                    ? ""
+                    : ", java.util.List.of("
+                        + String.join(",", registrations)
+                        + "), QueueRoots.class, Queue.class")
             + ")) {");
     line("try {");
-    if (queuePlan == null)
+    if (queuePlan == null && nativeRootPlan == null)
       line("NativeObserver.configure(java.util.List.of(" + String.join(",", registrations) + "));");
     line("initialize(); execute(session); session.checkpoint(0); session.complete();");
-    line(
-        "} catch (Throwable failure) { failure.printStackTrace(); session.fail(failure); throw"
-            + " failure; }");
+    if (nativeRootPlan == null) {
+      line(
+          "} catch (Throwable failure) { failure.printStackTrace(); session.fail(failure); throw"
+              + " failure; }");
+    } else {
+      line(
+          "} catch (Throwable failure) { try { session.fail(failure); }"
+              + " catch (Throwable reporting) { failure.addSuppressed(reporting); }"
+              + " failure.printStackTrace(); throw failure; }");
+    }
     line("}");
     line("}");
     initialize();
@@ -276,7 +295,8 @@ public final class JavaEmitter {
                 ? ObservationLayout.REQUIRED
                 : ObservationLayout.LEXICAL_CANDIDATES,
             bindingMetadata,
-            queuePlan));
+            queuePlan,
+            nativeRootPlan));
   }
 
   private QueuePlan.Resource queue(String name) {
@@ -465,7 +485,11 @@ public final class JavaEmitter {
   private String read(Location location, MemoryMode mode) {
     if (mode == MemoryMode.VOLATILE)
       return handle(location) + ".getVolatile(" + coordinateValues(location) + ")";
-    if (location.kind() == Location.Kind.ROOT) return "Roots." + roots.get(location.owner());
+    if (location.kind() == Location.Kind.ROOT) {
+      if (nativeRoots.containsKey(location.owner()))
+        throw new GirException("Native root reads require an asserted nominal shape");
+      return "Roots." + roots.get(location.owner());
+    }
     var owner = binding(location.owner());
     return slot(owner.name(), owner.shape(), location.index(), location.reference());
   }
@@ -483,9 +507,11 @@ public final class JavaEmitter {
     value = narrow(location, value);
     if (mode == MemoryMode.VOLATILE)
       line(handle(location) + ".setVolatile(" + coordinates(location) + value + ");");
-    else if (location.kind() == Location.Kind.ROOT)
-      line("Roots." + roots.get(location.owner()) + " = " + value + ";");
-    else {
+    else if (location.kind() == Location.Kind.ROOT) {
+      if (nativeRoots.containsKey(location.owner()))
+        line("session.writeNativeRoot(" + nativeRoots.get(location.owner()) + ", " + value + ");");
+      else line("Roots." + roots.get(location.owner()) + " = " + value + ";");
+    } else {
       var owner = binding(location.owner());
       line(
           slot(owner.name(), owner.shape(), location.index(), location.reference())
@@ -567,7 +593,8 @@ public final class JavaEmitter {
                 + "L;");
     }
     for (var root : program.roots())
-      line("Roots." + roots.get(root.name()) + " = " + initial(root.value(), objects) + ";");
+      if (!nativeRoots.containsKey(root.name()))
+        line("Roots." + roots.get(root.name()) + " = " + initial(root.value(), objects) + ";");
     // No registry survives construction; the graph's named roots establish its lifetime.
     for (var object : program.objects())
       bindArray(objects.get(object.id()), shapes.get(object.shape()), 0, object.id() + "L");
@@ -930,7 +957,15 @@ public final class JavaEmitter {
                 + " = ("
                 + types.get(op.shape())
                 + ") "
-                + read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode())
+                + (nativeRoots.containsKey(op.root())
+                    ? "session.readNativeRoot("
+                        + nativeRoots.get(op.root())
+                        + ", "
+                        + types.get(op.shape())
+                        + ".class, \""
+                        + op.shape()
+                        + "\")"
+                    : read(new Location(Location.Kind.ROOT, op.root(), 0), op.mode()))
                 + ";");
         if (concurrent || typedReferences) {
           reference(op.id(), "STRONG_READ", "0L", null, name);

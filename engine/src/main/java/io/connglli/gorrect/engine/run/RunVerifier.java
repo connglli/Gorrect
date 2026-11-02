@@ -14,6 +14,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.observe.NaturalLiveness;
@@ -38,6 +39,7 @@ import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ControlMessage;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import io.connglli.gorrect.protocol.HeapSnapshot;
+import io.connglli.gorrect.protocol.NativeRootEvidence;
 import io.connglli.gorrect.protocol.QueueHistory;
 import io.connglli.gorrect.protocol.ReferenceHistory;
 import java.io.IOException;
@@ -67,8 +69,8 @@ final class RunVerifier {
       var manifest = manifest(directory);
       var execution = execution(directory, manifest);
       if (execution.execution() != RunReport.Outcome.COMPLETED) {
-        // Failed-execution prefix diagnosis currently covers reference histories only.
-        report = diagnoseReferenceFailure(directory, manifest, execution);
+        report = diagnoseNativeFailure(directory, manifest, execution);
+        if (report == execution) report = diagnoseReferenceFailure(directory, manifest, execution);
         JsonFiles.write(directory.resolve("result.json"), report);
         return report;
       }
@@ -79,8 +81,11 @@ final class RunVerifier {
       var observation = ObservationProfile.parse(profile.observation());
       requireSupported(program, profile, observation);
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
+      boolean nativeRoots = NativeRootProgram.selected(program);
       boolean independentEvidence =
-          IdentityHashProgram.usesIdentityHash(program) || MonitorProgram.usesMonitors(program);
+          IdentityHashProgram.usesIdentityHash(program)
+              || MonitorProgram.usesMonitors(program)
+              || nativeRoots;
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -92,6 +97,9 @@ final class RunVerifier {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       QueueResources.source(program, layout);
+      NativeRoots.source(program, layout);
+      NativeRoots.selection(directory, layout);
+      if (nativeRoots) RetainedMetadata.selection(directory, profile, layout);
       boolean lexicalNatural = !observation.controlled() && layout.lexicalCandidates();
       if (observation.controlled() && layout.lexicalCandidates())
         throw new IOException("Lexical candidate selection requires natural observation");
@@ -177,7 +185,9 @@ final class RunVerifier {
                   cuts.get(
                       new CheckpointPlan.Visit(
                           messages[index].operation(), messages[index].occurrence())),
-                  messages[index].operation() == 0);
+                  messages[index].operation() == 0,
+                  new CheckpointPlan.Visit(
+                      messages[index].operation(), messages[index].occurrence()));
           observations.add(
               new HistoryOracle.Observation(
                   projection.covered(), projection.problems(), projection.graph().isPresent()));
@@ -322,7 +332,12 @@ final class RunVerifier {
             }
         } else
           projection =
-              captures.read(i + 1L, expected.handles().keySet(), null, visit.operation() == 0);
+              captures.read(
+                  i + 1L,
+                  expected.handles().keySet(),
+                  null,
+                  visit.operation() == 0,
+                  new CheckpointPlan.Visit(visit.operation(), visit.occurrence()));
         if (projection.covered().isPresent()) exercised.add("named-roots");
         var result = projection.verify(expected);
         if (result.verdict() == ExactVerifier.Verdict.INCONCLUSIVE) inconclusive = true;
@@ -331,6 +346,7 @@ final class RunVerifier {
           problems.add("Checkpoint " + (i + 1) + ": " + problem);
       }
 
+      if (nativeRoots) captures.cleanup(oracle.checkpoints().size() + 1L);
       captures.merge(exercised, unmet, problems);
 
       inconclusive |= captures.failed();
@@ -365,7 +381,7 @@ final class RunVerifier {
     return report;
   }
 
-  /** Only authenticated, valid monitor source can refine a missing execution report. */
+  /** Only authenticated, valid source can refine a missing execution report. */
   private static RunReport execution(Path directory, JsonObject manifest) throws IOException {
     try {
       var report =
@@ -378,7 +394,7 @@ final class RunVerifier {
       try {
         var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
         var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
-        if (MonitorProgram.usesMonitors(program))
+        if (MonitorProgram.usesMonitors(program) || NativeRootProgram.selected(program))
           requireSupported(program, profile, ObservationProfile.parse(profile.observation()));
       } catch (UnsupportedHistoryException unsupported) {
         throw unsupported;
@@ -394,6 +410,7 @@ final class RunVerifier {
       GirProgram program, TargetProfile profile, ObservationProfile observation) {
     var reasons = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
     reasons.addAll(VmDriver.unsupported(profile));
+    if (NativeRootProgram.selected(program)) reasons.addAll(NativeRoots.configuration(profile));
     if (!reasons.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", reasons));
   }
 
@@ -477,7 +494,9 @@ final class RunVerifier {
     private final ObservationLayout layout;
     private final Set<String> exercised = new HashSet<>();
     private final List<String> unmet = new ArrayList<>(), errors = new ArrayList<>();
+    private final NativeRoots.Tracker nativeTracker = new NativeRoots.Tracker();
     private String launchProblem;
+    private String nativeProblem;
 
     CaptureReader(
         Path directory,
@@ -485,14 +504,30 @@ final class RunVerifier {
         TargetProfile profile,
         ObservationLayout layout,
         JsonObject manifest) {
+      this(directory, run, profile, layout, manifest, true);
+    }
+
+    CaptureReader(
+        Path directory,
+        long run,
+        TargetProfile profile,
+        ObservationLayout layout,
+        JsonObject manifest,
+        boolean completed) {
       this.directory = directory;
       this.run = run;
       this.profile = profile;
       this.layout = layout;
-      if (profile.retainedMetadata() || layout.queuePlan() != null) {
+      if (profile.retainedMetadata()
+          || layout.queuePlan() != null
+          || layout.nativeRootPlan() != null) {
         try {
           var facts = ControlledLaunch.targetFacts(directory);
-          ControlledLaunch.evidence(profile, manifest, facts, layout.queuePlan() != null);
+          ControlledLaunch.evidence(
+              profile,
+              manifest,
+              facts,
+              layout.queuePlan() != null || layout.nativeRootPlan() != null);
           if (layout.queuePlan() != null)
             QueueResources.admission(profile, manifest, facts, directory);
         } catch (IOException | RuntimeException failure) {
@@ -500,22 +535,45 @@ final class RunVerifier {
           errors.add(launchProblem);
         }
       }
+      if (layout.nativeRootPlan() != null && launchProblem == null) {
+        try {
+          NativeRoots.admission(
+              profile, manifest, ControlledLaunch.targetFacts(directory), directory);
+        } catch (IOException | RuntimeException failure) {
+          nativeProblem = "Native root startup evidence failed: " + failure;
+          errors.add(nativeProblem);
+        }
+      }
       try {
         RetainedMetadata.selection(directory, profile, layout);
         QueueResources.selection(directory, layout);
-        if (profile.retainedMetadata()) RetainedMetadata.completion(directory, run);
+        NativeRoots.selection(directory, layout);
+        if (completed && profile.retainedMetadata()) RetainedMetadata.completion(directory, run);
       } catch (IOException | RuntimeException failure) {
         errors.add("Metadata certification failed: " + failure);
       }
     }
 
     SnapshotProjector.Projection read(
-        long sequence, Set<Integer> declarations, CheckpointPlan.Cut cut, boolean terminal) {
+        long sequence,
+        Set<Integer> declarations,
+        CheckpointPlan.Cut cut,
+        boolean terminal,
+        CheckpointPlan.Visit visit) {
       HeapSnapshot capture = null;
       boolean contextTrusted = false;
       try {
         capture = snapshot(directory, run, sequence);
         compilationCoverage(capture, profile, unmet);
+        NativeRootEvidence nativeEvidence = null;
+        if (layout.nativeRootPlan() != null && nativeProblem == null && launchProblem == null) {
+          try {
+            nativeEvidence = NativeRoots.read(directory, capture, layout, visit);
+          } catch (IOException | RuntimeException failure) {
+            nativeEvidence = null;
+            errors.add("Checkpoint " + sequence + " native root evidence failed: " + failure);
+          }
+        }
         var projection =
             projection(
                 directory,
@@ -525,7 +583,39 @@ final class RunVerifier {
                 declarations,
                 exercised,
                 cut,
-                terminal);
+                terminal,
+                nativeEvidence);
+        if (nativeEvidence != null && projection.nativeRootsCovered()) {
+          try {
+            // Rejected raw/global evidence must not constrain later independently qualified cuts.
+            nativeTracker.accept(nativeEvidence);
+          } catch (IOException | RuntimeException failure) {
+            String problem = "Checkpoint " + sequence + " native chronology failed: " + failure;
+            errors.add(problem);
+            projection =
+                projection(
+                    directory,
+                    capture,
+                    layout,
+                    ObservationProfile.parse(profile.observation()),
+                    declarations,
+                    exercised,
+                    cut,
+                    terminal,
+                    null);
+            var problems = new ArrayList<>(projection.problems());
+            problems.add(problem);
+            projection =
+                new SnapshotProjector.Projection(
+                    projection.graph(),
+                    problems,
+                    projection.covered(),
+                    projection.nativeRootsCovered());
+          }
+        }
+        if (layout.nativeRootPlan() != null && projection.graph().isEmpty())
+          errors.add(
+              "Checkpoint " + sequence + " native capture incomplete: " + projection.problems());
         // Local gaps retain covered facts. An empty global projection cannot establish capture
         // context or justify recovering named facts after a later metadata/envelope error.
         contextTrusted = projection.covered().isPresent();
@@ -536,7 +626,7 @@ final class RunVerifier {
         String problem = "Checkpoint " + sequence + " extraction failed: " + failure;
         errors.add(problem);
         var named =
-            !contextTrusted || capture == null
+            layout.nativeRootPlan() != null || !contextTrusted || capture == null
                 ? Optional.<Graph>empty()
                 : SnapshotProjector.project(capture, layout).graph();
         var projection =
@@ -544,6 +634,15 @@ final class RunVerifier {
         return contextTrusted && capture != null
             ? queueProjection(capture, projection)
             : projection;
+      }
+    }
+
+    void cleanup(long lastSequence) {
+      try {
+        var evidence = NativeRoots.cleanup(directory, run, lastSequence, layout);
+        if (evidence != null) nativeTracker.accept(evidence);
+      } catch (IOException | RuntimeException failure) {
+        errors.add("Native root cleanup certification failed: " + failure);
       }
     }
 
@@ -606,6 +705,8 @@ final class RunVerifier {
 
     void merge(Set<String> exercised, List<String> unmet, List<String> problems) {
       exercised.addAll(this.exercised);
+      if (launchProblem == null && nativeProblem == null && nativeTracker.exercised())
+        exercised.add("native-roots");
       for (String gap : this.unmet) if (!unmet.contains(gap)) unmet.add(gap);
       for (String error : errors) if (!problems.contains(error)) problems.add(error);
     }
@@ -621,7 +722,7 @@ final class RunVerifier {
       Set<String> exercised)
       throws IOException {
     return projection(
-        directory, snapshot, layout, profile, expectedBindings, exercised, null, false);
+        directory, snapshot, layout, profile, expectedBindings, exercised, null, false, null);
   }
 
   private static SnapshotProjector.Projection projection(
@@ -632,7 +733,8 @@ final class RunVerifier {
       Set<Integer> expectedBindings,
       Set<String> exercised,
       CheckpointPlan.Cut cut,
-      boolean terminal)
+      boolean terminal,
+      NativeRootEvidence nativeEvidence)
       throws IOException {
     if (cut != null)
       return WorkerCaptureVerifier.project(
@@ -663,12 +765,22 @@ final class RunVerifier {
           Optional.empty(), List.of("Named-root profile does not cover live bindings"));
     if (layout.bindingMetadata().equals("retained-class")) {
       var participants = bindings == null ? List.<BindingEvidence>of() : List.of(bindings);
+      if (layout.nativeRootPlan() != null)
+        return SnapshotProjector.projectNative(
+            snapshot,
+            layout,
+            participants,
+            RetainedMetadata.capture(directory, snapshot, participants, terminal),
+            nativeEvidence);
       return SnapshotProjector.projectRetained(
           snapshot,
           layout,
           participants,
           RetainedMetadata.capture(directory, snapshot, participants, terminal));
     }
+    if (layout.nativeRootPlan() != null)
+      return SnapshotProjector.projectNative(
+          snapshot, layout, bindings == null ? List.of() : List.of(bindings), null, nativeEvidence);
     return SnapshotProjector.project(snapshot, layout, bindings);
   }
 
@@ -698,6 +810,67 @@ final class RunVerifier {
       }
   }
 
+  /** Deterministic native failures retain covered refutations without changing the failure kind. */
+  private static RunReport diagnoseNativeFailure(
+      Path directory, JsonObject manifest, RunReport execution) {
+    try {
+      var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+      if (!NativeRootProgram.selected(program)) return execution;
+      Artifacts.check(directory, manifest);
+      var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
+      requireSupported(program, profile, ObservationProfile.parse(profile.observation()));
+      long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
+      var layout =
+          JsonFiles.GSON.fromJson(
+              JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
+      NativeRoots.source(program, layout);
+      NativeRoots.selection(directory, layout);
+      RetainedMetadata.selection(directory, profile, layout);
+
+      var oracle = Oracle.interpret(program);
+      var coverage = exactControls(directory, run, oracle);
+      var captures = new CaptureReader(directory, run, profile, layout, manifest, false);
+      var problems = new ArrayList<>(execution.problems());
+      if (!coverage.complete()) problems.add(coverage.problem());
+      boolean violated = false;
+      try {
+        var trace = ExecutionTrace.read(directory.resolve("traces/execution.gtrace"), run);
+        // Failure cannot certify a complete execution, even if its retained trace claims one.
+        var prefix = new ExecutionTrace(run, false, trace.events());
+        violated = ExactTraceVerifier.verify(prefix, oracle) == ExactVerifier.Verdict.VIOLATED;
+        if (violated) problems.add("Operation order or scalar-read prefix differs from GIR");
+        var recorded = CheckpointPlan.recorded(program, prefix);
+        var visits = new CheckpointPlan(oracle).visits();
+        for (int index = 0; index < coverage.captures(); index++) {
+          var visit = visits.get(index);
+          boolean terminal = visit.operation() == 0;
+          if (terminal) {
+            if (prefix.events().size() != oracle.events().size()) break;
+          } else if (index >= recorded.size() - 1 || !recorded.get(index).equals(visit)) break;
+          var expected = terminal ? oracle.finalGraph() : oracle.checkpoints().get(index).graph();
+          var projection =
+              captures.read(index + 1L, expected.handles().keySet(), null, terminal, visit);
+          var result = projection.verify(expected);
+          if (result.verdict() == ExactVerifier.Verdict.VIOLATED) violated = true;
+          for (String problem : result.differences())
+            problems.add("Checkpoint " + (index + 1) + ": " + problem);
+        }
+      } catch (IOException | RuntimeException failure) {
+        problems.add("Native failure-prefix extraction failed: " + failure);
+      }
+      captures.cleanup(coverage.captures());
+      captures.merge(new HashSet<>(), new ArrayList<>(), problems);
+      return new RunReport(
+          execution.execution(),
+          violated ? ExactVerifier.Verdict.VIOLATED : execution.verdict(),
+          execution.unmetRequirements(),
+          problems);
+    } catch (IOException | RuntimeException unavailable) {
+      // Failed preparation or unauthenticated source supplies no execution-prefix proof.
+      return execution;
+    }
+  }
+
   private static RunReport diagnoseReferenceFailure(
       Path directory, JsonObject manifest, RunReport execution) {
     if (execution.execution() != RunReport.Outcome.RUNTIME_ERROR
@@ -709,6 +882,7 @@ final class RunVerifier {
       Artifacts.check(directory, manifest);
       long run = JsonFiles.number(JsonFiles.required(manifest, "run"));
       var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
+      if (NativeRootProgram.selected(program)) return execution;
       var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
       if (profile.retainedMetadata() || ReferenceProgram.usesQueues(program)) {
         var facts = ControlledLaunch.targetFacts(directory);

@@ -24,7 +24,7 @@ Driver -> Runner <------ Unix socket --> Runtime control endpoint
 | `engine` | Java 21 | GIR, model/oracle, generation, emission, drivers, execution and CLI |
 | `runtime` | Java 17 | Worker coordination, recording, checkpoints and VM controls |
 | `protocol` | Java 17 | Shared records and codecs |
-| `native` | C++17 | JNI entry points and JVMTI observation |
+| `native` | C++17 | JNI root storage and JVMTI observation |
 
 Gradle builds Java and invokes CMake. Runtime, protocol and generated programs use `--release 17`; the engine supplies the compiler independently of the target. Engine/runtime depend on protocol, and runtime has no oracle dependency. The native library must match the target OS/architecture; external VM clients must match its APIs.
 
@@ -46,9 +46,7 @@ A two-phase rendezvous publishes worker arrivals, then keeps the caller and ever
 
 ## Native observer
 
-JNI drives JVMTI walks under the [capture contract](./observation.md#capture-contract), coordinating queue locks and containing C++ exceptions. Metadata queries and encoding run outside callbacks.
-
-The engine projects records using layouts that identify observation roles without expected graph values. Local metadata comes from VM tables or certified retained class bytes.
+JNI manages global roots and [capture](./observation.md). Native code owns locks and preallocated buffers; JNI boundaries contain C++ exceptions. Metadata queries and encoding stay outside callbacks.
 
 ## JVM integration
 
@@ -60,7 +58,7 @@ HotSpot uses WhiteBox controls and JFR; OpenJ9 uses launch policy, code-load cal
 
 The runner enforces compiler/startup/run deadlines, captures output and terminates surviving processes. Versioned control frames travel over a temporary Unix domain socket; bulk evidence travels as files. Socket cleanup and partial artifact retention apply on failure too.
 
-At each checkpoint the target writes evidence and waits for acknowledgement. The runner verifies run, sequence and executed site/visit identities against the program and trace. Plans reserve storage but supply no observed values. Completion requires a final capture after outer-scope release. The [protocol sources](../protocol/src/main/java/io/connglli/gorrect/protocol/) define framing and bounds.
+At each checkpoint the target writes evidence and waits for acknowledgement. The runner verifies run, sequence and executed site/visit identities against the program and trace. Plans reserve storage but supply no observed values. Completion requires a final capture after outer-scope release and, for declared native slots, certified cleanup. The [protocol sources](../protocol/src/main/java/io/connglli/gorrect/protocol/) define framing and bounds.
 
 ## Artifacts and results
 

@@ -1,6 +1,6 @@
 # Heap observation
 
-The observer projects physical evidence into [GIR](./gir.md). Layouts describe roles, never expected values. [Queue ownership](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueCapture.java) comes from the same walk; automatic capture requires [verified mutation locks](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueConsistency.java).
+The observer projects physical evidence into [GIR](./gir.md). Layouts describe roles, never expected values. [Queues](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueCapture.java) and [native slots](../protocol/src/main/java/io/connglli/gorrect/protocol/NativeRootEvidence.java) require same-walk ownership; automatic queues also need [verified mutation locks](../protocol/src/main/java/io/connglli/gorrect/protocol/QueueConsistency.java).
 
 ## Capture contract
 
@@ -16,7 +16,7 @@ Class IDs describe registered definitions. Same-named classes from distinct load
 
 ## Coverage and observer effects
 
-All profiles capture named static roots at quiescent checkpoints:
+All profiles capture declared roots at quiescent checkpoints:
 
 | Profile | Local obligations | Lifetime fences |
 | --- | --- | --- |

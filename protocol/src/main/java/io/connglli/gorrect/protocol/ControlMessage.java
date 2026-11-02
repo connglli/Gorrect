@@ -10,6 +10,9 @@ public record ControlMessage(
   /** Initial FAILED detail marker for a recognized retained-provider setup/certification gap. */
   public static final String RETAINED_UNSUPPORTED = "retained-unsupported: ";
 
+  /** Native-root qualification/setup rejection before graph initialization. */
+  public static final String NATIVE_ROOTS_UNSUPPORTED = "native-roots-unsupported: ";
+
   /** Known named-queue facility/setup rejection before graph initialization. */
   public static final String QUEUES_UNSUPPORTED = "queues-unsupported: ";
 

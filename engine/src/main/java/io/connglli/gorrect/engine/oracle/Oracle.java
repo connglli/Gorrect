@@ -10,6 +10,7 @@ import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.MemoryMode;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
+import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.protocol.ExecutionTrace;
@@ -39,6 +40,9 @@ public final class Oracle {
   /** Package-local differential baseline; no runtime, profile or CLI switch is exposed. */
   static OracleResult interpret(GirProgram program, OracleLimits limits, boolean retirement) {
     GirValidator.validate(program);
+    var nativeRoots = NativeRootProgram.unsupported(program);
+    if (!nativeRoots.isEmpty())
+      throw new UnsupportedHistoryException(String.join("; ", nativeRoots));
     var unsupported = CloneProgram.unsupported(program);
     if (!unsupported.isEmpty())
       throw new UnsupportedHistoryException(String.join("; ", unsupported));
@@ -67,7 +71,8 @@ public final class Oracle {
    * reference recovery paths have been reviewed. Ineligibility changes no support decision.
    */
   static boolean retirementEligible(GirProgram program) {
-    return program.queues().isEmpty()
+    return !NativeRootProgram.selected(program)
+        && program.queues().isEmpty()
         && program.shapes().stream()
             .allMatch(
                 shape ->

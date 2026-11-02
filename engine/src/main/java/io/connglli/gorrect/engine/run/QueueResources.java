@@ -32,7 +32,7 @@ final class QueueResources {
   }
 
   static boolean controlled(TargetProfile profile, Path directory) {
-    return profile.retainedMetadata() || selected(directory);
+    return ControlledLaunch.selected(profile, directory);
   }
 
   static void selection(Path directory, ObservationLayout layout) throws IOException {

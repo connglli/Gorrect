@@ -65,7 +65,14 @@ public final class GirFormatter {
           "object " + object.id() + " " + object.shape() + " [" + references + "] [" + data + "];");
     }
     for (var root : program.roots()) {
-      line(0, "root " + root.name() + " = " + reference(root.value()) + ";");
+      line(
+          0,
+          "root "
+              + root.name()
+              + (root.storage() == GirProgram.RootStorage.JNI_GLOBAL ? " jni-global" : "")
+              + " = "
+              + reference(root.value())
+              + ";");
     }
     line(0, "");
     line(0, "program {");
