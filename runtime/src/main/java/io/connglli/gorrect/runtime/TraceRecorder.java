@@ -33,9 +33,13 @@ final class TraceRecorder {
     rounds = new long[capacity];
   }
 
-  void record(int operation, int kind, long value, int group, long round, int phase) {
+  void requireCapacity() {
     if (count == operations.length)
       throw new IllegalStateException("Trace capacity exhausted for worker " + worker);
+  }
+
+  void record(int operation, int kind, long value, int group, long round, int phase) {
+    requireCapacity();
     operations[count] = operation;
     kinds[count] = (byte) kind;
     values[count] = value;

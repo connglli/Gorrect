@@ -16,7 +16,7 @@ public final class GirParser {
   private final Map<Integer, String> labels = new HashMap<>();
   private Token current;
   private Token lookahead;
-  private int nextOperation = 1;
+  private long nextOperation = 1;
   private int nextWorker = 1;
 
   private GirParser(String source) {
@@ -52,9 +52,29 @@ public final class GirParser {
     var objects = new ArrayList<GirProgram.InitialObject>();
     var roots = new ArrayList<GirProgram.Root>();
     var queues = new ArrayList<GirProgram.Queue>();
+    var methods = new ArrayList<GirProgram.Method>();
     var requirements = new HashSet<String>();
     while (!current.text().equals("program")) {
       switch (next().text()) {
+        case "method" -> {
+          String method = name();
+          expect("(");
+          var parameters = new ArrayList<GirProgram.Parameter>();
+          if (!take(")")) {
+            do {
+              String type = next().text();
+              String shape =
+                  switch (type) {
+                    case "ref" -> name();
+                    case "long" -> null;
+                    default -> throw error("Expected ref or long parameter");
+                  };
+              parameters.add(new GirProgram.Parameter(0, name(), shape));
+            } while (take(","));
+            expect(")");
+          }
+          methods.add(new GirProgram.Method(method, parameters, block(0)));
+        }
         case "require" -> {
           String requirement = next().text();
           if (!requirements.add(requirement)) throw error("Duplicate requirement " + requirement);
@@ -101,7 +121,19 @@ public final class GirParser {
     expect("program");
     var body = block(0);
     expect("");
-    return new GirProgram(version, shapes, objects, roots, body, labels, requirements, queues);
+    var numbered = new ArrayList<GirProgram.Method>();
+    long declaration = nextOperation;
+    for (var method : methods) {
+      var parameters = new ArrayList<GirProgram.Parameter>();
+      for (var parameter : method.parameters()) {
+        if (declaration > Integer.MAX_VALUE) throw error("Parameter declaration ID limit exceeded");
+        parameters.add(
+            new GirProgram.Parameter((int) declaration++, parameter.name(), parameter.shape()));
+      }
+      numbered.add(new GirProgram.Method(method.name(), parameters, method.body()));
+    }
+    return new GirProgram(
+        version, shapes, objects, roots, body, labels, requirements, queues, numbered);
   }
 
   private List<Instruction> block(int depth) {
@@ -109,7 +141,8 @@ public final class GirParser {
     expect("{");
     var instructions = new ArrayList<Instruction>();
     while (!take("}")) {
-      int id = nextOperation++;
+      if (nextOperation > Integer.MAX_VALUE) throw error("Instruction ID limit exceeded");
+      int id = (int) nextOperation++;
       // Labels may use instruction keywords, so ':' provides the distinction.
       if (lookahead.text().equals(":")) {
         String label = name();
@@ -119,6 +152,19 @@ public final class GirParser {
       String opcode = next().text();
       Instruction instruction =
           switch (opcode) {
+            case "call" -> {
+              String method = name();
+              expect("(");
+              var arguments = new ArrayList<Operand>();
+              if (!take(")")) {
+                do {
+                  arguments.add(operand());
+                } while (take(","));
+                expect(")");
+              }
+              expect(";");
+              yield new Instruction.Call(id, method, arguments);
+            }
             case "allocate" -> new Instruction.Allocate(id, name(), name());
             case "clone" -> new Instruction.Clone(id, name(), name());
             case "copy-array" ->

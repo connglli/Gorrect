@@ -25,9 +25,10 @@ public final class GirValidator {
 
   private final Map<String, Shape> shapes = new HashMap<>();
   private final Set<String> roots = new HashSet<>();
+  private final Map<String, GirProgram.Method> methods = new HashMap<>();
   private final Map<String, Shape> queues = new HashMap<>();
   private final Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
-  private int nextOperation = 1;
+  private long nextOperation = 1;
   private int nextWorker = 1;
   private int workerDepth = -1;
   private int conditionalDepth;
@@ -119,7 +120,23 @@ public final class GirValidator {
       if (root.value().kind() != Value.ReferenceKind.STRONG)
         fail("Named roots require strong references");
     }
+    for (var method : program.methods()) {
+      name(method.name());
+      if (methods.putIfAbsent(method.name(), method) != null)
+        fail("Duplicate method " + method.name());
+      for (var parameter : method.parameters()) {
+        name(parameter.name());
+        if (parameter.shape() != null) shape(parameter.shape());
+      }
+    }
+    for (var method : program.methods()) block(method.body(), 0, method.parameters());
     block(program.body(), 0);
+    long declaration = nextOperation;
+    for (var method : program.methods())
+      for (var parameter : method.parameters())
+        if (declaration > Integer.MAX_VALUE || parameter.declaration() != declaration++)
+          fail("Parameter declaration IDs must follow source instructions");
+    MethodProgram.validateBounds(program, cloneShapes);
     var queueGaps = ReferenceProgram.automaticQueueGaps(program);
     if (!queueGaps.isEmpty()) fail(String.join("; ", queueGaps));
     var labels = new HashSet<String>();
@@ -141,14 +158,30 @@ public final class GirValidator {
   }
 
   private void block(List<Instruction> instructions, int depth) {
-    block(instructions, depth, null, null);
+    block(instructions, depth, null, null, List.of());
+  }
+
+  private void block(
+      List<Instruction> instructions, int depth, List<GirProgram.Parameter> parameters) {
+    block(instructions, depth, null, null, parameters);
   }
 
   private void block(
       List<Instruction> instructions, int depth, String acquired, Shape acquiredShape) {
+    block(instructions, depth, acquired, acquiredShape, List.of());
+  }
+
+  private void block(
+      List<Instruction> instructions,
+      int depth,
+      String acquired,
+      Shape acquiredShape,
+      List<GirProgram.Parameter> parameters) {
     if (depth > MAX_NESTING) fail("GIR nesting limit exceeded");
     scopes.push(new HashMap<>());
     try {
+      for (var parameter : parameters)
+        declare(parameter.name(), parameter.shape() == null ? null : shape(parameter.shape()));
       if (acquired != null) {
         declare(acquired, acquiredShape);
         scopes.peek().put(acquired, new Binding(acquiredShape, true, true));
@@ -159,6 +192,20 @@ public final class GirValidator {
           fail("Internal instruction IDs must follow source order");
         }
         switch (instruction) {
+          case Instruction.Call call -> {
+            var method = methods.get(call.method());
+            if (method == null) fail("Unknown method " + call.method());
+            if (method.parameters().size() != call.arguments().size()) fail("Wrong call arity");
+            for (int index = 0; index < method.parameters().size(); index++) {
+              var parameter = method.parameters().get(index);
+              var argument = call.arguments().get(index);
+              operand(argument, parameter.shape() != null);
+              if (parameter.shape() != null
+                  && argument instanceof Operand.Name named
+                  && !shape(parameter.shape()).equals(binding(named.name()).shape()))
+                fail("Call argument shape mismatch");
+            }
+          }
           case Instruction.IfPresent present -> {
             if (binding(present.name()).shape() == null)
               fail("if-present requires a reference handle");

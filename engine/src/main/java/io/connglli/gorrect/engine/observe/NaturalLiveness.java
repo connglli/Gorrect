@@ -2,6 +2,7 @@ package io.connglli.gorrect.engine.observe;
 
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.Operand;
@@ -42,6 +43,8 @@ public final class NaturalLiveness {
 
   /** Expands bounded literal control flow; definitions separate successive loop activations. */
   public static NaturalLiveness analyze(GirProgram program) {
+    if (MethodProgram.selected(program))
+      throw new UnsupportedHistoryException("Methods require controlled observation");
     if (NativeRootProgram.selected(program))
       throw new UnsupportedHistoryException("Native roots require controlled observation");
     if (MonitorProgram.usesMonitors(program))
@@ -56,6 +59,8 @@ public final class NaturalLiveness {
    * correspondence before using these requirements to omit local comparisons.
    */
   public static NaturalLiveness analyze(GirProgram program, OracleResult oracle) {
+    if (MethodProgram.selected(program))
+      throw new UnsupportedHistoryException("Methods require controlled observation");
     if (NativeRootProgram.selected(program))
       throw new UnsupportedHistoryException("Native roots require controlled observation");
     if (MonitorProgram.usesMonitors(program))

@@ -70,6 +70,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
   private boolean complete;
   private final BindingRecorder bindings;
   private final int bindingCapacity;
+  private int callDepth;
 
   private TargetSession(String[] args, Class<?> intended) throws IOException {
     this(args, intended, null, null, null);
@@ -301,6 +302,21 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
     if (queueRecorder == null) throw new IllegalStateException("Queue evidence was not selected");
     queueRecorder.record(
         recorders.get(0).size(), operation, kind, queue, result, creator, site, occurrence, slot);
+  }
+
+  /** Checks entry capacity before recording or changing the primitive logical call depth. */
+  public void callEnter(int operation) {
+    if (!retained || operation <= 0 || callDepth >= 128)
+      throw new IllegalStateException("Invalid retained helper entry");
+    recorders.get(0).requireCapacity();
+    record(operation, ExecutionTrace.Kind.CALL_ENTER.ordinal(), 0L);
+    callDepth++;
+  }
+
+  /** Budget-independent cleanup; generated code records normal exit only after this returns. */
+  public void callLeave() {
+    if (callDepth <= 0) throw new IllegalStateException("No active helper");
+    callDepth--;
   }
 
   /**
@@ -599,6 +615,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    * Operation zero denotes the final capture; other operations retain a per-site visit number.
    */
   public void checkpoint(int operation) throws IOException {
+    if (callDepth != 0) throw new IllegalStateException("Capture inside a helper");
     long occurrence = visits.merge(operation, 1L, Long::sum);
     checkpoint++;
 
@@ -702,6 +719,7 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
   /** Persists complete traces and VM witnesses, then reports success after the final checkpoint. */
   public void complete() throws IOException {
+    if (callDepth != 0) throw new IllegalStateException("Completion inside a helper");
     cleanupNativeRoots();
     writeTrace(true);
     control.finish();

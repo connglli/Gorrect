@@ -6,6 +6,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
@@ -44,6 +45,9 @@ public final class ObservationCapabilities {
   /** Reasons the selected profile cannot faithfully execute/check this combination. */
   public static List<String> unsupported(GirProgram program, ObservationProfile profile) {
     var reasons = new ArrayList<String>(CloneProgram.unsupported(program));
+    reasons.addAll(MethodProgram.unsupported(program));
+    if (MethodProgram.selected(program) && !profile.controlled())
+      reasons.add("Methods require controlled observation");
     reasons.addAll(NativeRootProgram.unsupported(program));
     if (NativeRootProgram.selected(program) && !profile.controlled())
       reasons.add("Native roots require controlled observation");
@@ -165,6 +169,31 @@ public final class ObservationCapabilities {
                   profile.controlled()
                       ? "diagnostic array binding and identity reads when used"
                       : "no diagnostic array binding")));
+    }
+    if (MethodProgram.selected(program)) {
+      var reasons = new ArrayList<>(combination);
+      if (!target.getProperty("observer.bindingMetadata", "jvmti").equals("retained-class"))
+        reasons.add("Methods require retained-class binding metadata");
+      if (!target.getProperty("observer.retained.ready", "false").equals("true"))
+        reasons.add("Loaded-class certification unavailable");
+      result.add(
+          new Capability(
+              "method-calls",
+              profile.profileName(),
+              reasons.isEmpty(),
+              exercised.contains("method-calls"),
+              verified.contains("method-calls")
+                  && exercised.contains("method-calls")
+                  && reasons.isEmpty(),
+              reasons,
+              "Acyclic strong sequential calls; captures after helpers return",
+              "Direct typed static calls with caller, parameter and local lifetimes",
+              "Java frames and primitive call markers; no workload-reference registry",
+              List.of(
+                  "complete exact trace",
+                  "certified helper absence at captures",
+                  "loaded-byte provenance"),
+              List.of("reachability fences", "primitive entry/exit recording")));
     }
     if (nativeRoots) {
       var reasons = new ArrayList<>(combination);

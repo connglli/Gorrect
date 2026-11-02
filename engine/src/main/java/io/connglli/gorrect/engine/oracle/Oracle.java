@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.MemoryMode;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
@@ -40,6 +41,8 @@ public final class Oracle {
   /** Package-local differential baseline; no runtime, profile or CLI switch is exposed. */
   static OracleResult interpret(GirProgram program, OracleLimits limits, boolean retirement) {
     GirValidator.validate(program);
+    var methods = MethodProgram.unsupported(program);
+    if (!methods.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", methods));
     var nativeRoots = NativeRootProgram.unsupported(program);
     if (!nativeRoots.isEmpty())
       throw new UnsupportedHistoryException(String.join("; ", nativeRoots));
@@ -90,6 +93,7 @@ public final class Oracle {
 
   private static boolean retirementEligible(Instruction instruction) {
     return switch (instruction) {
+      case Instruction.Call ignored -> true;
       case Instruction.Allocate ignored -> true;
       case Instruction.Clone ignored -> true;
       case Instruction.CopyArray ignored -> true;
@@ -117,6 +121,15 @@ public final class Oracle {
   static void execute(List<Instruction> instructions, GraphMachine machine) {
     for (var instruction : instructions) {
       switch (instruction) {
+        case Instruction.Call call -> {
+          var method = machine.enterCall(call);
+          try {
+            execute(method.body(), machine);
+          } finally {
+            machine.leaveCall();
+          }
+          machine.marker(call.id(), ExecutionTrace.Kind.CALL_EXIT, 0);
+        }
         case Instruction.IfPresent present -> {
           boolean value = machine.present(present.name());
           machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);

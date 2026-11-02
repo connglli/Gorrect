@@ -14,7 +14,7 @@ A deterministic case can have one expected graph. Reference processing and concu
 
 ## Object graph
 
-Objects have stable logical identities, shapes and data. Shapes describe fields or array elements. Reference slots hold a target or null, with strong, soft or weak strength. Named roots and live thread-local handles keep objects reachable.
+Objects have stable logical identities, shapes and data. Shapes describe fields or array elements. Reference slots hold a target or null, with strong, soft or weak strength. Named roots and live handles in every thread/frame keep objects reachable.
 
 References can share targets, form cycles or point to their owner:
 
@@ -28,7 +28,7 @@ Changing a slot's target preserves the slot and object identities. Releasing roo
 
 ## Graph program language (GIR)
 
-[GIR](./gir.md) expresses allocation, graph/data access, handle lifetimes, conditionals, bounded loops, worker threads, synchronization and checkpoints. The oracle interprets these operations; the Java emitter implements them independently through real Java allocations and accesses.
+[GIR](./gir.md) expresses allocation, graph/data access, handle lifetimes, calls, conditionals, bounded loops, worker threads, synchronization and checkpoints. The oracle interprets these operations; the Java emitter implements them independently through real Java allocations and accesses.
 
 Checkpoints observe the graph under a declared [coverage contract](./observation.md). A collection request is a separate operation and does not determine which references clear or which objects are reclaimed.
 

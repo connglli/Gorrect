@@ -6,10 +6,10 @@ import java.util.List;
 /**
  * Immutable GIR statements and their execution contracts.
  *
- * <p>Fresh names exclude all declarations in active scopes, including released bindings. Reference
- * operands are live handles or {@code null}; scalar operands are live scalars or signed 64-bit
- * literals. Slot access requires a live, non-null owner and an in-range index in its shape's
- * reference or data namespace.
+ * <p>Fresh names exclude all declarations in the current frame's active scopes, including released
+ * bindings. Reference operands are live handles or {@code null}; scalar operands are live scalars
+ * or signed 64-bit literals. Slot access requires a live, non-null owner and an in-range index in
+ * its shape's reference or data namespace.
  *
  * <p>Statements change only the specified state. {@link GirValidator} checks static contracts;
  * execution checks null owners and target shapes. Invalid preconditions raise {@link GirException};
@@ -19,6 +19,18 @@ import java.util.List;
 public sealed interface Instruction {
   /** Internal preorder index, assigned by the frontend. */
   int id();
+
+  /**
+   * Invokes a statically named void helper with copied reference/long arguments. Entry validates
+   * every argument and capacity before opening an isolated frame or recording CALL_ENTER. The
+   * caller's live handles remain roots. Fallthrough cleans the frame before charging CALL_EXIT;
+   * failures keep completed effects and markers, always restore the caller, and emit no exit.
+   */
+  record Call(int id, String method, List<Operand> arguments) implements Instruction {
+    public Call {
+      arguments = List.copyOf(arguments);
+    }
+  }
 
   /**
    * A primitive consumes one step on success. Rejection for an invalid precondition or exhausted

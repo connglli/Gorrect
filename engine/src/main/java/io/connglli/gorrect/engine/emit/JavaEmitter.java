@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.Location;
 import io.connglli.gorrect.engine.gir.MemoryMode;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.Operand;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
@@ -59,9 +60,14 @@ public final class JavaEmitter {
   private final boolean typedReferences;
   private final boolean concurrent;
   private final QueuePlan queuePlan;
+  private final boolean realCalls;
+  private final Map<Integer, Shape> cloneShapes;
+  private GirProgram.Method currentMethod;
 
   private JavaEmitter(GirProgram program, ObservationProfile observation, String bindingMetadata) {
     this.program = program;
+    realCalls = MethodProgram.selected(program);
+    cloneShapes = realCalls ? GirValidator.arrayCloneShapes(program) : Map.of();
     this.observation = observation;
     this.bindingMetadata = bindingMetadata;
     var nativeNames = NativeRootProgram.roots(program);
@@ -101,6 +107,8 @@ public final class JavaEmitter {
     GirValidator.validate(program);
     var unsupported = ObservationCapabilities.unsupported(program, observation);
     if (!unsupported.isEmpty()) throw new GirException(String.join("; ", unsupported));
+    if (MethodProgram.selected(program) && !bindingMetadata.equals("retained-class"))
+      throw new GirException("Methods require retained-class binding metadata");
     return new JavaEmitter(program, observation, bindingMetadata).emit();
   }
 
@@ -266,6 +274,7 @@ public final class JavaEmitter {
     line("private static void execute(TargetSession session) throws Exception {");
     block(program.body());
     line("}");
+    for (var method : program.methods()) helper(method);
     for (var declaration : workers) {
       worker = declaration.id();
       line(
@@ -297,6 +306,59 @@ public final class JavaEmitter {
             bindingMetadata,
             queuePlan,
             nativeRootPlan));
+  }
+
+  private String methodDescriptor(GirProgram.Method method) {
+    return "(Lio/connglli/gorrect/runtime/TargetSession;I"
+        + method.parameters().stream()
+            .map(
+                parameter ->
+                    parameter.shape() == null ? "J" : descriptor(shapes.get(parameter.shape())))
+            .collect(Collectors.joining())
+        + ")V";
+  }
+
+  private String descriptor(Shape shape) {
+    return switch (shape.kind()) {
+      case OBJECT, SOFT_REFERENCE, WEAK_REFERENCE -> "LCase$" + types.get(shape.name()) + ";";
+      case REFERENCE_ARRAY -> "[Ljava/lang/Object;";
+      case DATA_ARRAY -> "[J";
+    };
+  }
+
+  private void helper(GirProgram.Method method) {
+    currentMethod = method;
+    var parameters = new LinkedHashMap<String, Binding>();
+    String arguments =
+        method.parameters().stream()
+            .map(
+                parameter -> {
+                  var shape = parameter.shape() == null ? null : shapes.get(parameter.shape());
+                  var binding =
+                      new Binding("b" + parameter.declaration(), shape, parameter.declaration());
+                  parameters.put(parameter.name(), binding);
+                  describeBinding(binding);
+                  return (shape == null ? "long" : types.get(shape.name())) + " " + binding.name();
+                })
+            .collect(Collectors.joining(", "));
+    line(
+        "private static void "
+            + MethodProgram.javaName(program, method)
+            + "(TargetSession session, int callSite"
+            + (arguments.isEmpty() ? "" : ", " + arguments)
+            + ") throws Exception {");
+    line("boolean entered = false;");
+    line("try {");
+    line("session.callEnter(callSite); entered = true;");
+    controlledBlock(method.body(), parameters);
+    line("} finally {");
+    for (var parameter : parameters.values())
+      if (parameter.shape() != null) release(parameter.name());
+    line("if (entered) session.callLeave();");
+    line("}");
+    line("session.record(callSite, " + ExecutionTrace.Kind.CALL_EXIT.ordinal() + ", 0L);");
+    line("}");
+    currentMethod = null;
   }
 
   private QueuePlan.Resource queue(String name) {
@@ -607,14 +669,62 @@ public final class JavaEmitter {
   }
 
   private void block(List<Instruction> instructions, String acquired, Binding acquiredBinding) {
+    if (realCalls) {
+      if (acquired != null) throw new GirException("Methods exclude acquired references");
+      controlledBlock(instructions, Map.of());
+      return;
+    }
     scopes.push(new LinkedHashMap<>());
     if (acquired != null) scopes.peek().put(acquired, acquiredBinding);
     for (var instruction : instructions) emitInstruction(instruction);
     for (var binding : scopes.pop().values()) if (binding.shape() != null) release(binding.name());
   }
 
+  /** Predeclared nullable locals let every exceptional exit fence all completed bindings. */
+  private void controlledBlock(List<Instruction> instructions, Map<String, Binding> parameters) {
+    scopes.push(new LinkedHashMap<>(parameters));
+    var locals = new LinkedHashMap<String, Shape>();
+    for (var instruction : instructions) {
+      Shape shape =
+          switch (instruction) {
+            case Instruction.Allocate op -> shapes.get(op.shape());
+            case Instruction.Clone op -> cloneShapes.get(op.id());
+            case Instruction.ReadRoot op -> shapes.get(op.shape());
+            case Instruction.ReadReference op -> shapes.get(op.shape());
+            default -> null;
+          };
+      if (shape != null) {
+        String name = "b" + instruction.id();
+        locals.put(name, shape);
+        line(types.get(shape.name()) + " " + name + " = null;");
+      }
+    }
+    line("try {");
+    for (var instruction : instructions) emitInstruction(instruction);
+    line("} finally {");
+    for (var name : locals.keySet()) release(name);
+    line("}");
+    scopes.pop();
+  }
+
+  private String definition(String type, String name) {
+    return realCalls ? name : type + " " + name;
+  }
+
   private void emitInstruction(Instruction instruction) {
     switch (instruction) {
+      case Instruction.Call call -> {
+        var method = MethodProgram.method(program, call.method());
+        String arguments =
+            call.arguments().stream().map(this::operand).collect(Collectors.joining(", "));
+        line(
+            MethodProgram.javaName(program, method)
+                + "(session, "
+                + call.id()
+                + (arguments.isEmpty() ? "" : ", " + arguments)
+                + ");");
+        return;
+      }
       case Instruction.IfPresent op -> {
         var value = binding(op.name());
         line(
@@ -916,7 +1026,7 @@ public final class JavaEmitter {
         var original = binding(op.owner());
         var shape = original.shape();
         String name = declare(op.name(), shape, op.id());
-        line(types.get(shape.name()) + " " + name + " = " + original.name() + ".clone();");
+        line(definition(types.get(shape.name()), name) + " = " + original.name() + ".clone();");
         line("++a" + op.id() + ";");
         bindArray(name, shape, op.id(), "a" + op.id());
       }
@@ -939,9 +1049,7 @@ public final class JavaEmitter {
         // Arrays have no identity constructor; advance the counter independently of layout.
         line("++a" + op.id() + ";");
         line(
-            types.get(op.shape())
-                + " "
-                + name
+            definition(types.get(op.shape()), name)
                 + " = "
                 + allocation(shape, op.id(), "a" + op.id())
                 + ";");
@@ -951,9 +1059,7 @@ public final class JavaEmitter {
       case Instruction.ReadRoot op -> {
         String name = declare(op.name(), shapes.get(op.shape()), op.id());
         line(
-            types.get(op.shape())
-                + " "
-                + name
+            definition(types.get(op.shape()), name)
                 + " = ("
                 + types.get(op.shape())
                 + ") "
@@ -978,9 +1084,7 @@ public final class JavaEmitter {
       case Instruction.ReadReference op -> {
         String name = declare(op.name(), shapes.get(op.shape()), op.id());
         line(
-            types.get(op.shape())
-                + " "
-                + name
+            definition(types.get(op.shape()), name)
                 + " = ("
                 + types.get(op.shape())
                 + ") "
@@ -1301,10 +1405,14 @@ public final class JavaEmitter {
           new ObservationLayout.LocalBinding(
               binding.id(),
               worker,
-              worker == 0 ? "execute" : ExecutionEvidence.workerMethod(worker),
-              "(Lio/connglli/gorrect/runtime/TargetSession;"
-                  + (worker == 0 ? "" : "Lio/connglli/gorrect/runtime/WorkerContext;")
-                  + ")V",
+              currentMethod != null
+                  ? MethodProgram.javaName(program, currentMethod)
+                  : worker == 0 ? "execute" : ExecutionEvidence.workerMethod(worker),
+              currentMethod != null
+                  ? methodDescriptor(currentMethod)
+                  : "(Lio/connglli/gorrect/runtime/TargetSession;"
+                      + (worker == 0 ? "" : "Lio/connglli/gorrect/runtime/WorkerContext;")
+                      + ")V",
               binding.name(),
               type));
     }

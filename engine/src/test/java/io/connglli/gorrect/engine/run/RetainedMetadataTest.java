@@ -208,6 +208,48 @@ class RetainedMetadataTest {
     }
   }
 
+  @Test
+  void rejectsCertifiedHelperFramesInEitherBracketAtOrdinaryAndTerminalCaptures()
+      throws IOException {
+    var code = certificate();
+    long helper =
+        code.methods().stream()
+            .filter(method -> method.name().equals("helper1"))
+            .findFirst()
+            .orElseThrow()
+            .token();
+    var binding = List.of(new BindingEvidence(17, 3, 7, 0, 1, List.of()));
+    for (boolean terminal : List.of(false, true)) {
+      String roleName = terminal ? "main" : "execute";
+      var role = terminal ? FrameEvidence.Role.MAIN : FrameEvidence.Role.EXECUTE;
+      long token =
+          code.methods().stream()
+              .filter(method -> method.name().equals(roleName))
+              .findFirst()
+              .orElseThrow()
+              .token();
+      var ordinary = List.of(new FrameEvidence.Frame(token, 0, 0));
+      var active =
+          List.of(new FrameEvidence.Frame(token, 0, 0), new FrameEvidence.Frame(helper, 1, 0));
+      for (boolean before : List.of(false, true)) {
+        new FrameEvidence(
+                17,
+                3,
+                CodeEvidence.Status.VALID,
+                0,
+                2,
+                2,
+                List.of(
+                    new FrameEvidence.Participant(
+                        0, 7, role, before ? active : ordinary, before ? ordinary : active)))
+            .write(directory.resolve("snapshots/3.gframe"));
+        assertThrows(
+            IOException.class,
+            () -> RetainedMetadata.capture(directory, snapshot(), binding, terminal));
+      }
+    }
+  }
+
   private CodeEvidence certificate() throws IOException {
     Files.createDirectories(directory.resolve("generated/classes"));
     Files.createDirectories(directory.resolve("traces"));
@@ -229,6 +271,7 @@ class RetainedMetadataTest {
         public class Case {
           public static void main(String[] args) { System.out.println(args.length); }
           private static void execute(TargetSession session) { System.out.println(session); }
+          private static void helper1(TargetSession session, int callSite) { System.out.println(callSite); }
           private static void worker1(TargetSession session, WorkerContext worker) { System.out.println(worker); }
         }
         """);

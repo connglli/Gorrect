@@ -13,6 +13,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
@@ -85,7 +86,8 @@ final class RunVerifier {
       boolean independentEvidence =
           IdentityHashProgram.usesIdentityHash(program)
               || MonitorProgram.usesMonitors(program)
-              || nativeRoots;
+              || nativeRoots
+              || MethodProgram.selected(program);
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -156,6 +158,8 @@ final class RunVerifier {
         problems.add("Worker synchronization evidence extraction failed: " + failure);
       }
       var exercised = new HashSet<String>();
+      if (trace.events().stream().anyMatch(event -> event.kind() == ExecutionTrace.Kind.CALL_ENTER))
+        exercised.add("method-calls");
       var observedOperations = new HashSet<Integer>();
       for (var event : trace.events())
         if (event.kind() == ExecutionTrace.Kind.SCALAR_READ)
@@ -282,7 +286,11 @@ final class RunVerifier {
 
       if (violated) problems.add("Operation order or scalar-read trace differs from GIR");
       var verified = new HashSet<String>();
-      if (!violated) verified.addAll(exercised);
+      if (!violated) {
+        verified.addAll(exercised);
+        // Helper absence and terminal provenance are established by the captures below.
+        verified.remove("method-calls");
+      }
 
       if (!lexicalNatural && !independentEvidence)
         controls(directory, run, oracle, program, trace, false);
@@ -394,7 +402,9 @@ final class RunVerifier {
       try {
         var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), directory);
         var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
-        if (MonitorProgram.usesMonitors(program) || NativeRootProgram.selected(program))
+        if (MonitorProgram.usesMonitors(program)
+            || NativeRootProgram.selected(program)
+            || MethodProgram.selected(program))
           requireSupported(program, profile, ObservationProfile.parse(profile.observation()));
       } catch (UnsupportedHistoryException unsupported) {
         throw unsupported;
@@ -410,6 +420,8 @@ final class RunVerifier {
       GirProgram program, TargetProfile profile, ObservationProfile observation) {
     var reasons = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
     reasons.addAll(VmDriver.unsupported(profile));
+    if (MethodProgram.selected(program) && !profile.retainedMetadata())
+      reasons.add("Methods require retained-class binding metadata");
     if (NativeRootProgram.selected(program)) reasons.addAll(NativeRoots.configuration(profile));
     if (!reasons.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", reasons));
   }

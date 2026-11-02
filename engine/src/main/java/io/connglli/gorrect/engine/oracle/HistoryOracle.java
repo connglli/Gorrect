@@ -8,6 +8,7 @@ import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.MonitorProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
@@ -176,6 +177,8 @@ public final class HistoryOracle {
   // Static validity and support selection precede dispatch and any evidence-completeness exit.
   static void validateProgram(GirProgram program) {
     GirValidator.validate(program);
+    if (MethodProgram.selected(program))
+      throw new UnsupportedHistoryException("Methods require the exact sequential backend");
     var nativeGaps = NativeRootProgram.unsupported(program);
     if (!nativeGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", nativeGaps));
     if (MonitorProgram.usesMonitors(program))
@@ -307,6 +310,8 @@ public final class HistoryOracle {
       frontier.expand(machine.graph());
 
       switch (instruction) {
+        case Instruction.Call ignored ->
+            throw new UnsupportedHistoryException("Methods require the exact sequential backend");
         case Instruction.IfPresent present -> {
           boolean value = machine.present(present.name());
           machine.marker(present.id(), ExecutionTrace.Kind.BRANCH, value ? 1 : 0);

@@ -75,6 +75,24 @@ public final class GirFormatter {
               + ";");
     }
     line(0, "");
+    for (var method : program.methods()) {
+      line(
+          0,
+          "method "
+              + method.name()
+              + "("
+              + method.parameters().stream()
+                  .map(
+                      parameter ->
+                          (parameter.shape() == null ? "long" : "ref " + parameter.shape())
+                              + " "
+                              + parameter.name())
+                  .collect(Collectors.joining(", "))
+              + ") {");
+      method.body().forEach(instruction -> instruction(instruction, 1));
+      line(0, "}");
+      line(0, "");
+    }
     line(0, "program {");
     program.body().forEach(instruction -> instruction(instruction, 1));
     line(0, "}");
@@ -84,6 +102,17 @@ public final class GirFormatter {
     String label = labels.get(instruction.id());
     String prefix = label == null ? "" : label + ": ";
     switch (instruction) {
+      case Instruction.Call call ->
+          line(
+              indent,
+              prefix
+                  + "call "
+                  + call.method()
+                  + "("
+                  + call.arguments().stream()
+                      .map(GirFormatter::operand)
+                      .collect(Collectors.joining(", "))
+                  + ");");
       case Instruction.IfPresent present -> {
         line(indent, prefix + "if-present " + present.name() + " {");
         present.body().forEach(child -> instruction(child, indent + 1));

@@ -40,7 +40,9 @@ public record ExecutionTrace(long run, boolean complete, List<Event> events) {
      */
     REFERENCE_READ,
     COMPARE_SET,
-    BRANCH
+    BRANCH,
+    CALL_ENTER,
+    CALL_EXIT
   }
 
   private static final Kind[] KINDS = Kind.values();

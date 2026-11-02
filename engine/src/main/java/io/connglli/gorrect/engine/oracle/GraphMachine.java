@@ -2,6 +2,7 @@ package io.connglli.gorrect.engine.oracle;
 
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirProgram;
+import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
 import io.connglli.gorrect.engine.gir.Location;
 import io.connglli.gorrect.engine.gir.MemoryMode;
@@ -15,6 +16,7 @@ import io.connglli.gorrect.engine.model.ObjectId;
 import io.connglli.gorrect.engine.model.Shape;
 import io.connglli.gorrect.engine.model.Value;
 import io.connglli.gorrect.engine.model.WrapperId;
+import io.connglli.gorrect.protocol.BindingEvidence;
 import io.connglli.gorrect.protocol.ExecutionTrace;
 import java.util.ArrayDeque;
 import java.util.ArrayList;
@@ -41,6 +43,9 @@ final class GraphMachine {
   private final Map<String, Integer> queueIdentities = new HashMap<>();
   private final Map<WrapperId, String> registrations = new HashMap<>();
   private Deque<Map<String, Binding>> scopes = new ArrayDeque<>();
+  private final Map<String, GirProgram.Method> methods;
+  private final Deque<Deque<Map<String, Binding>>> callers = new ArrayDeque<>();
+  private final Deque<String> calls = new ArrayDeque<>();
   private int worker, group, phase;
   private long round;
   private final Map<Integer, Access> accesses = new HashMap<>();
@@ -85,6 +90,9 @@ final class GraphMachine {
     retireAtCheckpoints = source.retireAtCheckpoints;
     // Declarations never change; payload, root, and binding maps belong to each fork.
     shapes = source.shapes;
+    methods = source.methods;
+    if (!source.callers.isEmpty())
+      throw new GirException("Method frames cannot enter history search");
     objects.putAll(source.objects);
     referenceObjects.putAll(source.referenceObjects);
     roots.putAll(source.roots);
@@ -283,6 +291,8 @@ final class GraphMachine {
     this.retireAtCheckpoints = retireAtCheckpoints;
     ordinaryAllocations = program.objects().size();
     shapes = new HashMap<>();
+    methods = new HashMap<>();
+    program.methods().forEach(method -> methods.put(method.name(), method));
     program.shapes().forEach(shape -> shapes.put(shape.name(), shape));
     for (var queue : program.queues()) {
       queueShapes.put(queue.name(), shape(queue.shape()));
@@ -318,6 +328,43 @@ final class GraphMachine {
     }
     program.roots().forEach(root -> roots.put(root.name(), root.value()));
     enterScope();
+  }
+
+  /** Resolves every argument and entry bound before changing bindings, markers or counters. */
+  GirProgram.Method enterCall(Instruction.Call call) {
+    var method = methods.get(call.method());
+    if (call.id() <= 0 || method == null || method.parameters().size() != call.arguments().size())
+      throw new GirException("Invalid call target or arity");
+    if (calls.contains(method.name())) throw new GirException("Recursive method activation");
+    long nesting = scopes.size() + callers.stream().mapToLong(Deque::size).sum();
+    if (nesting > GirValidator.MAX_NESTING)
+      throw new GirException("Method frame nesting limit exceeded");
+    if (method.parameters().size() > BindingEvidence.MAX_BINDINGS)
+      throw new GirException("Method binding capacity exceeded");
+    var arguments = new HashMap<String, Binding>();
+    for (int index = 0; index < method.parameters().size(); index++) {
+      var parameter = method.parameters().get(index);
+      if (arguments.containsKey(parameter.name())) throw new GirException("Duplicate parameter");
+      Value value = operand(call.arguments().get(index), parameter.shape() != null);
+      if (value instanceof Value.Reference reference)
+        requireShape(reference, shape(parameter.shape()));
+      arguments.put(parameter.name(), new Binding(parameter.declaration(), value));
+    }
+    requireStep();
+    callers.push(scopes);
+    calls.push(method.name());
+    scopes = new ArrayDeque<>();
+    scopes.push(arguments);
+    marker(call.id(), ExecutionTrace.Kind.CALL_ENTER, 0);
+    return method;
+  }
+
+  /** Cleanup never charges a step, including when body or exit-marker budgets are exhausted. */
+  void leaveCall() {
+    if (calls.isEmpty()) throw new GirException("No active method frame");
+    scopes.clear();
+    scopes = callers.pop();
+    calls.pop();
   }
 
   /** Validates before charging entry or opening its budget-independent child scope. */
@@ -1022,6 +1069,11 @@ final class GraphMachine {
           handles.put(binding.operation(), reference);
       }
     }
+    for (var caller : callers)
+      for (var scope : caller)
+        for (var binding : scope.values())
+          if (binding.value() instanceof Value.Reference reference)
+            handles.put(binding.operation(), reference);
     return new Graph(objects, roots, handles, referenceObjects, queueGraph());
   }
 

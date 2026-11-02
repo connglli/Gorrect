@@ -3,6 +3,7 @@ package io.connglli.gorrect.engine.oracle;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.model.Graph;
 import io.connglli.gorrect.engine.model.Shape;
@@ -42,6 +43,9 @@ public final class HistoryPlan {
     var nativeGaps = NativeRootProgram.unsupported(program);
     if (!nativeGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", nativeGaps));
     var cloneShapes = GirValidator.arrayCloneShapes(program);
+    var methodGaps = MethodProgram.unsupported(program);
+    if (!methodGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", methodGaps));
+    if (MethodProgram.selected(program)) MethodProgram.steps(program, limits);
     var plan = new HistoryPlan(program, limits, cloneShapes);
     new GraphMachine(program, limits); // Apply the same initial graph/wrapper bounds as execution.
     plan.objects =
@@ -67,6 +71,17 @@ public final class HistoryPlan {
     if (acquired != null) scopes.peek().put(acquired, acquiredDeclaration);
     for (var instruction : body)
       switch (instruction) {
+        case Instruction.Call call -> {
+          event(call.id(), ExecutionTrace.Kind.CALL_ENTER);
+          var caller = scopes;
+          scopes = new ArrayDeque<>();
+          try {
+            block(MethodProgram.method(program, call.method()).body(), null, 0);
+          } finally {
+            scopes = caller;
+          }
+          event(call.id(), ExecutionTrace.Kind.CALL_EXIT);
+        }
         case Instruction.Parallel parallel -> {
           event(parallel.id(), ExecutionTrace.Kind.OPERATION);
           long visit = visits.merge(parallel.id(), 1L, Long::sum);

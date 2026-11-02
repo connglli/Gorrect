@@ -32,15 +32,15 @@ Gradle builds Java and invokes CMake. Runtime, protocol and generated programs u
 
 The frontend parses and validates [GIR](./gir.md). The model uses immutable heap records and explicit binding lifetimes so later writes cannot alter retained expectations. Dynamic checks reject invalid owners, shapes and accesses before their effects.
 
-The exact oracle handles deterministic phases. History checking explores bounded schedules and reference-processing choices, proves race freedom before launch, and repeats that proof offline. Only equivalent complete states may be merged; all live worker/caller contexts and semantic resources remain part of the state.
+The exact oracle handles deterministic phases and isolated calls with suspended caller roots. Bounded history checking proves race freedom before launch and offline matching. Only equivalent complete states merge, including all live contexts and semantic resources.
 
-The emitter generates real node classes, arrays and reusable worker methods. Plain operations use plain storage/accesses; volatile and atomic operations use field or array-element VarHandles. It retains compiled classes and layout metadata, without maintaining a second Java heap model.
+The emitter generates node classes, arrays, static helpers and workers. Plain accesses stay plain; volatile/atomic accesses use VarHandles. Controlled reference cleanup uses Java `finally`. Retained classes/layouts describe execution without a second Java heap model.
 
 [RunEngine](../engine/src/main/java/io/connglli/gorrect/engine/run/RunEngine.java) coordinates compilation, execution and verification through separate components. The seeded generator produces valid cases; reduction remains planned work.
 
 ## Target runtime
 
-Generated Java performs graph mutations. Helpers coordinate workers, VM controls and checkpoints, recording scalar/identity facts in bounded per-worker primitive buffers. Recording does not retain workload objects or serialize ordinary mutations. Capacity plans cover either branch without predicting observed values.
+Generated Java mutates graphs; runtime helpers coordinate workers, VM controls and checkpoints. Bounded primitive buffers record scalar/identity and call-entry/exit facts without retaining workload objects or serializing mutations. Capacity plans expand acyclic calls and both branch arms, never expected values.
 
 A two-phase rendezvous publishes worker arrivals, then keeps the caller and every worker paused through capture and acknowledgement. Failure cancels waiters and joins workers before propagation. Per-worker order matters; cross-worker file order supplies no synchronization.
 

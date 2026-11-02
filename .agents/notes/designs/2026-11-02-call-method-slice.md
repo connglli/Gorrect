@@ -1,12 +1,12 @@
 # First real-call slice
 
-Status: proposal awaiting user design approval, narrowing the deferred calls in the [stage 14 exploration](./2026-10-30-stage14-execution-semantics.md). No implementation or recursion/exception language is accepted. GIR and artifact formats remain version 1.
+Status: accepted by the user and implemented as the bounded void-call slice. [GIR](../../../docs/gir.md), [Instruction.Call](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/Instruction.java) and [MethodProgram](../../../engine/src/main/java/io/connglli/gorrect/engine/gir/MethodProgram.java) own the implemented contracts; the [implementation note](../implementations/2026-11-02-call-methods.md) records review and validation limits. The broader [stage 14 exploration](./2026-10-30-stage14-execution-semantics.md) remains deferred. GIR and artifact formats remain version 1.
 
 ## Useful workload and syntax
 
 A caller keeps an unpublished object while a helper allocates another object, requests GC, mutates a passed alias and publishes its local through that alias. After return, the caller links its private object into a named graph for verification. This exercises caller, parameter and callee-local retention across real Java calls without requiring interior frame capture.
 
-Proposed GIR pseudocode, not accepted syntax:
+Approved workload sketch, omitting the `gir 1;` header:
 
 ```text
 shape N object 1 1;

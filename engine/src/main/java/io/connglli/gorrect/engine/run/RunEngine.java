@@ -16,6 +16,7 @@ import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.gir.NativeRootProgram;
 import io.connglli.gorrect.engine.gir.ReferenceProgram;
 import io.connglli.gorrect.engine.observe.ObservationCapabilities;
@@ -254,6 +255,8 @@ public final class RunEngine {
 
       var combination = new ArrayList<>(ObservationCapabilities.unsupported(program, observation));
       combination.addAll(VmDriver.unsupported(profile));
+      if (MethodProgram.selected(program) && !profile.retainedMetadata())
+        combination.add("Methods require retained-class binding metadata");
       if (NativeRootProgram.selected(program))
         combination.addAll(NativeRoots.configuration(profile));
       if (ReferenceProgram.usesQueues(program))
@@ -272,6 +275,12 @@ public final class RunEngine {
       manifest.addProperty("referenceHistory", references);
       manifest.addProperty("concurrentHistory", concurrent);
       // Conditional plans reserve storage/control visits; their graph values are placeholders.
+      if (MethodProgram.selected(program)) {
+        long quota = MethodProgram.steps(program, OracleLimits.DEFAULT);
+        if (quota > profile.limits().traceEvents())
+          throw new OracleLimitException("Method-expanded target trace capacity exceeded");
+        HistoryPlan.plan(program, OracleLimits.DEFAULT);
+      }
       var oracle =
           (references || concurrent)
               ? HistoryPlan.plan(program, OracleLimits.DEFAULT)

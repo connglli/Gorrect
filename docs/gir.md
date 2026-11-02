@@ -30,7 +30,7 @@ Object 2 changes from 9 to 42; a fresh object stores its original 9. All three o
 
 ## Objects and declarations
 
-A file starts with `gir 1;`, followed by declarations and one `program { ... }` block. `//` introduces a line comment. Names use ASCII letters, digits and underscores, start with a letter/underscore, and cannot be `null`.
+`gir 1;` is followed by declarations, optional void `method` definitions and one `program { ... }` block. `//` introduces a line comment. Names use ASCII letters, digits and underscores, start with a letter/underscore, and cannot be `null`.
 
 Objects have stable logical identities, declared shapes and indexed reference/data slots. Object data fields use `int`/`long`; scalars/data arrays stay signed 64-bit. Int initializers/stores/atomic operands narrow; reads/old results sign-extend. Data creates no edges. Shapes specify fields/array elements; identity metadata, JVM headers and addresses are separate.
 
@@ -44,6 +44,7 @@ Objects have stable logical identities, declared shapes and indexed reference/da
 | `root main = 1;` / `root saved = null;` | Named strong root slots with the stated initial targets. |
 | `root saved jni-global = null;` | JNI global storage; initially null; [plain programs](../engine/src/main/java/io/connglli/gorrect/engine/gir/NativeRootProgram.java) only. |
 | `queue ready W;` | Named reference queue admitting only wrapper type `W`. |
+| `method mutate(ref N node, long value) { ... }` | Typed, nonrecursive void helper; no caller-local lookup. |
 
 Initial references are IDs, `null`, wrapped `soft(2)`/`weak(2)` or cleared `soft(null)`/`weak(null)`. Lists match shape counts; non-null targets must be declared. Forward references, aliases, cycles and self-references are allowed. Declaration names/IDs are unique within their namespaces. Initial IDs are positive signed 64-bit integers; counts are nonnegative signed 32-bit integers.
 
@@ -59,6 +60,7 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 
 | Form | Purpose |
 | --- | --- |
+| `call mutate(node, 7);` | Copy arguments into a private helper frame; retain live caller handles. |
 | `allocate h N;` | Fresh zero-filled instance and strong handle. |
 | `clone copy original;` | Fresh shallow array copy with the source's nominal shape. |
 | `copy-array source sourceIndex destination destinationIndex length;` | Copy a complete shallow range, preserving identities and overlap semantics. |
@@ -103,9 +105,9 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 
 Root, strong-reference and data reads/writes are plain unless explicitly volatile. CAS/exchange have volatile effects; failed CAS has only read effects. CAS never fails spuriously. `if-nonzero` evaluates once: zero selects else, every nonzero value selects then. Branch scopes export no bindings; heap/root writes persist.
 
-Reference handles stay strong until release or scope exit; acquired handles last through their whole body. Scalars retain nothing. Names cannot shadow bindings or repeat within scopes. Release requires no reclamation. The outer scope ends before final capture. [Profiles](./observation.md#coverage-and-observer-effects) define physical obligations for executed checkpoints.
+Handles stay strong until release/scope exit; acquired handles last their whole body. Scalars retain nothing. Parameters and top-level locals share a method's outer scope; caller bindings remain private and live. Names cannot shadow within a frame; release requires the current scope. Cleanup runs on every exit without undoing completed writes. The program scope ends before final capture. [Profiles](./observation.md#coverage-and-observer-effects) define physical obligations.
 
-Array cloning, range copying and native roots require strong sequential programs with controlled observation.
+Array cloning, range copying and native roots require strong sequential controlled programs. Methods require strong plain sequential execution with `retained-class`; workers, reference processing, wrappers/queues, native roots, natural observation and helper checkpoints are unsupported, including unused definitions.
 
 ## Reference histories
 

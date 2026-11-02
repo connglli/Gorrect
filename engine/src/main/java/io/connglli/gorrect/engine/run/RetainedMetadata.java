@@ -1,6 +1,7 @@
 package io.connglli.gorrect.engine.run;
 
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.engine.gir.MethodProgram;
 import io.connglli.gorrect.engine.observe.ObservationLayout;
 import io.connglli.gorrect.engine.observe.RetainedBindings;
 import io.connglli.gorrect.engine.observe.RetainedLocalMetadata;
@@ -144,6 +145,14 @@ final class RetainedMetadata {
       if (expected.size() != 1 || !tables.lengths().containsKey(expected.getFirst().token()))
         throw new IOException("Missing certified role method or local-variable table");
       long token = expected.getFirst().token();
+      var helpers =
+          code.methods().stream()
+              .filter(method -> MethodProgram.helper(method.name(), method.descriptor()))
+              .map(CodeEvidence.Method::token)
+              .collect(Collectors.toSet());
+      if (participant.before().stream().anyMatch(frame -> helpers.contains(frame.method()))
+          || participant.after().stream().anyMatch(frame -> helpers.contains(frame.method())))
+        throw new IOException("Capture still contains a certified helper activation");
       if (terminal) {
         var departed =
             code.methods().stream()

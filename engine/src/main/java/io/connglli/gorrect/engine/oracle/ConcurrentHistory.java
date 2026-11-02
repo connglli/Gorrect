@@ -500,6 +500,9 @@ public final class ConcurrentHistory {
         case Execute execute -> {
           var instruction = execute.instruction();
           switch (instruction) {
+            case Instruction.Call ignored ->
+                throw new UnsupportedHistoryException(
+                    "Methods require the exact sequential backend");
             case Instruction.Acquire acquire -> {
               return acquire(worker, acquire);
             }

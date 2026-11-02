@@ -24,7 +24,7 @@ All profiles capture declared roots at quiescent checkpoints:
 | `roots-diagnostic` | Every live caller/participating-worker reference binding. | Yes |
 | `roots-natural` | Main bindings with future uses before release/scope exit. | No |
 
-Natural analysis follows validated exact branches and bounded loops, distinguishing definitions and actual visits. It excludes reference/contended histories, worker cuts and diagnostically bound arrays. Controlled capture supports those histories and matched worker cuts under [GIR restrictions](./gir.md#parallel-workers).
+Natural analysis follows validated exact branches and bounded loops, distinguishing definitions and actual visits. It excludes helpers, reference/contended histories, worker cuts and diagnostically bound arrays. Controlled capture supports those histories and matched worker cuts under [GIR restrictions](./gir.md#parallel-workers).
 
 A required non-null local needs a unique actual root match by thread, activation, method, depth, slot and bytecode scope. Null requires primitive presence without contradictory roots. Missing origins/debug scopes make local coverage incomplete; they are never guessed from expected targets. Covered graph/scalar contradictions remain usable beside such gaps.
 
@@ -36,7 +36,7 @@ The profile selects `jvmti` (default) or `retained-class`; plan/layout hashes an
 
 Before construction, a nontransforming hook binds the intended class/loader/methods through weak mirrors; the host compares copied bytes with retained `Case.class`. Controlled launch must exclude later transformation. Retained metadata enables no local-access capability and cannot replace missing physical roots.
 
-Stack samples bracket every participant, even empty ones. Caller sites use `execute`, workers their declared methods, and final capture uses `main` after workload frames/bindings end. Matching requires the same thread/method/depth and valid equal BCI before/after; actual roots still supply method/depth/slot. Only missing BCI may use the certified sample. Final code status must confirm the startup epoch. Gaps or inconsistent OpenJ9 origins/depths stay inconclusive while earlier refutations remain visible. [CodeEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CodeEvidence.java) and [FrameEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/FrameEvidence.java) define the certificates.
+Stack samples bracket every participant, including empty ones. Main captures use `execute`, final capture `main`, and workers their declared methods. Both brackets must exclude certified helper tokens; a logical call stack alone proves no absence. Matching requires the same thread/method/depth and equal valid BCI; actual roots supply method/depth/slot. Only missing BCI may use the certified sample. Final code status must confirm the startup epoch. Missing/inconsistent origins stay inconclusive beside earlier refutations. [CodeEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/CodeEvidence.java) and [FrameEvidence](../protocol/src/main/java/io/connglli/gorrect/protocol/FrameEvidence.java) define certificates.
 
 ## Snapshot format
 

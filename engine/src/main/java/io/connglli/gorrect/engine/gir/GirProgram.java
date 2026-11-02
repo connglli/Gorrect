@@ -26,7 +26,8 @@ public record GirProgram(
     List<Instruction> body,
     Map<Integer, String> labels,
     Set<String> requirements,
-    List<Queue> queues) {
+    List<Queue> queues,
+    List<Method> methods) {
   public GirProgram {
     shapes = List.copyOf(shapes);
     objects = List.copyOf(objects);
@@ -35,7 +36,33 @@ public record GirProgram(
     labels = Map.copyOf(labels);
     requirements = Set.copyOf(requirements);
     queues = List.copyOf(queues);
+    methods = List.copyOf(methods);
   }
+
+  /** Source-compatible construction of programs without helper definitions. */
+  public GirProgram(
+      int version,
+      List<Shape> shapes,
+      List<InitialObject> objects,
+      List<Root> roots,
+      List<Instruction> body,
+      Map<Integer, String> labels,
+      Set<String> requirements,
+      List<Queue> queues) {
+    this(version, shapes, objects, roots, body, labels, requirements, queues, List.of());
+  }
+
+  /** A void static definition; parameters and top-level locals share its outer scope. */
+  public record Method(String name, List<Parameter> parameters, List<Instruction> body) {
+    public Method {
+      Objects.requireNonNull(name);
+      parameters = List.copyOf(parameters);
+      body = List.copyOf(body);
+    }
+  }
+
+  /** Null shape denotes long; declaration IDs follow every source instruction ID. */
+  public record Parameter(int declaration, String name, String shape) {}
 
   /** Source-compatible construction of programs without named queues. */
   public GirProgram(
@@ -73,12 +100,15 @@ public record GirProgram(
 
   /**
    * Returns a fresh sequential preorder traversal of the instruction tree, not an execution trace.
-   * Conditional and loop bodies occur once; parallel bodies follow worker declaration order.
-   * Workers themselves are not instructions. Lexical scopes and runtime choices are not modeled.
+   * Definitions occur once before the program; calls never expand this traversal. Conditional and
+   * loop bodies occur once; parallel bodies follow worker declaration order. Workers themselves are
+   * not instructions. Lexical scopes and runtime choices are not modeled.
    */
   public Stream<Instruction> instructions() {
     var pending = new ArrayDeque<Iterator<Instruction>>();
     pending.push(body.iterator());
+    for (int index = methods.size() - 1; index >= 0; index--)
+      pending.push(methods.get(index).body().iterator());
     var traversal =
         new Spliterators.AbstractSpliterator<Instruction>(
             Long.MAX_VALUE, Spliterator.ORDERED | Spliterator.NONNULL) {
@@ -105,6 +135,7 @@ public record GirProgram(
                   for (int index = parallel.workers().size() - 1; index >= 0; index--)
                     pending.push(parallel.workers().get(index).body().iterator());
                 }
+                case Instruction.Call ignored -> {}
                 case Instruction.Operation ignored -> {}
               }
               action.accept(instruction);
