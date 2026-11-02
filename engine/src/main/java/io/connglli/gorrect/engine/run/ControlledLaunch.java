@@ -39,7 +39,8 @@ final class ControlledLaunch {
   static boolean selected(TargetProfile profile, Path directory) {
     return profile.retainedMetadata()
         || QueueResources.selected(directory)
-        || NativeRoots.selected(directory);
+        || NativeRoots.selected(directory)
+        || ObjectClones.selected(directory);
   }
 
   /**
@@ -88,7 +89,10 @@ final class ControlledLaunch {
    */
   static void check(Path directory, TargetProfile profile, Map<String, String> savedEnvironment)
       throws IOException {
-    boolean queues = QueueResources.selected(directory) || NativeRoots.selected(directory);
+    boolean queues =
+        QueueResources.selected(directory)
+            || NativeRoots.selected(directory)
+            || ObjectClones.selected(directory);
     if (!profile.retainedMetadata() && !queues) return;
     var problems = configuration(profile, queues);
     if (!problems.isEmpty()) throw new IllegalArgumentException(String.join("; ", problems));

@@ -83,6 +83,17 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
       Class<?> queueRoots,
       Class<?> queueType)
       throws IOException {
+    this(args, intended, registrations, queueRoots, queueType, null);
+  }
+
+  private TargetSession(
+      String[] args,
+      Class<?> intended,
+      List<NativeObserver.Registration> registrations,
+      Class<?> queueRoots,
+      Class<?> queueType,
+      Boolean objectClones)
+      throws IOException {
     if (args.length != 6) throw new IllegalArgumentException("Invalid target launch arguments");
     run = Long.parseLong(args[1]);
     directory = Path.of(args[2]);
@@ -168,6 +179,8 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
 
       var properties = VmFacts.read();
       properties.putAll(queueFacts);
+      if (objectClones != null)
+        properties.setProperty("observer.objectClones.qualified", objectClones.toString());
       if (nativeRootPlan != null)
         properties.setProperty(
             "observer.nativeRoots.qualified", Boolean.toString(nativeRootsConfigured));
@@ -249,6 +262,12 @@ public final class TargetSession implements AutoCloseable, ObservationRecorder {
    */
   public static TargetSession open(String[] args, Class<?> intended) throws IOException {
     return new TargetSession(args, Objects.requireNonNull(intended));
+  }
+
+  /** Records the generated classes' real shallow-copy qualification before startup admission. */
+  public static TargetSession openObjectClones(String[] args, Class<?> intended, boolean qualified)
+      throws IOException {
+    return new TargetSession(args, Objects.requireNonNull(intended), null, null, null, qualified);
   }
 
   /** Opens a source-selected named-queue case, configuring copied metadata before HELLO/ACK. */

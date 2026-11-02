@@ -116,6 +116,7 @@ class ArrayCloneModelTest {
     machine.apply(new Instruction.ReadRoot(3, "nil", "A", "empty"));
     rejected(machine, new Instruction.Clone(2, "copy", "nil"), GirException.class);
     machine.apply(new Instruction.ReadRoot(4, "ordinary", "N", "node"));
+    machine.apply(new Instruction.Release(5, "ordinary"));
     rejected(machine, new Instruction.Clone(2, "copy", "ordinary"), GirException.class);
     machine.apply(new Instruction.Clone(2, "copy", "original"));
     assertEquals(Value.Reference.strong(new ObjectId(0, 2, 1)), machine.bound("copy"));

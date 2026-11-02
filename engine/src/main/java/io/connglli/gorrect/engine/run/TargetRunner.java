@@ -148,6 +148,13 @@ final class TargetRunner {
             RunReport.Outcome.PROTOCOL_ERROR, "Invalid target capability report: " + exception);
       }
 
+      if (ObjectClones.selected(layout)) {
+        try {
+          ObjectClones.admission(profile, manifest, target);
+        } catch (IOException | RuntimeException failure) {
+          unmet.add("Object clone startup qualification failed: " + failure);
+        }
+      }
       if (queues) {
         try {
           QueueResources.admission(profile, manifest, target, directory);

@@ -224,7 +224,7 @@ public final class ConcurrentHistory {
     HistoryOracle.validateProgram(program);
     if (CloneProgram.usesClones(program))
       throw new UnsupportedHistoryException(
-          "Array cloning is unsupported by the concurrent history backend");
+          "Cloning is unsupported by the concurrent history backend");
     if (ArrayCopyProgram.usesCopies(program))
       throw new UnsupportedHistoryException(
           "Array copying is unsupported by the concurrent history backend");

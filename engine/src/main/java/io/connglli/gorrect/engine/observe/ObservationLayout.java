@@ -18,6 +18,7 @@ public record ObservationLayout(
     String bindingMetadata,
     QueuePlan queuePlan,
     NativeRootPlan nativeRootPlan) {
+  public static final String OBJECT_CLONE_IDENTITY = "object-clone";
   public static final String REQUIRED = "required";
   public static final String LEXICAL_CANDIDATES = "lexical-candidates";
 
@@ -145,8 +146,10 @@ public record ObservationLayout(
   /**
    * Maps a JVM class signature to logical slots. Reference and data field names are in logical slot
    * order; the shape's data kinds require matching JVM field descriptors and primitive records.
-   * Worker, site, and occurrence name the final {@code int}, {@code int}, and {@code long} identity
-   * fields. Field indices come from captured VM metadata.
+   * Worker, site, and occurrence name diagnostic {@code int}, {@code int}, and {@code long} fields.
+   * They are final except source-selected object clones' site and occurrence. The optional marker
+   * authorizes only those two mutable roles; source/layout validation checks its selection. Field
+   * indices come from captured VM metadata.
    */
   public record ObjectType(
       String signature,
@@ -155,10 +158,24 @@ public record ObservationLayout(
       List<String> data,
       String worker,
       String site,
-      String occurrence) {
+      String occurrence,
+      String cloneIdentity) {
     public ObjectType {
       references = List.copyOf(references);
       data = List.copyOf(data);
+      if (cloneIdentity != null && !cloneIdentity.equals(OBJECT_CLONE_IDENTITY))
+        throw new IllegalArgumentException("Unknown clone identity marker");
+    }
+
+    public ObjectType(
+        String signature,
+        Shape shape,
+        List<String> references,
+        List<String> data,
+        String worker,
+        String site,
+        String occurrence) {
+      this(signature, shape, references, data, worker, site, occurrence, null);
     }
   }
 

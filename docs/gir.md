@@ -62,7 +62,7 @@ Labels name instructions, not objects: `created` names the allocation above, whi
 | --- | --- |
 | `call mutate(node, 7);` | Copy arguments into a private helper frame; retain live caller handles. |
 | `allocate h N;` | Fresh zero-filled instance and strong handle. |
-| `clone copy original;` | Fresh shallow array copy with the source's nominal shape. |
+| `clone copy original;` | Fresh shallow object or array copy with the source's nominal shape. |
 | `copy-array source sourceIndex destination destinationIndex length;` | Copy a complete shallow range, preserving identities and overlap semantics. |
 | `allocate-ref r W value;` / `allocate-ref r W null ready;` | Fresh soft/weak wrapper, optionally registered with a named queue. |
 | `enqueue-ref inserted r;` | Clear even on failure; bind long 1 for first insertion, otherwise 0. |
@@ -107,7 +107,7 @@ Root, strong-reference and data reads/writes are plain unless explicitly volatil
 
 Handles stay strong until release/scope exit; acquired handles last their whole body. Scalars retain nothing. Parameters and top-level locals share a method's outer scope; caller bindings remain private and live. Names cannot shadow within a frame; release requires the current scope. Cleanup runs on every exit without undoing completed writes. The program scope ends before final capture. [Profiles](./observation.md#coverage-and-observer-effects) define physical obligations.
 
-Array cloning, range copying and native roots require strong sequential controlled programs. Methods require strong plain sequential execution with `retained-class`; workers, reference processing, wrappers/queues, native roots, natural observation and helper checkpoints are unsupported, including unused definitions.
+Cloning, range copying and native roots require strong sequential controlled programs; [ordinary object cloning](../engine/src/main/java/io/connglli/gorrect/engine/gir/CloneProgram.java) additionally requires plain accesses and excludes native roots and methods. Methods require strong plain sequential execution with `retained-class`; workers, reference processing, wrappers/queues, native roots, natural observation and helper checkpoints are unsupported, including unused definitions.
 
 ## Reference histories
 

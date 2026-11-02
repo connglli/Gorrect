@@ -22,7 +22,7 @@ class ArrayCloneGirTest {
         GirParser.parse(
             HEADER + "program { read-root original A arr; copied: clone copy original; }");
     assertEquals(program, GirParser.parse(GirFormatter.format(program)));
-    assertEquals(Map.of(2, program.shapes().getFirst()), GirValidator.arrayCloneShapes(program));
+    assertEquals(Map.of(2, program.shapes().getFirst()), GirValidator.cloneShapes(program));
     assertEquals("copied", program.labels().get(2));
     assertTrue(GirFormatter.format(program).contains("copied: clone copy original;"));
   }
@@ -33,10 +33,7 @@ class ArrayCloneGirTest {
         "clone copy missing;",
         "clone original original;",
         "read-data scalar original 0; clone copy scalar;",
-        "release original; clone copy original;",
-        "read-root ordinary N node; clone copy ordinary;",
-        "read-root ordinary N node; repeat 0 { clone copy ordinary; }",
-        "read-root ordinary N node; if-nonzero 1 {} else { clone copy ordinary; }"
+        "release original; clone copy original;"
       })
   void rejectsInvalidNamesAndNonArrayTypesInEveryBlock(String source) {
     assertThrows(

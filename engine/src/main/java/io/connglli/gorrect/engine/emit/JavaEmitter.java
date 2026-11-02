@@ -28,6 +28,7 @@ import java.util.HashMap;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.stream.Collectors;
 import java.util.stream.IntStream;
 
@@ -62,12 +63,17 @@ public final class JavaEmitter {
   private final QueuePlan queuePlan;
   private final boolean realCalls;
   private final Map<Integer, Shape> cloneShapes;
+  private final Set<Shape> objectCloneShapes;
   private GirProgram.Method currentMethod;
 
   private JavaEmitter(GirProgram program, ObservationProfile observation, String bindingMetadata) {
     this.program = program;
     realCalls = MethodProgram.selected(program);
-    cloneShapes = realCalls ? GirValidator.arrayCloneShapes(program) : Map.of();
+    cloneShapes = GirValidator.cloneShapes(program);
+    objectCloneShapes =
+        cloneShapes.values().stream()
+            .filter(shape -> shape.kind() == Shape.Kind.OBJECT)
+            .collect(Collectors.toUnmodifiableSet());
     this.observation = observation;
     this.bindingMetadata = bindingMetadata;
     var nativeNames = NativeRootProgram.roots(program);
@@ -88,7 +94,7 @@ public final class JavaEmitter {
   /**
    * Validates GIR and emits direct target operations, worker methods, and capture layout metadata.
    * Inputs are unchanged; each call owns its bindings, counters, and output buffer. Unsupported
-   * history/array combinations are rejected before any executable result is returned.
+   * observation combinations are rejected before any executable result is returned.
    */
   public static Emission emit(GirProgram program) {
     return emit(program, ObservationProfile.NAMED_ROOTS);
@@ -200,9 +206,18 @@ public final class JavaEmitter {
         continue;
       }
       if (shape.kind() != Shape.Kind.OBJECT) continue;
-      line("public static final class " + type + " {");
-      line("public final int idWorker, idSite;");
-      line("public final long idOccurrence;");
+      boolean cloneable = objectCloneShapes.contains(shape);
+      line(
+          "public static final class "
+              + type
+              + (cloneable ? " implements java.lang.Cloneable" : "")
+              + " {");
+      if (cloneable) {
+        line("public final int idWorker; public int idSite; public long idOccurrence;");
+      } else {
+        line("public final int idWorker, idSite;");
+        line("public final long idOccurrence;");
+      }
       for (String field : names("f", shape.references())) line("public Object " + field + ";");
       for (int slot = 0; slot < shape.data(); slot++)
         line("public " + dataType(shape, slot) + " d" + slot + ";");
@@ -211,6 +226,15 @@ public final class JavaEmitter {
               + type
               + "(int worker, int site, long occurrence) { idWorker = worker; idSite = site;"
               + " idOccurrence = occurrence; }");
+      if (cloneable) {
+        line(
+            "public "
+                + type
+                + " copy(int site, long occurrence) throws CloneNotSupportedException {");
+        line(type + " copy = (" + type + ") super.clone();");
+        line("copy.idSite = site; copy.idOccurrence = occurrence; return copy;");
+        line("}");
+      }
       line("}");
       layouts.add(
           new ObservationLayout.ObjectType(
@@ -220,7 +244,8 @@ public final class JavaEmitter {
               names("d", shape.data()),
               "idWorker",
               "idSite",
-              "idOccurrence"));
+              "idOccurrence",
+              cloneable ? ObservationLayout.OBJECT_CLONE_IDENTITY : null));
       registrations.add(
           "new NativeObserver.Registration(" + type + ".class, HeapSnapshot.ClassKind.OBJECT)");
     }
@@ -241,11 +266,15 @@ public final class JavaEmitter {
     }
     line("}");
     allocationCounters();
+    if (!objectCloneShapes.isEmpty()) cloneQualification();
     line("public static void main(String[] args) throws Exception {");
     line(
         "try (TargetSession session = TargetSession."
-            + (nativeRootPlan == null ? "open" : "openNative")
+            + (!objectCloneShapes.isEmpty()
+                ? "openObjectClones"
+                : nativeRootPlan == null ? "open" : "openNative")
             + "(args, Case.class"
+            + (!objectCloneShapes.isEmpty() ? ", qualifyClones()" : "")
             + (nativeRootPlan != null
                 ? ", java.util.List.of(" + String.join(",", registrations) + ")"
                 : queuePlan == null
@@ -664,6 +693,44 @@ public final class JavaEmitter {
     line("}");
   }
 
+  /** Probes actual selected classes before admission, without retaining workload references. */
+  private void cloneQualification() {
+    line("private static boolean qualifyClones() { try {");
+    for (var shape : program.shapes()) {
+      if (!objectCloneShapes.contains(shape)) continue;
+      String type = types.get(shape.name());
+      line("{");
+      line(type + " original = new " + type + "(0, 1, 1L);");
+      for (int slot = 0; slot < shape.references(); slot++)
+        line("original.f" + slot + " = original;");
+      for (int slot = 0; slot < shape.data(); slot++)
+        line(
+            "original.d"
+                + slot
+                + " = "
+                + (shape.dataKinds().get(slot) == Shape.DataKind.INT
+                    ? "-17"
+                    : "9223372036854775807L")
+                + ";");
+      line(type + " copy = original.copy(2, 3L);");
+      line(
+          "if (copy == original || copy.idWorker != 0 || copy.idSite != 2 || copy.idOccurrence !="
+              + " 3L || original.idSite != 1 || original.idOccurrence != 1L) return false;");
+      for (int slot = 0; slot < shape.references(); slot++) {
+        line("if (copy.f" + slot + " != original) return false;");
+        line("copy.f" + slot + " = null; if (original.f" + slot + " != original) return false;");
+      }
+      for (int slot = 0; slot < shape.data(); slot++) {
+        String value =
+            shape.dataKinds().get(slot) == Shape.DataKind.INT ? "-17" : "9223372036854775807L";
+        line("if (copy.d" + slot + " != " + value + ") return false;");
+        line("copy.d" + slot + " = 0; if (original.d" + slot + " != " + value + ") return false;");
+      }
+      line("}");
+    }
+    line("return true; } catch (CloneNotSupportedException unsupported) { return false; } }");
+  }
+
   private void block(List<Instruction> instructions) {
     block(instructions, null, null);
   }
@@ -1026,7 +1093,20 @@ public final class JavaEmitter {
         var original = binding(op.owner());
         var shape = original.shape();
         String name = declare(op.name(), shape, op.id());
-        line(definition(types.get(shape.name()), name) + " = " + original.name() + ".clone();");
+        if (shape.array()) {
+          line(definition(types.get(shape.name()), name) + " = " + original.name() + ".clone();");
+        } else {
+          // Commit the occurrence only after real clone and both diagnostic stores succeed.
+          line(
+              definition(types.get(shape.name()), name)
+                  + " = "
+                  + original.name()
+                  + ".copy("
+                  + op.id()
+                  + ", a"
+                  + op.id()
+                  + " + 1);");
+        }
         line("++a" + op.id() + ";");
         bindArray(name, shape, op.id(), "a" + op.id());
       }

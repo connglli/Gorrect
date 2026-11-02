@@ -58,7 +58,7 @@ public final class ObservationCapabilities {
     if (IdentityHashProgram.usesIdentityHash(program) && !profile.controlled())
       reasons.add("Identity hashes require controlled observation");
     if (CloneProgram.usesClones(program) && !profile.controlled())
-      reasons.add("Array cloning requires controlled observation");
+      reasons.add("Cloning requires controlled observation");
     reasons.addAll(ArrayCopyProgram.unsupported(program));
     if (ArrayCopyProgram.usesCopies(program) && !profile.controlled())
       reasons.add("Array copying requires controlled observation");
@@ -169,6 +169,33 @@ public final class ObservationCapabilities {
                   profile.controlled()
                       ? "diagnostic array binding and identity reads when used"
                       : "no diagnostic array binding")));
+    }
+    if (CloneProgram.usesObjectClones(program)) {
+      var reasons = new ArrayList<>(combination);
+      if (!target.getProperty("observer.objectClones.qualified", "false").equals("true"))
+        reasons.add("Generated object clone qualification unavailable");
+      boolean used = exercised.contains("object-clones");
+      result.add(
+          new Capability(
+              "object-clones",
+              profile.profileName(),
+              reasons.isEmpty(),
+              used,
+              verified.contains("object-clones") && used && reasons.isEmpty(),
+              reasons,
+              "Strong sequential plain execution; source-selected clone identity roles",
+              "Real Object.clone shallow copy and fresh logical allocation identity",
+              "Copied object plus two diagnostic identity stores; no identity registry",
+              List.of(
+                  "generated-class startup qualification",
+                  "complete exact trace",
+                  "source-checked layout and actual diagnostic fields",
+                  "complete heap capture"),
+              List.of(
+                  "clone allocation and copying",
+                  "diagnostic identity stores",
+                  "startup qualification",
+                  "capture optimization and timing effects")));
     }
     if (MethodProgram.selected(program)) {
       var reasons = new ArrayList<>(combination);

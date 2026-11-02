@@ -32,6 +32,9 @@ public final class JsonFiles {
           .serializeNulls()
           .registerTypeAdapter(Shape.class, (JsonSerializer<Shape>) JsonFiles::shape)
           .registerTypeAdapter(
+              ObservationLayout.ObjectType.class,
+              (JsonSerializer<ObservationLayout.ObjectType>) JsonFiles::objectType)
+          .registerTypeAdapter(
               ObservationLayout.class, (JsonSerializer<ObservationLayout>) JsonFiles::layout)
           .create();
 
@@ -44,6 +47,21 @@ public final class JsonFiles {
     object.addProperty("data", shape.data());
     if (shape.dataKinds().contains(Shape.DataKind.INT))
       object.add("dataKinds", context.serialize(shape.dataKinds()));
+    return object;
+  }
+
+  /** Absent clone selection preserves the legacy object-layout field order and bytes. */
+  private static JsonElement objectType(
+      ObservationLayout.ObjectType type, Type ignored, JsonSerializationContext context) {
+    var object = new JsonObject();
+    object.addProperty("signature", type.signature());
+    object.add("shape", context.serialize(type.shape()));
+    object.add("references", context.serialize(type.references()));
+    object.add("data", context.serialize(type.data()));
+    object.addProperty("worker", type.worker());
+    object.addProperty("site", type.site());
+    object.addProperty("occurrence", type.occurrence());
+    if (type.cloneIdentity() != null) object.addProperty("cloneIdentity", type.cloneIdentity());
     return object;
   }
 

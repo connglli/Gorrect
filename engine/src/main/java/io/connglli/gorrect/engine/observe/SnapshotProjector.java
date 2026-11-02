@@ -549,8 +549,10 @@ public final class SnapshotProjector {
           data.add(field);
         }
         var worker = identityField(type, object.worker(), "I", expected);
-        var site = identityField(type, object.site(), "I", expected);
-        var occurrence = identityField(type, object.occurrence(), "J", expected);
+        boolean cloneIdentity =
+            ObservationLayout.OBJECT_CLONE_IDENTITY.equals(object.cloneIdentity());
+        var site = identityField(type, object.site(), "I", expected, !cloneIdentity);
+        var occurrence = identityField(type, object.occurrence(), "J", expected, !cloneIdentity);
         require(
             expected.size() == type.fields().size(), "Unclassified fields in " + type.signature());
         require(
@@ -915,10 +917,20 @@ public final class SnapshotProjector {
 
     private HeapSnapshot.FieldInfo identityField(
         HeapSnapshot.ClassInfo type, String name, String descriptor, Set<String> expected) {
+      return identityField(type, name, descriptor, expected, true);
+    }
+
+    private HeapSnapshot.FieldInfo identityField(
+        HeapSnapshot.ClassInfo type,
+        String name,
+        String descriptor,
+        Set<String> expected,
+        boolean finalField) {
       var field = field(type, name, expected);
       require(
           !Modifier.isStatic(field.modifiers())
-              && Modifier.isFinal(field.modifiers())
+              && Modifier.isFinal(field.modifiers()) == finalField
+              && (finalField || !Modifier.isVolatile(field.modifiers()))
               && field.descriptor().equals(descriptor),
           "Invalid identity field " + name);
       return field;

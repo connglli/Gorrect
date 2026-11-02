@@ -71,6 +71,7 @@ public final class MethodProgram {
     if (!selected(program)) return List.of();
     boolean invalid =
         NativeRootProgram.selected(program)
+            || CloneProgram.usesObjectClones(program)
             || !program.queues().isEmpty()
             || !program.requirements().isEmpty()
             || program.shapes().stream()
@@ -296,7 +297,7 @@ public final class MethodProgram {
    * Saturated quota proof precedes expansion and recorder allocation, including both branch arms.
    */
   public static long steps(GirProgram program, OracleLimits limits) {
-    var cloneShapes = GirValidator.arrayCloneShapes(program);
+    var cloneShapes = GirValidator.cloneShapes(program);
     var shapes = new HashMap<String, Shape>();
     program.shapes().forEach(shape -> shapes.put(shape.name(), shape));
     long result = quota(program, program.body(), new HashMap<>(), shapes, cloneShapes).steps();

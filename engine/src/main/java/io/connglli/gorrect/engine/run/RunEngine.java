@@ -9,6 +9,7 @@ import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.emit.JavaEmitter;
 import io.connglli.gorrect.engine.fuzz.WorkloadGenerator;
+import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirFormatter;
 import io.connglli.gorrect.engine.gir.GirParser;
@@ -257,6 +258,8 @@ public final class RunEngine {
       combination.addAll(VmDriver.unsupported(profile));
       if (MethodProgram.selected(program) && !profile.retainedMetadata())
         combination.add("Methods require retained-class binding metadata");
+      if (CloneProgram.usesObjectClones(program))
+        combination.addAll(ObjectClones.configuration(profile));
       if (NativeRootProgram.selected(program))
         combination.addAll(NativeRoots.configuration(profile));
       if (ReferenceProgram.usesQueues(program))
@@ -323,6 +326,7 @@ public final class RunEngine {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       NativeRoots.source(program, layout);
+      ObjectClones.source(program, layout);
       NativeRoots.selection(directory, layout);
 
       var installations =

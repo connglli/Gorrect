@@ -434,7 +434,7 @@ final class GraphMachine {
 
     switch (operation) {
       case Instruction.Allocate op -> allocate(op);
-      case Instruction.Clone op -> cloneArray(op);
+      case Instruction.Clone op -> cloneObject(op);
       case Instruction.CopyArray op -> copyArray(op);
       case Instruction.AllocateReference op -> allocateReference(op);
       case Instruction.ReadRoot op -> {
@@ -649,7 +649,7 @@ final class GraphMachine {
   Memory memory(Instruction.Operation operation) {
     return switch (operation) {
       case Instruction.Clone ignored ->
-          throw new UnsupportedHistoryException("Array cloning has no concurrent access contract");
+          throw new UnsupportedHistoryException("Cloning has no concurrent access contract");
       case Instruction.CopyArray ignored ->
           throw new UnsupportedHistoryException("Array copying has no concurrent access contract");
       case Instruction.ReadRoot op ->
@@ -786,20 +786,20 @@ final class GraphMachine {
     slots += shape.slots();
   }
 
-  private void cloneArray(Instruction.Clone op) {
+  private void cloneObject(Instruction.Clone op) {
     requireDeclaration(op.name());
     var source = reference(new Operand.Name(op.owner()));
     if (source.target() == null || source.wrapperTarget() != null)
-      throw new GirException("clone requires a non-null array handle");
+      throw new GirException("clone requires a non-null object or array handle");
     var original = objects.get(source.target());
-    if (original == null || !original.shape().array())
-      throw new GirException("clone requires an array handle");
+    if (original == null || original.shape().wrapper())
+      throw new GirException("clone requires an object or array handle");
     if (ordinaryAllocations + wrappers >= limits.objects()) limit("objects");
     if (original.shape().slots() > limits.slots() - slots) limit("slots");
 
     long occurrence = occurrences.getOrDefault(op.id(), 0L) + 1;
     var id = new ObjectId(worker, op.id(), occurrence);
-    // HeapObject owns immutable lists; array writes replace only the selected vertex.
+    // HeapObject owns immutable lists; writes replace only the selected vertex.
     var copy = new HeapObject(original.shape(), original.references(), original.data());
     objects.put(id, copy);
     bind(op.name(), op.id(), Value.Reference.strong(id));

@@ -7,9 +7,11 @@ import static io.connglli.gorrect.engine.run.Artifacts.target;
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
 import io.connglli.gorrect.engine.config.TargetProfile;
+import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirException;
 import io.connglli.gorrect.engine.gir.GirParser;
 import io.connglli.gorrect.engine.gir.GirProgram;
+import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.HistoryProgram;
 import io.connglli.gorrect.engine.gir.IdentityHashProgram;
 import io.connglli.gorrect.engine.gir.Instruction;
@@ -87,7 +89,8 @@ final class RunVerifier {
           IdentityHashProgram.usesIdentityHash(program)
               || MonitorProgram.usesMonitors(program)
               || nativeRoots
-              || MethodProgram.selected(program);
+              || MethodProgram.selected(program)
+              || CloneProgram.usesObjectClones(program);
       boolean references = ReferenceProgram.usesReferences(program);
       boolean concurrent = HistoryProgram.usesConcurrentHistory(program);
       var oracle =
@@ -100,6 +103,7 @@ final class RunVerifier {
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       QueueResources.source(program, layout);
       NativeRoots.source(program, layout);
+      ObjectClones.source(program, layout);
       NativeRoots.selection(directory, layout);
       if (nativeRoots) RetainedMetadata.selection(directory, profile, layout);
       boolean lexicalNatural = !observation.controlled() && layout.lexicalCandidates();
@@ -125,6 +129,7 @@ final class RunVerifier {
                 ? ControlledLaunch.targetFacts(directory)
                 : target(directory);
         unmet.addAll(VmDriver.requirements(profile, facts));
+        if (ObjectClones.selected(layout)) ObjectClones.admission(profile, manifest, facts);
         capabilityEvidenceUsable = true;
       } catch (IOException | RuntimeException failure) {
         captures.error("Target capability evidence failed: " + failure);
@@ -160,6 +165,14 @@ final class RunVerifier {
       var exercised = new HashSet<String>();
       if (trace.events().stream().anyMatch(event -> event.kind() == ExecutionTrace.Kind.CALL_ENTER))
         exercised.add("method-calls");
+      var cloneSites = GirValidator.cloneShapes(program);
+      if (trace.events().stream()
+          .anyMatch(
+              event ->
+                  event.kind() == ExecutionTrace.Kind.OPERATION
+                      && cloneSites.containsKey(event.operation())
+                      && !cloneSites.get(event.operation()).array()))
+        exercised.add("object-clones");
       var observedOperations = new HashSet<Integer>();
       for (var event : trace.events())
         if (event.kind() == ExecutionTrace.Kind.SCALAR_READ)
@@ -290,6 +303,7 @@ final class RunVerifier {
         verified.addAll(exercised);
         // Helper absence and terminal provenance are established by the captures below.
         verified.remove("method-calls");
+        verified.remove("object-clones");
       }
 
       if (!lexicalNatural && !independentEvidence)
@@ -404,7 +418,8 @@ final class RunVerifier {
         var program = GirParser.parse(Files.readString(directory.resolve("case.gir")));
         if (MonitorProgram.usesMonitors(program)
             || NativeRootProgram.selected(program)
-            || MethodProgram.selected(program))
+            || MethodProgram.selected(program)
+            || CloneProgram.usesObjectClones(program))
           requireSupported(program, profile, ObservationProfile.parse(profile.observation()));
       } catch (UnsupportedHistoryException unsupported) {
         throw unsupported;
@@ -422,6 +437,7 @@ final class RunVerifier {
     reasons.addAll(VmDriver.unsupported(profile));
     if (MethodProgram.selected(program) && !profile.retainedMetadata())
       reasons.add("Methods require retained-class binding metadata");
+    if (CloneProgram.usesObjectClones(program)) reasons.addAll(ObjectClones.configuration(profile));
     if (NativeRootProgram.selected(program)) reasons.addAll(NativeRoots.configuration(profile));
     if (!reasons.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", reasons));
   }
@@ -532,14 +548,17 @@ final class RunVerifier {
       this.layout = layout;
       if (profile.retainedMetadata()
           || layout.queuePlan() != null
-          || layout.nativeRootPlan() != null) {
+          || layout.nativeRootPlan() != null
+          || ObjectClones.selected(layout)) {
         try {
           var facts = ControlledLaunch.targetFacts(directory);
           ControlledLaunch.evidence(
               profile,
               manifest,
               facts,
-              layout.queuePlan() != null || layout.nativeRootPlan() != null);
+              layout.queuePlan() != null
+                  || layout.nativeRootPlan() != null
+                  || ObjectClones.selected(layout));
           if (layout.queuePlan() != null)
             QueueResources.admission(profile, manifest, facts, directory);
         } catch (IOException | RuntimeException failure) {
@@ -836,6 +855,7 @@ final class RunVerifier {
           JsonFiles.GSON.fromJson(
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
       NativeRoots.source(program, layout);
+      ObjectClones.source(program, layout);
       NativeRoots.selection(directory, layout);
       RetainedMetadata.selection(directory, profile, layout);
 
@@ -907,6 +927,7 @@ final class RunVerifier {
               JsonFiles.read(directory.resolve("generated/layout.json")), ObservationLayout.class);
 
       QueueResources.source(program, layout);
+      ObjectClones.source(program, layout);
       QueueResources.selection(directory, layout);
       RetainedMetadata.selection(directory, profile, layout);
       var plan = new CheckpointPlan(HistoryPlan.plan(program, OracleLimits.DEFAULT));

@@ -20,7 +20,8 @@ public final class NativeRootProgram {
 
   public static List<String> unsupported(GirProgram program) {
     if (!selected(program)) return List.of();
-    return ReferenceProgram.usesReferences(program)
+    return CloneProgram.usesObjectClones(program)
+            || ReferenceProgram.usesReferences(program)
             || program.shapes().stream()
                 .anyMatch(
                     shape ->

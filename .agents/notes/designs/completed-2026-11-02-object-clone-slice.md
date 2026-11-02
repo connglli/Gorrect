@@ -1,6 +1,6 @@
 # Ordinary object clone proposal
 
-Status: proposed stage 18 continuation; no implementation is accepted. Extend existing `clone result owner` to ordinary object shapes, retaining GIR/artifact version 1 and the [array-clone contract](../implementations/completed-2026-10-31-stage18a.md). `Shape` continues to describe semantic slots, without a user-facing Cloneable qualifier.
+Status: accepted stage 18 design, implemented by the [ordinary object clone slice](../implementations/completed-2026-11-02-object-clone.md). Extend existing `clone result owner` to ordinary object shapes, retaining GIR/artifact version 1 and the [array-clone contract](../implementations/completed-2026-10-31-stage18a.md). `Shape` continues to describe semantic slots, without a user-facing Cloneable qualifier.
 
 ## Semantics and admission
 

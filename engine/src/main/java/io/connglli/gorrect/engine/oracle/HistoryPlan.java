@@ -1,5 +1,6 @@
 package io.connglli.gorrect.engine.oracle;
 
+import io.connglli.gorrect.engine.gir.CloneProgram;
 import io.connglli.gorrect.engine.gir.GirProgram;
 import io.connglli.gorrect.engine.gir.GirValidator;
 import io.connglli.gorrect.engine.gir.Instruction;
@@ -42,7 +43,9 @@ public final class HistoryPlan {
   public static OracleResult plan(GirProgram program, OracleLimits limits) {
     var nativeGaps = NativeRootProgram.unsupported(program);
     if (!nativeGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", nativeGaps));
-    var cloneShapes = GirValidator.arrayCloneShapes(program);
+    var cloneShapes = GirValidator.cloneShapes(program);
+    var cloneGaps = CloneProgram.unsupported(program);
+    if (!cloneGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", cloneGaps));
     var methodGaps = MethodProgram.unsupported(program);
     if (!methodGaps.isEmpty()) throw new UnsupportedHistoryException(String.join("; ", methodGaps));
     if (MethodProgram.selected(program)) MethodProgram.steps(program, limits);

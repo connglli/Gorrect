@@ -473,7 +473,7 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
       }
       if (kind == ClassKind::object || kind == ClassKind::roots) {
         // This restriction makes GetClassFields order match heap callback field indices.
-        // Supporting inheritance/interfaces requires resolving their JVMTI index contributions.
+        // Other inheritance/interfaces need an independent JVMTI index contribution proof.
         auto parent = env->GetSuperclass(type);
         auto object = env->FindClass("java/lang/Object");
         bool direct = env->IsSameObject(parent, object);
@@ -482,11 +482,27 @@ Java_io_connglli_gorrect_runtime_observe_NativeObserver_configure0(JNIEnv *env, 
         JvmtiMemory<jclass> interfaces;
         jint interface_count = 0;
         check(jvmti->GetImplementedInterfaces(type, &interface_count, &interfaces.data));
+        bool marker = interface_count == 0;
+        if (kind == ClassKind::object && interface_count == 1) {
+          // Only the bootstrap zero-field marker preserves direct-Object field indices.
+          auto cloneable = env->FindClass("java/lang/Cloneable");
+          JvmtiMemory<jfieldID> marker_fields;
+          JvmtiMemory<jclass> marker_interfaces;
+          jint marker_field_count = 0, marker_interface_count = 0;
+          check(jvmti->GetClassFields(cloneable, &marker_field_count, &marker_fields.data));
+          check(jvmti->GetImplementedInterfaces(cloneable, &marker_interface_count,
+                                                &marker_interfaces.data));
+          marker = env->IsSameObject(interfaces.data[0], cloneable) && marker_field_count == 0 &&
+                   marker_interface_count == 0;
+          for (jint i = 0; i < marker_interface_count; ++i)
+            env->DeleteLocalRef(marker_interfaces.data[i]);
+          env->DeleteLocalRef(cloneable);
+        }
         for (jint i = 0; i < interface_count; ++i)
           env->DeleteLocalRef(interfaces.data[i]);
-        if (!direct || interface_count != 0)
+        if (!direct || !marker)
           throw std::runtime_error(
-              "This profile requires direct Object subclasses without interfaces");
+              "Direct Object subclasses require no interfaces or the exact Cloneable marker");
         JvmtiMemory<jfieldID> fields;
         jint field_count = 0;
         check(jvmti->GetClassFields(type, &field_count, &fields.data));

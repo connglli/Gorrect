@@ -45,11 +45,12 @@ public sealed interface Instruction {
   record Allocate(int id, String name, String shape) implements Operation {}
 
   /**
-   * Requires a fresh result name and a live non-null array handle. Allocates a distinct array with
-   * the same nominal shape and shallow contents: reference targets are shared, but later array
-   * writes are independent. Uses this site's next allocation occurrence and normal object/slot
-   * budgets. Invalid owners and exhausted budgets reject before any model effect. The first
-   * implementation supports strong sequential programs under controlled observation.
+   * Requires a fresh result name and a live non-null ordinary object or array handle. Allocates a
+   * distinct vertex with the same nominal shape and shallow contents: reference targets (including
+   * self-references) stay shared, but later writes to source and clone are independent. Constructor
+   * effects are absent. Uses this site's next allocation occurrence and normal object/slot budgets.
+   * Invalid owners and exhausted budgets reject before any model effect. The first implementation
+   * supports strong sequential programs under controlled observation.
    */
   record Clone(int id, String name, String owner) implements Operation {}
 

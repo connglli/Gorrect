@@ -67,10 +67,11 @@ public final class GirValidator {
   }
 
   /**
-   * Validates every lexical block and returns each clone site's inferred array shape. Storage
-   * planning uses this immutable map without treating a source declaration as an executed clone.
+   * Validates every lexical block and returns each clone site's inferred object or array shape.
+   * Storage planning uses this immutable map without treating a source declaration as an executed
+   * clone.
    */
-  public static Map<Integer, Shape> arrayCloneShapes(GirProgram program) {
+  public static Map<Integer, Shape> cloneShapes(GirProgram program) {
     var validator = new GirValidator();
     validator.validateProgram(program);
     return Map.copyOf(validator.cloneShapes);
@@ -137,6 +138,7 @@ public final class GirValidator {
         if (declaration > Integer.MAX_VALUE || parameter.declaration() != declaration++)
           fail("Parameter declaration IDs must follow source instructions");
     MethodProgram.validateBounds(program, cloneShapes);
+    CloneProgram.validateBounds(cloneShapes);
     var queueGaps = ReferenceProgram.automaticQueueGaps(program);
     if (!queueGaps.isEmpty()) fail(String.join("; ", queueGaps));
     var labels = new HashSet<String>();
@@ -304,7 +306,7 @@ public final class GirValidator {
       }
       case Instruction.Clone op -> {
         var source = binding(op.owner()).shape();
-        if (source == null || !source.array()) fail("clone requires an array handle");
+        if (source == null || source.wrapper()) fail("clone requires an object or array handle");
         declare(op.name(), source);
         cloneShapes.put(op.id(), source);
       }
