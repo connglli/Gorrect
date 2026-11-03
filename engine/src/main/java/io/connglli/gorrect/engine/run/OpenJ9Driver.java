@@ -59,12 +59,9 @@ final class OpenJ9Driver {
     return args;
   }
 
-  /**
-   * Other revisions must pass generated caller/worker/slot conformance before enabling recovery.
-   */
+  /** Standard JVMTI coordinates still require certified frames, scopes and physical roots. */
   static boolean retainedCoordinates(Properties facts) {
     return facts.getProperty("java.feature", "").equals("21")
-        && facts.getProperty("java.vm.version", "").equals("master-6e16eb1a4f")
         && facts.getProperty("os.name", "").equals("Linux")
         && facts.getProperty("os.arch", "").equals("amd64");
   }

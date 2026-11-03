@@ -1,14 +1,18 @@
 package io.connglli.gorrect.engine.run;
 
 import static io.connglli.gorrect.engine.run.RunTestSupport.assertPass;
+import static io.connglli.gorrect.engine.run.RunTestSupport.copy;
 import static io.connglli.gorrect.engine.run.RunTestSupport.input;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertNotEquals;
 
 import com.google.gson.JsonObject;
 import io.connglli.gorrect.engine.config.JsonFiles;
+import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.protocol.HeapSnapshot;
 import io.connglli.gorrect.protocol.QueueCapture;
 import java.io.IOException;
+import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.List;
 import org.junit.jupiter.api.Tag;
@@ -30,6 +34,34 @@ class NamedQueueOpenJ9RunTest {
         RunEngine.run(input(directory, NamedQueueRunTest.PROGRAM), selected(retained, false), run));
     assertPass(RunEngine.verify(run));
     assertPass(RunEngine.replay(run, directory.resolve("replay")));
+    if (!retained) {
+      for (String damage :
+          List.of(
+              "version",
+              "feature",
+              "platform",
+              "qualification",
+              "Reference",
+              "ReferenceQueue",
+              "ReferenceQueue$Null")) {
+        Path changed = copy(directory, run, damage);
+        var facts = Artifacts.target(changed);
+        switch (damage) {
+          case "version" -> facts.setProperty("java.vm.version", "unrecognized-version");
+          case "feature" -> facts.setProperty("java.feature", "22");
+          case "platform" -> facts.setProperty("os.arch", "aarch64");
+          case "qualification" -> facts.remove("observer.queues.ready");
+          default -> facts.setProperty("queue.library." + damage, "unknown");
+        }
+        try (var output = Files.newOutputStream(changed.resolve("target.properties"))) {
+          facts.store(output, "Damaged queue admission evidence");
+        }
+        if (damage.equals("version")) assertPass(RunEngine.verify(changed));
+        else
+          assertNotEquals(
+              ExactVerifier.Verdict.SATISFIED, RunEngine.verify(changed).verdict(), damage);
+      }
+    }
   }
 
   @Test

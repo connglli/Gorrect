@@ -157,7 +157,7 @@ final class VmDriver {
     ControlledLaunch.effective(profile, target, unmet);
     if (profile.retainedMetadata()) {
       if (profile.vm().equals("openj9") && !OpenJ9Driver.retainedCoordinates(target))
-        unmet.add("retained-class stack coordinates need conformance for this OpenJ9 build");
+        unmet.add("retained-class OpenJ9 coordinates require Linux amd64 JDK 21");
       if (profile.vm().equals("hotspot") && !HotSpotDriver.retainedCoordinates(target))
         unmet.add("retained-class HotSpot coordinate conformance covers Linux amd64 JDK 17/21");
     }

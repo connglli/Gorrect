@@ -143,9 +143,8 @@ final class QueueResources {
       throw new IOException("Queue capture coordinate qualification requires Linux amd64");
     String feature = facts.getProperty("java.feature", "");
     if (profile.vm().equals("openj9")) {
-      if (!feature.equals("21")
-          || !facts.getProperty("java.vm.version", "").equals("master-6e16eb1a4f"))
-        throw new IOException("OpenJ9 queue layout needs qualification for this VM build");
+      if (!feature.equals("21"))
+        throw new IOException("OpenJ9 queue layout qualification covers JDK 21");
     } else if (!Set.of("17", "21").contains(feature))
       throw new IOException("HotSpot queue layout qualification covers JDK 17/21");
     List<String> actual =
@@ -161,8 +160,9 @@ final class QueueResources {
       AutomaticQueues.admission(profile, facts, manifest);
   }
 
-  // Qualified class resources from the exercised libraries. Controlled launch excludes a later
-  // transformer/alternate loader; these hashes alone are not loaded-definition certificates.
+  // JVMTI exposes private queue links, but does not specify their ownership algorithm. Qualify
+  // complete library tuples for the non-destructive walk; public poll/remove consume members.
+  // Controlled launch excludes later transformers/loaders; hashes alone do not certify definitions.
   private static final List<String> HOTSPOT17 =
       List.of(
           "46026f0a24279bef0b5247e072ce22020e916e9b297b73b090a7499037c20bb4",
@@ -170,7 +170,7 @@ final class QueueResources {
           "fedf1dd3543d2ad276e6198a1aaf9cc002e9bf63d35553f08284c008cb6c9ea5");
   private static final List<String> HOTSPOT21 =
       List.of(
-          "6a6e5bce752ff860988c05b28bb0b641e70c137f58170078cef8a9dc33304aef",
+          "bcec4dc83514441d08ec506b70b0216be9d1322505308acf5e0492b39669a980",
           "e68f9766800b3ae557ea020ab2ba337ada319366058e84ed3d3ae10df4f82911",
           "30c7305f924cc078fb11f28a3cbbacf7d529588c8849fe5f89eb816c11e98c19");
   private static final List<String> OPENJ9 =

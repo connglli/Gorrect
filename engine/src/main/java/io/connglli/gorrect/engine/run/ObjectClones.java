@@ -54,10 +54,8 @@ final class ObjectClones {
     if (profile.vm().equals("hotspot")) {
       if (!Set.of("17", "21").contains(feature))
         throw new IOException("Object cloning qualification covers HotSpot JDK 17/21");
-    } else if (!profile.vm().equals("openj9")
-        || !feature.equals("21")
-        || !facts.getProperty("java.vm.version", "").equals("master-6e16eb1a4f"))
-      throw new IOException("Object cloning requires the selected OpenJ9 build");
+    } else if (!profile.vm().equals("openj9") || !feature.equals("21"))
+      throw new IOException("Object cloning qualification covers OpenJ9 JDK 21");
     if (!facts.getProperty("observer.objectClones.qualified", "false").equals("true"))
       throw new IOException("Actual generated object clone qualification is missing");
   }

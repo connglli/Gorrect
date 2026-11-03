@@ -5,10 +5,15 @@ import static io.connglli.gorrect.engine.run.RunTestSupport.copy;
 import static io.connglli.gorrect.engine.run.RunTestSupport.input;
 import static io.connglli.gorrect.engine.run.RunTestSupport.profile;
 import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertThrows;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.config.JsonFiles;
+import io.connglli.gorrect.engine.config.TargetProfile;
 import io.connglli.gorrect.engine.gir.GirParser;
+import io.connglli.gorrect.engine.observe.ObservationLayout;
+import io.connglli.gorrect.engine.observe.QueueProjector;
+import io.connglli.gorrect.engine.observe.SnapshotProjector;
 import io.connglli.gorrect.engine.oracle.ExactVerifier;
 import io.connglli.gorrect.engine.oracle.HistoryLimits;
 import io.connglli.gorrect.engine.oracle.HistoryOracle;
@@ -24,10 +29,12 @@ import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
 import org.junit.jupiter.params.ParameterizedTest;
+import org.junit.jupiter.params.provider.CsvSource;
 import org.junit.jupiter.params.provider.ValueSource;
 
 @Tag("hotspot")
@@ -74,6 +81,116 @@ class NamedQueueRunTest {
     assertEquals(
         HeapSnapshot.Status.COMPLETE,
         QueueCapture.read(run.resolve("snapshots/1.gqueue"), token, 1).snapshot().status());
+  }
+
+  @ParameterizedTest
+  @CsvSource({"jvmti,weak", "retained-class,weak", "jvmti,soft", "retained-class,soft"})
+  void queueOnlyMembersAndAliasesSurviveGrowthAndInterpretedReferentReads(
+      String metadata, String strength) throws IOException {
+    String program =
+        """
+        gir 1; shape N object 0 1; shape W %s; queue ready W; queue other W;
+        object 1 N [] [7]; root data=1; root saved=null;
+        program {
+          empty: checkpoint;
+          scope {
+            allocate-ref first W null ready; allocate-ref second W null ready;
+            allocate-ref third W null ready; allocate-ref unregistered W null;
+            enqueue-ref missing unregistered; enqueue-ref addedFirst first;
+            enqueue-ref duplicate first; enqueue-ref addedSecond second; enqueue-ref addedThird third;
+            allocate-ref witness W second; write-root saved witness;
+          }
+          collect; owned: checkpoint;
+          scope {
+            poll-queue first ready; poll-queue second ready;
+            read-root witness W saved;
+            acquire held W witness {
+              same-object aliased held second;
+              scope { read-root payload N data; write-data payload 0 42; }
+            }
+            clear-ref witness; is-cleared cleared witness;
+            acquire absent W witness { write-root data null; }
+          }
+          partial: checkpoint;
+          scope {
+            poll-queue last ready; write-root saved last;
+            poll-queue empty ready; poll-queue unrelated other;
+          }
+          drained: checkpoint;
+        }
+        """
+            .formatted(strength);
+    Path selected = selected(21, metadata.equals("retained-class"));
+    Path run = directory.resolve("ownership");
+    // Keep referent reads on the target's interpreter path while checking physical queue ownership.
+    assertPass(RunEngine.run(input(directory, program), selected, run));
+    assertPass(RunEngine.verify(run));
+    var layout =
+        JsonFiles.GSON.fromJson(
+            JsonFiles.read(run.resolve("generated/layout.json")), ObservationLayout.class);
+    int[] sizes = {0, 3, 1, 0};
+    for (int index = 0; index < sizes.length; index++) {
+      int point = index + 1;
+      var queues =
+          QueueProjector.project(
+              Artifacts.snapshot(run, token(run), point),
+              QueueCapture.read(run.resolve("snapshots/" + point + ".gqueue"), token(run), point),
+              layout,
+              "hotspot");
+      assertTrue(queues.complete(), queues.problems().toString());
+      assertEquals(sizes[index], queues.queues().get("ready").members().size());
+      assertEquals(0, queues.queues().get("other").members().size());
+    }
+    var graph =
+        SnapshotProjector.project(Artifacts.snapshot(run, token(run), 4), layout)
+            .graph()
+            .orElseThrow();
+    assertEquals(List.of(42L), graph.objects().get(graph.roots().get("data").target()).data());
+    assertPass(RunEngine.replay(run, directory.resolve("replay")));
+  }
+
+  @ParameterizedTest
+  @ValueSource(strings = {"jvmti", "retained-class"})
+  void libraryTupleAndBootstrapPremisesRemainMandatoryOffline(String metadata) throws IOException {
+    Path run = directory.resolve("qualified");
+    assertPass(
+        RunEngine.run(
+            input(directory, PROGRAM), selected(21, metadata.equals("retained-class")), run));
+    int variant = 0;
+    for (var change :
+        List.of(
+            Map.entry("queue.library.Reference", "0".repeat(64)),
+            Map.entry(
+                "queue.library.Reference",
+                "6a6e5bce752ff860988c05b28bb0b641e70c137f58170078cef8a9dc33304aef"),
+            Map.entry("queue.library.Reference", ""),
+            Map.entry(
+                "queue.library.ReferenceQueue",
+                "036be43a9c8fcdfd9d7a0603a6d3d0111db0337fb4ab963c030ef886b06fa6a7"),
+            Map.entry(
+                "queue.library.ReferenceQueue$Null",
+                "fedf1dd3543d2ad276e6198a1aaf9cc002e9bf63d35553f08284c008cb6c9ea5"),
+            Map.entry("observer.queues.ready", "false"),
+            Map.entry("observer.queues.bootstrap", "false"),
+            Map.entry("os.name", "Other"),
+            Map.entry("os.arch", "aarch64"),
+            Map.entry("java.feature", "17"),
+            Map.entry("java.feature", "25"))) {
+      Path changed = copy(directory, run, "unqualified-" + variant++);
+      var facts = Artifacts.target(changed);
+      if (change.getValue().isEmpty()) facts.remove(change.getKey());
+      else facts.setProperty(change.getKey(), change.getValue());
+      try (var output = Files.newOutputStream(changed.resolve("target.properties"))) {
+        facts.store(output, "Unqualified queue context");
+      }
+      var manifest = JsonFiles.read(changed.resolve("manifest.json"));
+      var profile = TargetProfile.parse(manifest.getAsJsonObject("profile"), changed);
+      assertThrows(
+          IOException.class, () -> QueueResources.admission(profile, manifest, facts, changed));
+      var result = RunEngine.verify(changed);
+      assertEquals(RunReport.Outcome.EXTRACTION_ERROR, result.execution(), result.toString());
+      assertEquals(ExactVerifier.Verdict.INCONCLUSIVE, result.verdict(), result.toString());
+    }
   }
 
   @ParameterizedTest

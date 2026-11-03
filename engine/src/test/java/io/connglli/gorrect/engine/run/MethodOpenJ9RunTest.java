@@ -2,11 +2,13 @@ package io.connglli.gorrect.engine.run;
 
 import static io.connglli.gorrect.engine.run.RunTestSupport.assertPass;
 import static io.connglli.gorrect.engine.run.RunTestSupport.input;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import io.connglli.gorrect.engine.config.JsonFiles;
 import java.io.IOException;
 import java.nio.file.Path;
 import java.util.List;
+import java.util.Set;
 import org.junit.jupiter.api.Tag;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -27,6 +29,11 @@ class MethodOpenJ9RunTest {
     Path run = directory.resolve("run");
     assertPass(RunEngine.run(input(directory, MethodRunTest.SOURCE), selected, run));
     assertPass(RunEngine.verify(run));
-    assertPass(RunEngine.replay(run, directory.resolve("replay")));
+    assertTrue(
+        RetainedOpenJ9RunTest.assertRawCoordinates(run)
+            .containsAll(Set.of("execute", "main", "non-null")));
+    Path replay = directory.resolve("replay");
+    assertPass(RunEngine.replay(run, replay));
+    RetainedOpenJ9RunTest.assertRawCoordinates(replay);
   }
 }

@@ -70,10 +70,8 @@ final class NativeRoots {
     if (profile.vm().equals("hotspot")) {
       if (!Set.of("17", "21").contains(feature))
         throw new IOException("Native root qualification covers HotSpot JDK 17/21");
-    } else if (!profile.vm().equals("openj9")
-        || !feature.equals("21")
-        || !facts.getProperty("java.vm.version", "").equals("master-6e16eb1a4f"))
-      throw new IOException("Native root qualification requires the selected OpenJ9 build");
+    } else if (!profile.vm().equals("openj9") || !feature.equals("21"))
+      throw new IOException("Native root qualification covers OpenJ9 JDK 21");
     if (!facts.getProperty("observer.nativeRoots.qualified", "false").equals("true"))
       throw new IOException("Actual JNI root kind/tag/multiplicity qualification is missing");
   }

@@ -108,6 +108,7 @@ class ObjectCloneRunTest {
     Path replay = directory.resolve("replay");
     assertPass(RunEngine.replay(run, replay));
     assertPass(RunEngine.verify(replay));
+    checkDamagedCloneEvidence(run);
   }
 
   @Tag("openj9")
@@ -150,6 +151,10 @@ class ObjectCloneRunTest {
   void corruptIdentityModifiersPayloadAndSourceSelectionCannotPass() throws IOException {
     Path run = directory.resolve("run");
     assertPass(RunEngine.run(input(directory, PROGRAM), objectProfile(21), run));
+    checkDamagedCloneEvidence(run);
+  }
+
+  private void checkDamagedCloneEvidence(Path run) throws IOException {
     for (String damage :
         List.of("worker", "site", "occurrence", "volatile", "duplicate", "payload")) {
       Path corrupt = copy(directory, run, damage);
@@ -169,18 +174,23 @@ class ObjectCloneRunTest {
         SnapshotProjector.project(raw, JsonFiles.GSON.fromJson(unmarked, ObservationLayout.class))
             .graph()
             .isEmpty());
-    for (String damage : List.of("qualification", "unknown-version", "injection")) {
+    for (String damage :
+        List.of("vm-version", "qualification", "unknown-version", "platform", "injection")) {
       Path corruptFacts = copy(directory, run, damage);
       var facts = Artifacts.target(corruptFacts);
+      if (damage.equals("vm-version")) facts.setProperty("java.vm.version", "unrecognized-version");
       if (damage.equals("qualification")) facts.remove("observer.objectClones.qualified");
       if (damage.equals("unknown-version")) facts.setProperty("java.feature", "23");
+      if (damage.equals("platform")) facts.setProperty("os.arch", "aarch64");
       if (damage.equals("injection"))
         facts.setProperty("vm.argument.0", "-javaagent:unreviewed.jar");
       try (var output = Files.newOutputStream(corruptFacts.resolve("target.properties"))) {
         facts.store(output, "Corrupted qualification");
       }
-      assertNotEquals(
-          ExactVerifier.Verdict.SATISFIED, RunEngine.verify(corruptFacts).verdict(), damage);
+      if (damage.equals("vm-version")) assertPass(RunEngine.verify(corruptFacts));
+      else
+        assertNotEquals(
+            ExactVerifier.Verdict.SATISFIED, RunEngine.verify(corruptFacts).verdict(), damage);
     }
     Path corrupt = copy(directory, run, "marker");
     var layout = JsonFiles.read(corrupt.resolve("generated/layout.json"));

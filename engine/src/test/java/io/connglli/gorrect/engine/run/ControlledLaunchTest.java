@@ -172,18 +172,26 @@ class ControlledLaunchTest {
   }
 
   @Test
-  void openJ9CoordinateRecoveryRequiresItsConformedBuild() {
+  void openJ9CoordinateRecoveryUsesPlatformBoundsInsteadOfBuildStrings() {
     var facts = new Properties();
     facts.setProperty("java.feature", "21");
-    facts.setProperty("java.vm.version", "master-6e16eb1a4f");
     facts.setProperty("os.name", "Linux");
     facts.setProperty("os.arch", "amd64");
+    for (String version : List.of("unknown-build", "future-main", "")) {
+      facts.setProperty("java.vm.version", version);
+      assertTrue(OpenJ9Driver.retainedCoordinates(facts), version);
+    }
+    facts.remove("java.vm.version");
     assertTrue(OpenJ9Driver.retainedCoordinates(facts));
-    facts.setProperty("java.vm.version", "master-other");
-    assertFalse(OpenJ9Driver.retainedCoordinates(facts));
-    facts.setProperty("java.vm.version", "master-6e16eb1a4f");
-    facts.setProperty("java.feature", "17");
-    assertFalse(OpenJ9Driver.retainedCoordinates(facts));
+    for (var entry :
+        Map.of("java.feature", "17", "os.name", "Windows", "os.arch", "aarch64").entrySet()) {
+      String saved = facts.getProperty(entry.getKey());
+      facts.setProperty(entry.getKey(), entry.getValue());
+      assertFalse(OpenJ9Driver.retainedCoordinates(facts), entry.toString());
+      facts.remove(entry.getKey());
+      assertFalse(OpenJ9Driver.retainedCoordinates(facts), entry.getKey());
+      facts.setProperty(entry.getKey(), saved);
+    }
   }
 
   @Test
@@ -211,12 +219,16 @@ class ControlledLaunchTest {
   void unqualifiedOpenJ9PolicyDoesNotChangeNativeProviderCoverage() {
     var json = profile();
     json.addProperty("vm", "openj9");
-    json.addProperty("collector", "balanced");
-    assertTrue(VmDriver.unsupported(TargetProfile.parse(json, directory)).isEmpty());
-    json.addProperty("bindingMetadata", "retained-class");
-    assertTrue(
-        VmDriver.unsupported(TargetProfile.parse(json, directory)).stream()
-            .anyMatch(problem -> problem.contains("gencon only")));
+    for (String collector : List.of("balanced", "optavgpause", "optthruput", "metronome")) {
+      json.addProperty("collector", collector);
+      json.remove("bindingMetadata");
+      assertTrue(VmDriver.unsupported(TargetProfile.parse(json, directory)).isEmpty());
+      json.addProperty("bindingMetadata", "retained-class");
+      assertTrue(
+          VmDriver.unsupported(TargetProfile.parse(json, directory)).stream()
+              .anyMatch(problem -> problem.contains("gencon only")),
+          collector);
+    }
   }
 
   @Test
